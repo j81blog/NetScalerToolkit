@@ -25,17 +25,60 @@ function Get-DateTimeVersionString {
             $Hour = 0
         }
     }
-    return '{0}{1:d2}{2:d2}' -f $DateTime.ToString("yyyy.Mdd."), $Hour, $Minutes
+    return '{0}{1}{2:d2}' -f $DateTime.ToString("yyyy.Mdd."), $Hour, $Minutes
+}
+
+function Get-NetScalerToolkitManifestPath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RootPath,
+
+        [Parameter(Mandatory)]
+        [string]$ModuleName
+    )
+
+    @(
+        Join-Path $RootPath "$ModuleName\$ModuleName.psd1"
+        Join-Path $RootPath "$ModuleName\$ModuleName.Common\$ModuleName.Common.psd1"
+        Join-Path $RootPath "$ModuleName\$ModuleName.Configuration\$ModuleName.Configuration.psd1"
+        Join-Path $RootPath "$ModuleName\$ModuleName.Statistics\$ModuleName.Statistics.psd1"
+    )
+}
+
+function Update-NetScalerToolkitManifestVersion {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$Version
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Module manifest not found: $Path"
+    }
+
+    $content = Get-Content -LiteralPath $Path -Raw
+    $pattern = "(?m)^(\s*ModuleVersion\s*=\s*)['""][^'""]+['""]"
+    if (-not [regex]::IsMatch($content, $pattern)) {
+        throw "ModuleVersion entry not found in manifest: $Path"
+    }
+
+    $replacement = "`${1}'$Version'"
+    $updated = [regex]::Replace($content, $pattern, $replacement, 1)
+
+    if ($updated -ne $content) {
+        Set-Content -LiteralPath $Path -Value $updated -Encoding UTF8
+    }
+    Test-ModuleManifest -Path $Path -ErrorAction Stop | Out-Null
 }
 
 $NewVersion = Get-DateTimeVersionString
+$manifestPaths = Get-NetScalerToolkitManifestPath -RootPath $PSScriptRoot -ModuleName $ModuleName
 
-$manifestFiles = Get-ChildItem -Path "$PSScriptRoot\*" -Filter *.psd1 -Recurse
-
-ForEach ($manifestFile in $manifestFiles) {
-    $manifestPath = $manifestFile.FullName
+foreach ($manifestPath in $manifestPaths) {
     Write-Host "Updating module manifest at $manifestPath to version $NewVersion..." -ForegroundColor Cyan
-    Update-ModuleManifest -Path $manifestPath -ModuleVersion $NewVersion -ErrorAction Stop
+    Update-NetScalerToolkitManifestVersion -Path $manifestPath -Version $NewVersion
 }
 
 if (Get-Module J81FunctionLibrary) {
@@ -43,4 +86,4 @@ if (Get-Module J81FunctionLibrary) {
     Get-ChildItem -Path "$PSScriptRoot\$ModuleName\*" -Recurse -Include *.ps1, *.psd1, *.psm1 | Set-Signature -ValidatePS
     Write-Host "Module manifest and scripts have been updated and signed. You can now commit the changes to GitHub." -ForegroundColor Green
 }
-Write-Host "`r`nUpdated $ModuleName module manifest to version $NewVersion.`r`n" -ForegroundColor Green
+Write-Host "`r`nUpdated $ModuleName module manifests to version $NewVersion.`r`n" -ForegroundColor Green

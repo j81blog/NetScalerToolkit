@@ -35,7 +35,11 @@
         [Parameter(Mandatory)]
         [string]$Message,
 
-        [hashtable]$Data
+        [System.Collections.IDictionary]$Data,
+
+        [string[]]$ConsoleDataKeys,
+
+        [switch]$NoConsoleData
     )
 
     $rank = @{ Error = 0; Warning = 1; Info = 2; Debug = 3; None = -1 }
@@ -45,14 +49,15 @@
 
     if ($rank[$logLevel] -ge $rank[$Level]) {
         $timestamp = Get-Date
+        # Data values are sanitized separately so structured logs stay safe for support bundles.
+        $safeData = [ordered]@{}
+        if ($Data) {
+            foreach ($key in $Data.Keys) {
+                $safeData[$key] = ConvertTo-NSACMECertificateSafeText -InputObject $Data[$key]
+            }
+        }
         if ($script:NSACMECertificateLogFile) {
             if ($logType -eq 'jsonl') {
-                $safeData = [ordered]@{}
-                if ($Data) {
-                    foreach ($key in $Data.Keys) {
-                        $safeData[$key] = ConvertTo-NSACMECertificateSafeText -InputObject $Data[$key]
-                    }
-                }
                 $line = [pscustomobject]@{
                     timestamp = $timestamp.ToString('o')
                     level = $Level
@@ -61,7 +66,12 @@
                     data = $safeData
                 } | ConvertTo-Json -Compress -Depth 8
             } else {
-                $line = '{0}{1}{2}{1}{3}{1}{4}' -f $timestamp.ToString('yyyy-MM-dd HH:mm:ss:ffff'), "`t", $Level.Substring(0, 1).ToUpperInvariant(), $Component, $safeMessage
+                $dataText = if ($safeData.Count -gt 0) {
+                    ' | ' + (($safeData.Keys | ForEach-Object { '{0}={1}' -f $_, $safeData[$_] }) -join '; ')
+                } else {
+                    ''
+                }
+                $line = '{0}{1}{2}{1}{3}{1}{4}{5}' -f $timestamp.ToString('yyyy-MM-dd HH:mm:ss:ffff'), "`t", $Level.Substring(0, 1).ToUpperInvariant(), $Component, $safeMessage, $dataText
             }
             Add-Content -LiteralPath $script:NSACMECertificateLogFile -Value $line -Encoding UTF8
         }
@@ -91,6 +101,15 @@
             Write-Host ('{0,-7}' -f $label) -ForegroundColor $color -NoNewline
             Write-Host ('{0,-20}' -f $componentText) -ForegroundColor DarkGray -NoNewline
             Write-Host $safeMessage -ForegroundColor $messageColor
+            if (-not $NoConsoleData -and $safeData.Count -gt 0 -and ($Level -in @('Error', 'Warning', 'Debug'))) {
+                $displayKeys = if ($ConsoleDataKeys) { $ConsoleDataKeys } else { @($safeData.Keys) }
+                foreach ($key in $displayKeys) {
+                    if (-not $safeData.Contains($key)) { continue }
+                    if ($null -eq $safeData[$key] -or [string]::IsNullOrWhiteSpace([string]$safeData[$key])) { continue }
+                    Write-Host ('       {0,-22} ' -f $key) -ForegroundColor DarkGray -NoNewline
+                    Write-Host $safeData[$key] -ForegroundColor $messageColor
+                }
+            }
         }
     }
 }
@@ -98,8 +117,8 @@
 # SIG # Begin signature block
 # MIImdwYJKoZIhvcNAQcCoIImaDCCJmQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCrV7BjTNnHJGC7
-# N2QTnMJt+TEm4oTzmcFaqmua01baCqCCIAowggYUMIID/KADAgECAhB6I67aU2mW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCwtq0ufPbumFFN
+# n7SpXI27gCE1UWxS4e7n0G/NLBFm+6CCIAowggYUMIID/KADAgECAhB6I67aU2mW
 # D5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYDVQQK
 # Ew9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRpbWUg
 # U3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1OTU5
@@ -275,31 +294,31 @@
 # cnR1bSBDb2RlIFNpZ25pbmcgMjAyMSBDQQIQCDJPnbfakW9j5PKjPF5dUTANBglg
 # hkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3
 # DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEV
-# MC8GCSqGSIb3DQEJBDEiBCCb8fR5WqGfLhCI88Z6XB7TgjbbHKexd1QUakHPs7SB
-# 2zANBgkqhkiG9w0BAQEFAASCAYCs+Sms0Zw262gdDZjMHhz46hlJgH05CdW0oi5p
-# tk6kupEIZiIWwpSNZq+Ld+P1LAEQ5ALv8ykeII0B36WYmGQgqo5jy/YShxE7rIXu
-# OBZIzzmkY42xLGfjcOwO48xJzZG9hSDGmX6Ish9evEWyrIqM7XT0Tn7zN2St+2jN
-# uz/W4W6MSvBduqpc3T6pm8YauiM1/aLcPPSiluGE9OCIlq1r8hu8Kjq17T4kQoMB
-# 6W+hj8USWvywI9Aqvc7AIhvtKozpiDHSN/w+H/U9TK1Ghb9THbHWs77Vj9N3Xjfo
-# QBlMEnAZr1p1k9TkgxTTgiBnLtA1iPjkQvWKv1Mogo7zijwT1c6qd//Q2l0Zdy/W
-# K44bnZeXtIsWIWWEgQn1vr6P7s8pUgWPVh5AXw9eKLBrJHx9up8wkN8n3qOWHbqS
-# WXiu2uZWrDeEbDhUU3Des1781BzJ/vmiNOS3WJJLONFDKAK/m+wZDJwwnFu0RU5Y
-# SpJjMJb/VlFIWgeKqqDvt2yVjbyhggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
+# MC8GCSqGSIb3DQEJBDEiBCAGidSDdv+QQIr91oGCTkTTqXoNTRasM4AeTFgOvb43
+# jTANBgkqhkiG9w0BAQEFAASCAYAzEwLSLcTx9c/RmhJ3SAyzzRnoiDmIj2TCmmpN
+# IIaGA+44xL6XmN5zqoWbx+Z2gk0akOl3GE+tF/45ce1qA/gWFfZTumVOkqIEEqF1
+# oB17Acr5EWItmfcpBtDmt3jho8+TJW3gl/WQIAk7ODxocae/lT5hui1DSA+sC2vB
+# Na6HAiNqMI6P3QkYq8nNhDft81sECcTU4eiDbw/UFuBOwI+LCdgaxgSv4aaKqjKG
+# 53xBHDaEZAMp8eFcf4sIjrjw7agCJ6lK4GwEwZDm1VyjIX2OMq73xNjE6gTS4FNv
+# cd7ST/eKkK+i82QTKbeUBHeZBogJfvodbXQUJObPTVQdWsZeGpq7/z8BWTOLjIIr
+# BgdoYDd2NlV8j5p7yjb7O29I+/OMjxYwfRqzDtBvMV1hnEOKM/61f5p/0Ei/0DRl
+# e0XfqNDPb7SJ+hyjEeO/WUNEunlmsGM2jcE6NKXsV9RRaLtG5aOQcm8TEcwMv69r
+# C7c9WRcYeQPNsoxFNqvprKol96+hggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
 # AQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
 # KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNgIRAKQp
 # O24e3denNAiHrXpOtyQwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG9w0BCQMxCwYJ
-# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDExOTUzMTFaMD8GCSqGSIb3
-# DQEJBDEyBDANdfk67nxMzGDligpQEtfC9EKx63cNH7M7zqKEjVJpf2I8R0rF0Rcb
-# 6h0MmEh84kUwDQYJKoZIhvcNAQEBBQAEggIAz/AoRdy8mLRy/vTt322dBRqn2/9+
-# QG2Nef/g9KmlObFnOoTY4VgUlhGDYorSVhz+zIk2+X+l8xiiGwrC7bguyNlcvPmZ
-# ttWcQcIKhPhEXyqi6YcoigBRltpyjKP7Ewbmg/BuZQU3dRdvDcF4zf7c5qUxa4er
-# JrqoSGWzGm9preylhOTRo1yn6cmV1+fiF3ny+nhilnccGWB3Q99n3PXQ/39xWPUn
-# RFEbZOwi+lK7JC3lbDQFL3+lHzdv7BNO0EBGYuyCkZDZqtx+20yAli4UL2lzp/8d
-# fPLtb2fb8PTrsFPJ86Gr3haV4vhohMwN55DRZnS6tujkYcQ7j7XPMHzvwJD48R5i
-# gHXDAk56mPMp7uVie4+TLQSUE/sdOcD7Uqsz4qieQI/8OFM5b8Q5g3A2xiow6VFH
-# wGrGEG2Qio2tkwe5UU0K5Gta/glmtLtwMYAnzCcHY4oAMkCGhDrjXY3kDNn4vXpe
-# /+aiD83nrzRBGia8YratpyJkAHl+tBz5Ndv2MC+y1uIkie7FKDJVx4sEUQXrJgOV
-# RxfU8Q17ebTZIPKluN/ESgGn0ig2A0a2Ky5jtRpH6gImbifI826IQKibUZvjnIyT
-# 3Pt4oTiY81wO7R4Z2xzQEBFBo1Q4v7QDsm7HPg9WS2rqOrQ686E8UzFgGGPvHw2Z
-# 7s0dmCwSiU7LImE=
+# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDQwNzQwMzNaMD8GCSqGSIb3
+# DQEJBDEyBDBH25zKn2a832gynD3G/a3OmovbJyo1QItgTrPcpDClhW9UGfqjiLdF
+# 5tKW3GnEedowDQYJKoZIhvcNAQEBBQAEggIADl+1gua/5hzAV5ykaRCW+pR11MqG
+# MPbVA9QKVne4AD4CN6s68n6lyVvP+4RXC8NCtDf0trfVIhiq4ZQqjX9ha/A6nnEP
+# YZ1igJfDL44+JCpGdbsDD3dapMy2gvGefHgPLvbq6xFvacTT5mNYUbykZB+R5W1Q
+# 7O89YSq2WkGujF97R+/VqsQgGpJTR9A/sw8P/EZPwVsTdkOvh5WXCUH/Qn1vjmLh
+# 16dhv+hP/W+peI8mNG9DKn2x/j5NGfNcElQBKktum7HHBb7YyfwV4DcjygwpQ6Y1
+# O2eaPbKnAeyVrYJcqmUTRBaJJHo2cnQfnnNtGSbho83ebDevBya+Y+KZoFKOpKdW
+# voqbeG8LMQKSA8DD+NiXUQwQJAtNAu7+4uLFp5t3AgU/jRaQ/RpG57YqwDtaXEty
+# H6lpBJG+8KJGi9UkJpDUu/bqo8T9xAkppuAnp6GBetMObrNmK5sNJfulZUH4wKiO
+# TBGmXsNPWKjp444m8B6XqNBbUy09y9z5Oyz8GmtcxykLfiLAY/Co+ABXI2+9zmf3
+# 7dcM5yVaXiaSZOBN3m8TPxJy/JGWCQRTIefoD/tTq0tEamSsyAwg2ES/XKwDYVyy
+# o3BQhxxc8QdwUv9IJTjJG345SZECcwuRrEn0nrIf3CAGSB4yEhG+t9jRklavGs+F
+# 1rs03NDdXUgbe6o=
 # SIG # End signature block

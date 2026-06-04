@@ -1,0 +1,190 @@
+﻿# Invoke-NSUnsetRDPClientProfile
+
+Module area: `NetScalerToolkit`
+
+## Synopsis
+
+Generated command reference. Review the command syntax and parameter metadata before use.
+
+## Syntax
+
+```powershell
+Invoke-NSUnsetRDPClientProfile -Name <String> [-AddUserNameInRDPFile <SwitchParameter>] [-AudiocaptureMode <SwitchParameter>] [-KeyBoardhook <SwitchParameter>] [-MultiMonItorsupPort <SwitchParameter>] [-Psk <SwitchParameter>] [-RandomizeRDPFileName <SwitchParameter>] [-RDPCookieValidity <SwitchParameter>] [-RDPCustomParams <SwitchParameter>] [-RDPFileName <SwitchParameter>] [-RDPHost <SwitchParameter>] [-RDPLinkattribute <SwitchParameter>] [-RDPListenEr <SwitchParameter>] [-RDPURLOverride <SwitchParameter>] [-RDPValidateClientIp <SwitchParameter>] [-RedirectCLIPboard <SwitchParameter>] [-RedirectComPortS <SwitchParameter>] [-RedirectDrives <SwitchParameter>] [-RedirectPnpdevices <SwitchParameter>] [-RedirectPrinters <SwitchParameter>] [-VideoplaybackMode <SwitchParameter>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>] [-PassThru <SwitchParameter>]
+```
+
+## Parameters
+
+### -AddUserNameInRDPFile
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -AudiocaptureMode
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -Confirm
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+- Aliases: `cf`
+
+### -IgnoreNotFound
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -KeyBoardhook
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -MultiMonItorsupPort
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -Name
+
+- Type: `System.String`
+- Required: `True`
+- Pipeline input: `False`
+
+### -PassThru
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -Psk
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -RandomizeRDPFileName
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -RDPCookieValidity
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -RDPCustomParams
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -RDPFileName
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -RDPHost
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -RDPLinkattribute
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -RDPListenEr
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -RDPURLOverride
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -RDPValidateClientIp
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -RedirectCLIPboard
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -RedirectComPortS
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -RedirectDrives
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -RedirectPnpdevices
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -RedirectPrinters
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -ReturnNullOnNotFound
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -Session
+
+- Type: `System.Management.Automation.PSObject`
+- Required: `False`
+- Pipeline input: `False`
+
+### -ThrowOnWarning
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -VideoplaybackMode
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+
+### -WhatIf
+
+- Type: `System.Management.Automation.SwitchParameter`
+- Required: `False`
+- Pipeline input: `False`
+- Aliases: `wi`
+
+## Notes
+
+This page was generated from exported PowerShell command metadata.
+

@@ -1,0 +1,8 @@
+﻿# Job
+
+Module area: **Configuration**
+Feature area: **Other**
+
+| Action | Command |
+| --- | --- |
+| Get | [Invoke-NSGetJob](get.md) |

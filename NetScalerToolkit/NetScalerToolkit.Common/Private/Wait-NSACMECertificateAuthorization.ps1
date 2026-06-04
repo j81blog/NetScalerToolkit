@@ -25,24 +25,108 @@
         [int]$TimeoutSeconds = 180
     )
 
+    function Get-NSACMECertificateAuthorizationLogData {
+        param([Parameter(Mandatory)][object]$Authorization)
+
+        $httpChallenge = @($Authorization.challenges | Where-Object { $_.type -eq 'http-01' } | Select-Object -First 1)
+        $data = [ordered]@{
+            Fqdn = $Authorization.fqdn
+            Status = $Authorization.status
+            HTTP01Status = $Authorization.HTTP01Status
+            Expires = $Authorization.expires
+        }
+
+        foreach ($propertyName in @('HTTP01Url', 'HTTP01Token')) {
+            if ($Authorization.PSObject.Properties.Name -contains $propertyName -and $null -ne $Authorization.$propertyName) {
+                $data[$propertyName] = $Authorization.$propertyName
+            }
+        }
+
+        if ($httpChallenge) {
+            $data['HTTP01ChallengeStatus'] = $httpChallenge.status
+            if ($httpChallenge.error) {
+                foreach ($problemProperty in @('type', 'detail', 'status')) {
+                    if ($httpChallenge.error.PSObject.Properties.Name -contains $problemProperty -and $null -ne $httpChallenge.error.$problemProperty) {
+                        $data["HTTP01Error_$problemProperty"] = $httpChallenge.error.$problemProperty
+                    }
+                }
+            }
+        }
+
+        foreach ($propertyName in @('HTTP01Error', 'HTTP01Problem', 'error')) {
+            if ($Authorization.PSObject.Properties.Name -contains $propertyName -and $null -ne $Authorization.$propertyName) {
+                $problem = $Authorization.$propertyName
+                foreach ($problemProperty in @('type', 'detail', 'status')) {
+                    if ($problem -is [System.Collections.IDictionary] -and $problem.Contains($problemProperty)) {
+                        $data["${propertyName}_${problemProperty}"] = $problem[$problemProperty]
+                    } elseif ($problem.PSObject.Properties.Name -contains $problemProperty -and $null -ne $problem.$problemProperty) {
+                        $data["${propertyName}_${problemProperty}"] = $problem.$problemProperty
+                    }
+                }
+                if ($problem -is [string]) {
+                    $data[$propertyName] = $problem
+                }
+            }
+        }
+
+        return $data
+    }
+
+    function Get-NSACMECertificateAuthorizationErrorDetail {
+        param([Parameter(Mandatory)][object]$Authorization)
+
+        $challenge = @($Authorization.challenges | Where-Object { $_.type -eq 'http-01' -and $_.error } | Select-Object -First 1)
+        if ($challenge -and $challenge.error.detail) {
+            return $challenge.error.detail
+        }
+
+        foreach ($propertyName in @('HTTP01Error', 'HTTP01Problem', 'error')) {
+            if ($Authorization.PSObject.Properties.Name -contains $propertyName -and $null -ne $Authorization.$propertyName) {
+                $problem = $Authorization.$propertyName
+                if ($problem -is [System.Collections.IDictionary] -and $problem.Contains('detail')) { return $problem['detail'] }
+                if ($problem.PSObject.Properties.Name -contains 'detail' -and $problem.detail) { return $problem.detail }
+                if ($problem -is [string]) { return $problem }
+            }
+        }
+    }
+
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
         Start-Sleep -Seconds 5
         $authzs = Posh-ACME\Get-PAOrder -Refresh -MainDomain $MainDomain | Posh-ACME\Get-PAAuthorizations
         $invalid = @($authzs | Where-Object { $_.status -eq 'invalid' -or $_.HTTP01Status -eq 'invalid' })
-        if ($invalid.Count -gt 0) { throw "One or more HTTP-01 validations failed: $($invalid.fqdn -join ', ')" }
-        if (-not (@($authzs | Where-Object { $_.status -ne 'valid' }).Count)) { return $true }
-        Write-NSACMECertificateLog Info 'ACME' "Waiting for validation: $((@($authzs | Select-Object -ExpandProperty status -Unique)) -join ', ')."
+        foreach ($authz in @($authzs)) {
+            $statusText = '{0}: authz={1}; http-01={2}' -f $authz.fqdn, $authz.status, $authz.HTTP01Status
+            Write-NSACMECertificateLog Debug 'ACME' "Authorization status: $statusText." -Data (Get-NSACMECertificateAuthorizationLogData -Authorization $authz) -ConsoleDataKeys @('HTTP01Error_type', 'HTTP01Error_status', 'Expires')
+        }
+        if ($invalid.Count -gt 0) {
+            $invalidMessages = @()
+            foreach ($authz in $invalid) {
+                $detail = Get-NSACMECertificateAuthorizationErrorDetail -Authorization $authz
+                $message = if ($detail) { "HTTP-01 validation failed for $($authz.fqdn): $detail" } else { "HTTP-01 validation failed for $($authz.fqdn)." }
+                $invalidMessages += if ($detail) { "$($authz.fqdn): $detail" } else { $authz.fqdn }
+                Write-NSACMECertificateLog Warning 'ACME' $message -Data (Get-NSACMECertificateAuthorizationLogData -Authorization $authz) -ConsoleDataKeys @('Fqdn', 'Status', 'HTTP01Status', 'HTTP01Error_type', 'HTTP01Error_status')
+            }
+            throw "One or more HTTP-01 validations failed: $($invalidMessages -join '; ')"
+        }
+        if (-not (@($authzs | Where-Object { $_.status -ne 'valid' }).Count)) {
+            Write-NSACMECertificateLog Info 'ACME' "All ACME authorizations are valid for $MainDomain."
+            return $true
+        }
+        Write-NSACMECertificateLog Info 'ACME' "Waiting for validation: $((@($authzs | ForEach-Object { '{0}={1}/{2}' -f $_.fqdn, $_.status, $_.HTTP01Status })) -join ', ')."
     } while ((Get-Date) -lt $deadline)
 
+    foreach ($authz in @($authzs)) {
+        Write-NSACMECertificateLog Warning 'ACME' "ACME validation timeout state for $($authz.fqdn)." -Data (Get-NSACMECertificateAuthorizationLogData -Authorization $authz) -ConsoleDataKeys @('Fqdn', 'Status', 'HTTP01Status', 'Expires')
+    }
     throw "Timed out waiting for ACME validation for $MainDomain."
 }
 
 # SIG # Begin signature block
 # MIImdwYJKoZIhvcNAQcCoIImaDCCJmQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAxdWmLvrW6SM1P
-# DehIpB3La+irjk82yjLpDjD1IbhfqKCCIAowggYUMIID/KADAgECAhB6I67aU2mW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB3hRCNs1GBVyX+
+# xEkVPcmUe7oKIN5GoDHof6f/hJ4tfqCCIAowggYUMIID/KADAgECAhB6I67aU2mW
 # D5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYDVQQK
 # Ew9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRpbWUg
 # U3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1OTU5
@@ -218,31 +302,31 @@
 # cnR1bSBDb2RlIFNpZ25pbmcgMjAyMSBDQQIQCDJPnbfakW9j5PKjPF5dUTANBglg
 # hkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3
 # DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEV
-# MC8GCSqGSIb3DQEJBDEiBCCDXumfbvN1dIo5YqTqPiiB7yZdtOXy9QyeBgAg/t+9
-# 9jANBgkqhkiG9w0BAQEFAASCAYCkdwpYM+dgtgfRPl0kOi7OPlgJsayvcPmBX1sw
-# +3P4Ivaksuv96jaVFbreI8DWpurBksUtz4lc8MVTN4aUZmeOMcTycsexbMHUiptl
-# U/G0DbE6C8GT42SqSTFfIwR9ejPb3SEXoxhqCpXkdsgGkWetpgNYQONWF3ZSp11x
-# ngrv40zv0nTnHyKSPjjGUQdRQK2tcMu5y6lpert2OVLUJCUA/I68hgp0LUyZ3RQk
-# iXY8Yp5v8AvxS55VEkBRkwM8r1rzMsFvNQFnmmu3a8idKXdP6agWN+c88jg8EGV+
-# cVUqhyIzBtbe2lQTLKy1alNxH9i53ys9AyfOo6PqHFvhOALviMJ1eOzl5RUdu2OQ
-# YINJ2rS1WGkAEeiLNsTqYxHqJvkdP66j9KuoQ5auUawGY+J5xQYiPHceBXL56wC8
-# ev7z6JlEUePtuIltV3k2E/h18y7HXYsdB4T3IBP/rkmefoR3EfVYQYJVCzz6ijdt
-# pUkaf1wtMCM5HyTi/fAfZAxQJhKhggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
+# MC8GCSqGSIb3DQEJBDEiBCBt4LVQs9yOM3O18K3LH7jDC8dgahGmxmdKNnlt6tm5
+# qjANBgkqhkiG9w0BAQEFAASCAYC6wbQIqEuHHz3LIQRla2F5LmMPYjpxKJeOkUzX
+# NWzpLWZURSdo59TPbDivmEXcd0Xq0KWOBZniYGOUo18z6ScqrhkqXerCNgQ2Rctv
+# 0U4Ner2JFdArvm+IcRBzgNWHcdGSm7HZ1g0xv1yRn7Pw8O4rvb0okXw0mj22OErv
+# dYtjoztwpLJzebxyUiGhrw6vsQYp5V/CFxQNgCKAxWQ7dF1/FDfVsAuK9QZUT3KJ
+# 5u8wrP8asAjrGkllJEv+lgWRwhIG1EKdIOVE9U36B3UXC7b6VUDpAuvief5DZ/HP
+# 7m3Sh8RCzhq/E0jO4c+ySMcHXaQga+LPzjO7ojW3rWc2Rwr+gPhMovZjY+xew612
+# aaSuiUc8wRsGF+j4devWYqfywiNv5LvPbYkifWxMec2qhAs3NDdwNBzvk9Kk+C0S
+# BK8/a3XPgrKpT9VuTvyZN1F4nSoufirrqBdg7fCY9MtfszKm34VOo0mY1AjyqHES
+# 8aBc4qUpnQiZqTgpi4NNPIv5ZtehggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
 # AQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
 # KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNgIRAKQp
 # O24e3denNAiHrXpOtyQwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG9w0BCQMxCwYJ
-# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDExOTUzMDFaMD8GCSqGSIb3
-# DQEJBDEyBDCoIoZn5hqS6pPuIiPdD4F2GLNlu7pyYUmAtFSYhIalnMeyjb6dnREU
-# d+JYtx1HexkwDQYJKoZIhvcNAQEBBQAEggIAkG3yGRTE69wwrY8yyJVS8eDl7NgW
-# LGrXGhXr6E0bR9He0JSH3g/KZeSm/sWdhTHZ0EU9rQ7YwFkryS/hFlbgftZ3peZd
-# MX4ddGAssY4MfIBpaZi5Hdiba9o1qPTRPXX/WxRlIIX7tOP9uhTOj2zBSZ3c9Dx6
-# 5X1K4SboYcnC7GvkpIIUZ6NjwpZrWFxxigEVi3azWNdualc4DN7KcIZFZb5ogT8V
-# zcroB4c+e2JNj6TEhapUQetpM3HgsJQ+5lxRskwOEZa2IFTf9tVG+hKaaEkIQB4r
-# LID3q6kRCRN8jZYq3BNjC1jm6yGKanitquQfFEbaeREuHTcVcCGCWAMD3PGI0g6y
-# 9WVXQkYvNXXa5qeC/o9uzlx61Rn2v7nuWBNgGcRvJd6rMslzKfny2fHNpmJ9moIP
-# MGAJ0vxGCuMunW5BGZ3kyiaXieu5McuVVh+Ude2+73nVEzLUu+KtPRLZn4LsSa2y
-# AxsExtEztqUsJoJuEY16Hup3gWI0q63hHeBtzNZoszGh9sB54rLPw3jGjLhKgDNQ
-# dV5w70Kl8Hy9LyNZxV/B5nKvd7I38DPJ/i+jXTYpRTNo0EkFE3cc09YmWj1Nyrpo
-# L3yu25xn+IowMj/62zxRZ2T1A2m94nDEW91s1ymQQFRj7q2PjYR7i63hpI2Stxmj
-# fUV6fugFSwALQ6U=
+# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDQwNzQwMjZaMD8GCSqGSIb3
+# DQEJBDEyBDAYw99SvgDa84LaRG5aCvVag5C0UF1Uo8t/pMbPRYfHsqbbqxU0es3Z
+# bAZ7WoPB7e8wDQYJKoZIhvcNAQEBBQAEggIAuNVzaGY+38Zc/j/NX4LYOlam/qRr
+# FZZ1LV1pEdLJAbwyAwCDbWqXrA0JBSQbyISQFQHoW8UfD5tBGl9LbNGiUkhmBwRi
+# 1pyy4Q/IKeWaayV8zsa6CxVv/3aJpFKkUmWDh/lDQyHYtEjPbTyHAsOaEoDAvaXa
+# Dk+cHaw/Un0x+lURLiIrUa6cIW3MlK/yN9zT/W/Hm7xxs626MEVsJcgTqBsRgDjP
+# ZA0THFYdUe6I9UH2zMIkAEso+5tsfQCM+YWKCCjuEd1Mu95xHWVnthhvKc7L900q
+# EIUqgPnsu/RQTyMW9q76+9hcrem1CAHdbWZ27hXY71SDbvhhSmvGTs5hBo6Uaq7x
+# 6nl51c3ktUcRKvMndW50AGMf4CvSWbs1UN1nvyAhMRwYltAuFobS7dll0f1qNsKR
+# N7ECQqRvCM/d+fNdj8zyCcq6tdz1m9c8yT7TI8sFhUvjmS2LqSf66tEP5r3EiJoU
+# 7t68vBYQpNeJ96lUcY7aUX0oGDljGoId0438Day7Pzml1zXs0r9RRRhSa6r3j2aQ
+# /aTtuZV52TSJDDDOHAGLGT7rdd+HGUEH7LVJ2fZ8GqZVY2BLhmCOjXe7zl5gU5ST
+# jqElOBRlTc+0HY0zRM/bzXZrE/gTf7/K39eULX+MroD+Z74h50tDw0iWyYPNM9uF
+# U4UtFyKUd/1JXBU=
 # SIG # End signature block

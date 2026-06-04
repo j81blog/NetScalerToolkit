@@ -38,6 +38,7 @@
         Move-Item -LiteralPath $Path -Destination $archive -Force
     }
 
+    # Elevation and version metadata make support logs useful without exposing request secrets.
     $isAdmin = $false
     if ($IsWindows -or ('PSEdition' -notin $PSVersionTable.Keys) -or $PSVersionTable.PSEdition -eq 'Desktop') {
         try {
@@ -58,8 +59,10 @@
         }
         if ($module) { $module.Version }
     } catch { $null }
-    $poshVersion = try { (Get-Module Posh-ACME -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1).Version } catch { $null }
+    $poshACMEVersion = try { (Get-Module Posh-ACME -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1).Version } catch { $null }
     $os = try { [System.Runtime.InteropServices.RuntimeInformation]::OSDescription } catch { [Environment]::OSVersion.VersionString }
+    $languageMode = $ExecutionContext.SessionState.LanguageMode
+    $username= [Security.Principal.WindowsIdentity]::GetCurrent().Name
 
     if ($LogType -eq 'jsonl') {
         $header = [pscustomobject]@{
@@ -71,9 +74,12 @@
                 PowerShellVersion = [string]$PSVersionTable.PSVersion
                 PowerShellEdition = [string]$PSVersionTable.PSEdition
                 OS = [string]$os
+                UserName = [string]$username
                 ProcessElevated = [bool]$isAdmin
+                LanguageMode = [string]$languageMode
+                PSCulture = [string]$PSCulture
                 NetScalerToolkitVersion = [string]$moduleVersion
-                PoshACMEVersion = [string]$poshVersion
+                PoshACMEVersion = [string]$poshACMEVersion
             }
         }
         Set-Content -LiteralPath $Path -Value ($header | ConvertTo-Json -Compress -Depth 6) -Encoding UTF8
@@ -83,10 +89,13 @@
             "Request-NSACMECertificate started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')"
             "PowerShell version            : $($PSVersionTable.PSVersion)"
             "PowerShell edition            : $($PSVersionTable.PSEdition)"
+            "PowerShell culture            : $PSCulture"
             "OS                            : $os"
             "Process elevated              : $isAdmin"
+            "Username                      : $username"
             "NetScalerToolkit version      : $moduleVersion"
-            "Posh-ACME version             : $poshVersion"
+            "Posh-ACME version             : $poshACMEVersion"
+            "Language mode                 : $languageMode"
             '================================================================================'
         )
         Set-Content -LiteralPath $Path -Value $header -Encoding UTF8
@@ -96,8 +105,8 @@
 # SIG # Begin signature block
 # MIImdwYJKoZIhvcNAQcCoIImaDCCJmQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5AEGPKqjx5AUH
-# 2DpiwiWvijECX27eiXBgQAaHCiP9wKCCIAowggYUMIID/KADAgECAhB6I67aU2mW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCcIDfVJHDOC2HU
+# lgP4J4ABM9AgDxvZMD7Eih5L2BzkKKCCIAowggYUMIID/KADAgECAhB6I67aU2mW
 # D5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYDVQQK
 # Ew9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRpbWUg
 # U3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1OTU5
@@ -273,31 +282,31 @@
 # cnR1bSBDb2RlIFNpZ25pbmcgMjAyMSBDQQIQCDJPnbfakW9j5PKjPF5dUTANBglg
 # hkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3
 # DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEV
-# MC8GCSqGSIb3DQEJBDEiBCBwXs930cqatiyOrqQK+RAcfE6ihwpmBbB60LK4/Yjo
-# QTANBgkqhkiG9w0BAQEFAASCAYBYOrsYwb/281VAFhYBA+k20oVY3GrsdTo0ca/a
-# z5oBQIxmXu7WCUj8DJgWtblsFcV/pNvjwxQqkAlb+aT131v3YEy07yVMmu/OOF1j
-# mccCD9IDZmyop58ym6b5TVPZQicsYcBc1EaCeax1kXmcNQjQXaGbZkfpNlYqofX+
-# e0jWbzyEvhkgryHwGnIuUSynQQ4bpvnpWow3eLBPPXLMo+69B4U0cY7bDbgIxNPW
-# 9Ksq1DExnXDh15GgrrKbUncXZrUKw19dYGjcAI7OiQvgbbt9uhiE0NS8EzZY3FFW
-# jlgXdRTTkMtssMAZo/gXVclx6WA62yDXK7IXFYGG+NigYnBbbw86EGDLtwgTWcPf
-# I8u8ncN1lrLEdFgQcYRCOtY9Vqq6Vxgwrv8Gk5xvPl3l5kMyr9yLtqxP3hN6STB9
-# rslDB5rHVg6GlXQnLVG0G/PKhOxoaOmJqIm2gfziKfl2zSxB5AUnhMm+XFzY7GS2
-# e9sNLVYEV0ozfCQS8tRLFqBGWZGhggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
+# MC8GCSqGSIb3DQEJBDEiBCB5MtpjyqvmtXuT2IT5+KNNPSh+SYHCGEtvj78EZfpK
+# qzANBgkqhkiG9w0BAQEFAASCAYBVr5cuAivXplwNla8H7y4R5TjFWHvglOQ25KWQ
+# Af8sWXkI051iODulcyS2vnCtGEUGHl5/jzG5DF+3FODtPAHU7xo8H/XlppQMSESE
+# 0m/L0Efb83Xk8vXeIwFUiiJWdoyT3/Lmgd2qXGIU4ZZO6E75XEVHtbheYDlPMCr0
+# 7+ydaO4ArhJfagZZNIQEPrGJxJyBsiTNRigHgSzoXgyyJLTbhsXb9wnf8K256fLS
+# rC8UZftdxX5dz1DDI0N6iwX5UKoZm5xC80i/xrhIPbv4M0ur0Dv+5KBrG/OuYcP2
+# hwQs0W2eF2o3WO6iLodz5EatOxCkAjtXgGqWvVkpbGmM70Sg0+Uq+sNlH87/dTfU
+# /TtkL768WTX5fXd1Y/V7Wazgt/6prT+z0V6fmESfxZ37SbIYpWWu7G/0GV/ZoSsO
+# cNg5KiAWHDcGdydBVZH/kES+tkp5mhQdwRaxBnehdxsZnB1O7M9av0lIbcESISmf
+# UDLMpKjoE/QWwm4m4gvLsdFhu8uhggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
 # AQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
 # KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNgIRAKQp
 # O24e3denNAiHrXpOtyQwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG9w0BCQMxCwYJ
-# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDExOTUxNDZaMD8GCSqGSIb3
-# DQEJBDEyBDAb5oQLDYfBpw8QkWTbRff9FgCW4USAINUk8cHZht9dBYgeAQg9pCmY
-# YJHb2V1GNkMwDQYJKoZIhvcNAQEBBQAEggIAQpWuY/5HSXd4EsJy9D+dXZFGubAQ
-# TYhY13xTlfeE1v3ehL4JGvDajBueCasysLKxok8GhWzSNMlGOOs26mvgmSyad+QO
-# v1vk39FEUTgTd7hlmmTKPd1oQRzpVqsY1GVZ4D7Oum/Ot94+xvq1Ngf4qoSu7KkM
-# RnP76PiT3hpfdykKUbsMRt4vSaNLiXnGHtztbGCWQQqGT6XPGixtG11uklY7lf5q
-# Xzjf+CeKF4TNYMX2c7YfAuofK/Hks7bZFDyG0V0lZyN33VgagE1aF+bTU1ka5Xnc
-# /I7zp/oLvhBJbggHqrg9hCqhwcd3zPt59VVD8C5PosdMTeDH6xs6ZMGf2AF5DO0U
-# ovN2p4Y159ZmMgptYFg3MfDr8BU019dICYoBMGThBYv4vJyaOZIeKF+rv6HKKrJa
-# wbdZD3bzWn8u317yqnMneJx8AVTnY0RXVE2/rq8iWL+7THqSU4hmT3dr5T5PqF8A
-# fmSUUKPpN5dDYux1XTbCAKn034M1bSjv+h7GI35uODB3Ri0TeipxgzOMxIT0c4Of
-# v6+1Cr5gbBmsWjJikHFEtapH1xbMHqZoh2JaTJ54tsqg58MsJM3zaulQOyYbhg5d
-# VXOgpafNvuOChfQIlcLlmV+khCieMutJIMj6VnZrobPaE8UEFOOimVvDYw+gwjzj
-# VWm18S8OhDSAYi4=
+# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDMxMjE1MDNaMD8GCSqGSIb3
+# DQEJBDEyBDAGJCXbVU3/+juZwRK/mcVN6XcsUziiL5Ffq/Zs4uBRlKXE1V9V47i1
+# U4ZYNbqxxE4wDQYJKoZIhvcNAQEBBQAEggIAq8FJAsZDE7q9Dr31HDUi9u44fwDc
+# zhvIClPKsMkwWIacc0Qk2t3a0fLxn33zfcb6u1HE3zS9pHIupaG7JpVRZDfvFe3R
+# oMxohqYFVUagECfB6kB/y5cZaSdThcQFKe/ha7tHpxvpA88GXWLnGKMBogUwLnp3
+# 2LYvSkQmVYpKrNYm6gnSJEAtdxC0FrqH5Ze5Jf5AsY061AXhNsT/p4VYIR2Srn/a
+# PZSqxEjAQ6EmUIhdzKPZRAQ51m6PZ/A2P87DpEVSXt+/T0zdbJsX8ye6HnAE+JyS
+# jYkjnufHjFJMfBA8oxzzTM2AOsqgc85G9vqTTZw1hc08KF3cYlk56gWw9ShVeD3p
+# E7UNFyFXXzH4YfdIvWzzrm1EQxuyr/vrk6b96uY+ynnEMAH7r6PtSRGpvG5LtmxY
+# AvwdTPPNi7urSQ+Dbd78aHA7BS99Y3MCojp8+WZzixpSshvLUrbY9P3v7qOmRNEu
+# T20M6lPJ8mYernE8wYm5fwMdUjdx//IMtTz0DaKSyzhfHaW6hTxtAsCI/UBrskTt
+# wazJArty32QS9sKyaynJEuLBB5rROezaKL1G44XI9WH7o5P0IASB+rH0nhmx+ZMv
+# BVLonmZqIPjhmPgsO3K6XEZwHW/ss9ynFwqrf1Uy/rBPM9w1r3GUjd3T3AJS2Jj4
+# 5RaHtNBntSB7BT0=
 # SIG # End signature block

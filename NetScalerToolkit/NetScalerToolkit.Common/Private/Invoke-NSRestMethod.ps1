@@ -26,6 +26,7 @@
             [datetime] $EndedAt
         )
 
+        # NITRO returns JSON for normal responses, but transport errors can return plain text.
         $body = $null
         if ($RawContent) {
             try {
@@ -75,6 +76,7 @@
 
         $result.PSObject.TypeNames.Insert(0, 'NetScalerToolkit.NitroResponse')
 
+        # Promote NITRO payload fields so callers can read resource arrays directly.
         if ($body -and $body -isnot [string]) {
             foreach ($property in $body.PSObject.Properties) {
                 if ($result.PSObject.Properties.Name -notcontains $property.Name) {
@@ -117,6 +119,7 @@
             return $response.Content
         }
 
+        # Windows PowerShell can default to older TLS flags; make TLS 1.2 available without removing existing flags.
         try {
             $stream = $response.GetResponseStream()
             if (-not $stream) {
@@ -138,18 +141,46 @@
     $certificateCallbackChanged = $false
     $startedAt = Get-Date
     $invokeRequest = $Request.Clone()
+    $previousProgressPreference = $ProgressPreference
 
     try {
+        $ProgressPreference = 'SilentlyContinue'
+        try {
+            $currentProtocolValue = [int] [System.Net.ServicePointManager]::SecurityProtocol
+            $tls12ProtocolValue = [int] [System.Net.SecurityProtocolType]::Tls12
+            if (($currentProtocolValue -band $tls12ProtocolValue) -ne $tls12ProtocolValue) {
+                [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
+            }
+        } catch {
+            Write-Verbose ('Unable to adjust .NET security protocol defaults: {0}' -f $_.Exception.Message)
+        }
+
         if ($SkipCertificateCheck) {
             $invokeWebRequestCommand = Get-Command -Name Invoke-WebRequest -ErrorAction Stop
             if ($invokeWebRequestCommand.Parameters.ContainsKey('SkipCertificateCheck')) {
                 $invokeRequest.SkipCertificateCheck = $true
             } else {
                 $originalCertificateCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
-                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {
-                    param($Sender, $Certificate, $Chain, $SslPolicyErrors)
-                    return $true
+                if (-not ([System.Management.Automation.PSTypeName] 'NetScalerToolkitCertificateValidation').Type) {
+                    # PS 5.1 cannot safely use a scriptblock callback from the .NET TLS worker thread.
+                    Add-Type -TypeDefinition @'
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+
+public static class NetScalerToolkitCertificateValidation
+{
+    public static bool TrustAll(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
+    {
+        return true;
+    }
+}
+'@
                 }
+                $trustAllCallback = [System.Delegate]::CreateDelegate(
+                    [System.Net.Security.RemoteCertificateValidationCallback],
+                    [NetScalerToolkitCertificateValidation].GetMethod('TrustAll')
+                )
+                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $trustAllCallback
                 $certificateCallbackChanged = $true
             }
         }
@@ -158,9 +189,14 @@
         if ($invokeWebRequestCommand.Parameters.ContainsKey('UseBasicParsing')) {
             $invokeRequest.UseBasicParsing = $true
         }
+        if ($invokeWebRequestCommand.Parameters.ContainsKey('DisableKeepAlive')) {
+            $invokeRequest.DisableKeepAlive = $true
+        }
 
+        Write-Verbose ('NITRO HTTP request: {0} {1}' -f $invokeRequest.Method, $invokeRequest.Uri)
         $webResponse = Invoke-WebRequest @invokeRequest
         $endedAt = Get-Date
+        Write-Verbose ('NITRO HTTP response: {0} {1} in {2} ms' -f $invokeRequest.Method, $invokeRequest.Uri, [math]::Round(($endedAt - $startedAt).TotalMilliseconds, 0))
         return ConvertTo-NSRestResponse -WebResponse $webResponse -RawContent $webResponse.Content -Request $Request -StartedAt $startedAt -EndedAt $endedAt
     } catch {
         $endedAt = Get-Date
@@ -169,8 +205,20 @@
             return ConvertTo-NSRestResponse -WebResponse $_.Exception.Response -RawContent $content -Request $Request -StartedAt $startedAt -EndedAt $endedAt
         }
 
-        throw
+        Write-Verbose ('NITRO HTTP request failed without response: {0} {1}. {2}' -f $invokeRequest.Method, $invokeRequest.Uri, $_.Exception.Message)
+        $exception = [System.InvalidOperationException]::new(
+            ('NITRO HTTP request failed for {0} {1}: {2}' -f $invokeRequest.Method, $invokeRequest.Uri, $_.Exception.Message),
+            $_.Exception
+        )
+        $errorRecord = [System.Management.Automation.ErrorRecord]::new(
+            $exception,
+            'NetScalerNitroHttpRequestFailed',
+            [System.Management.Automation.ErrorCategory]::ConnectionError,
+            $invokeRequest.Uri
+        )
+        throw $errorRecord
     } finally {
+        $ProgressPreference = $previousProgressPreference
         if ($certificateCallbackChanged) {
             [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $originalCertificateCallback
         }
@@ -180,8 +228,8 @@
 # SIG # Begin signature block
 # MIImdwYJKoZIhvcNAQcCoIImaDCCJmQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAy4En1ZBnUO4KD
-# 2CKkFQkV8zwV6oe8jObaGI1gdx8IuaCCIAowggYUMIID/KADAgECAhB6I67aU2mW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAs+nLSbectP3VO
+# UAcRQ2nC1SJiikUBJAVsjRPhvwzTCKCCIAowggYUMIID/KADAgECAhB6I67aU2mW
 # D5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYDVQQK
 # Ew9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRpbWUg
 # U3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1OTU5
@@ -357,31 +405,31 @@
 # cnR1bSBDb2RlIFNpZ25pbmcgMjAyMSBDQQIQCDJPnbfakW9j5PKjPF5dUTANBglg
 # hkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3
 # DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEV
-# MC8GCSqGSIb3DQEJBDEiBCBgLtwpr7rbwgwDSmISeLM1eJdwvgf3RRXImJkP0EPF
-# yTANBgkqhkiG9w0BAQEFAASCAYCH+pVxKW+WgsH7TM7I6fnje7DhMUowNHGLLpoW
-# 1t2IldTRz5fzdba/6rmtQy7NDcSFaxqP1FJS6MHcmUcmUiEJsiSO81PS/j5rvNzI
-# H36Ysu2HgH+56OZwq8b13YqhEbBH+ctuRNBqLA3OBs+HzTUezBxQmnqcLVFdKmUJ
-# lPZBiAyB4BoXyGD7T3XbFPiYRW/tZB8cyRDArevajs6SJa9KtrLkOENN86URsjaG
-# aU1S/b3b7b/8g99aKHTnFnrm54dQ/qeuim9tqDycBvAmQLdhY2dBn3dai9J2/vnq
-# peT6QSNMynrdTUGKJOuNHv2pCJXD5CU2SRpOWqOvKvqzA27rFi24ySiHYKJe7Ca5
-# skRDuRHRTwFXl8htkbHyf97Q//rhyJ2E1pUE2ODORmz/uT7HE2AHuAglPbI61603
-# zXTJMN7ZilB64APPppxmETSmZnAUMl7KpCswyQWluOa6T/9Jba0N9SeKPVfb+yHu
-# 1KDoTSwLY3HUCDfOd/d2xpcHHG6hggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
+# MC8GCSqGSIb3DQEJBDEiBCCIZjAb3Pu3rTnUzGCy6ObQJIKAuifvW4FLMoNKbXSJ
+# CjANBgkqhkiG9w0BAQEFAASCAYBcyxDMPFpbTBYYIw5jUCN9nj7ONpAH4FF/ZkJc
+# xZ/iksMtt+j40PDpAl3fx8lA4ISAuSEA2T2qeqORFjqavHe6dF5jrOmsSsoNK5jw
+# ASPXaBzJdKoNb63c4YFtA4S4dNxER41bMMnXBQKg/I1vX4UIlyLNAqJa2wUaRZ2N
+# bizZF8qZ5inWrZRAGxIOckK3vVgMqkEW0+ipqddLcDmYYyvh9kJOUGM+2rH9TdM4
+# ji7IoxY5JUCBKi3iKO99AdAdDpP8DA8ogG78TS5hxFtex5oWFBguex8F7dwBIJhD
+# Oa1BjTXzRyl61FB0fNV9PO9GK+bisx9ZL7kbkTkze9IPHDjBwTw2LD9P2UgucU3j
+# drHDeXi1DDfhKbZ9Lt3b3xgWyqeM9DtHL0N4IWnxUwrfkQPBA6b5nFvmryliurHc
+# YYO+Hbmb2ZR8xkkm2wF+WYk51urVb7a8o0RldTVGw5nxB46h+Ld+O6ixxCKyFmNT
+# LEbRxoTviv9Kr8d+m+lTdTqlNFKhggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
 # AQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
 # KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNgIRAKQp
 # O24e3denNAiHrXpOtyQwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG9w0BCQMxCwYJ
-# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDExOTUxNTJaMD8GCSqGSIb3
-# DQEJBDEyBDA5DCIbCAAedmjdACm5Teh6rfbXWHbv0WAaBYFKtoXZbMxk/D2mvnS9
-# OwfaP2Vsx80wDQYJKoZIhvcNAQEBBQAEggIAyS0/WtF5M2GGxRs63S2w3OIRdS7i
-# NP6yXVq4ETAUO73WHG6lJJtCYItCcGN85CppdnI7hQuKT9v2FkUSUNfJKujDmAPs
-# Iemg+nbpi0Hb0ROLJoH3syAz9lCiaDqbjkxkY37Iu9vvlOYJF7GRbWlYfmXU7TEu
-# S2ezLcdzIraIgIYusavwfcbQiPlEoP4pZ+TLew1QMmPrxCRQ2FmWRqrBmg2MQTop
-# Auvw/NtyJsAWExW+0BOQHWPiyXE+FhWPtORhcwEMDUDOsJJyo2G69xHw3W1oLMnA
-# 8JhYUZnFBgFOsruVP5prA3yKVOY3WSyTIZNcpa4OIQnMGOPvCrHV6owDk8SgNU+o
-# 5oADok4TR5moa0zrL6T0IAQ2RNDqM9CkhzfJ856HNXQr9OSZm0cm7m70MXOGUYmO
-# 3rpB93vokW6hVGvzAkYItiLeUaH0vJNwyuqAdCnLMpxogHX97mw/Sezy26MiaDzi
-# kYPsiVhYlbBz+kxaaYWeWVRM1gwn4LHjExtM/sM4WGDlW4dcTcuk6yxEfrRVYK8g
-# 7niz92V/1AopGONdpo+hwH4sPzzWnl7xNd9/fIqOkwS3xwdi9YWj8jCXLZEKoM4l
-# lIjvNuqG4g69pGGQ08SjCrt07K/F11HLGeCErpOYx0/kj8ZX4NewN9e3cn3zx9AX
-# cyyTcTfYblxQWr0=
+# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDMxMjE1MDlaMD8GCSqGSIb3
+# DQEJBDEyBDCzYX/+kZIOvmTetSzU0ijgKOumD5AEKJeV3I13z8YcudykFNpxyvMI
+# sNiEE+F9QnowDQYJKoZIhvcNAQEBBQAEggIAZLLDEgCwaLsm+ST9sYp9bhDVkB9Y
+# yo9/YL+eNxyJKIdCugQYQD56v1NH/yE3MhO1xqGDkjZULdMY/KYEGfIXaDP68H8t
+# oCCVtZ7qt7UxpU2liO9ln8hDXGHs7BkgTlIHqJyikRgxHMs3DDOk+9595G6N/ZAo
+# zQ2bzRvey1Bm5KQ1/6zrp+IaaOqpCSeRLGxczbUEbiV3meHteMyn7mztot4JUkfX
+# HPKxkiG5oXGJWddvF/aRmyGbwVJJgg1ibIRn2/dlvmscgKId9dVyTvp5x86GQ/24
+# KqfAgeSFQIRF/ses08dmEgRJ6y3tRqPROnlpEN9AK2FpSpJ09tZy0EUn1zg4Caq3
+# ohTjsTZoDkru8UczGY18SQ/WQfeMVOj48BKAQEC2AU+jrAHBJKdunNcvnyAKEswS
+# D+4lLwkOuAiMXM+J5ekbwXxdlmGnnmUI06x1m3W45lzwLzgDVGCMJ14ERNHiSpIb
+# wKLuuNBnBjnZ0oipa7wi5EiE7elooN+RtiF0DaMGC4GGOR8+VG/ahNZhwV6gNfAt
+# 1Abwmra+gIiTTklsS4H0bwZlQP82EUqgnB5Ep9EQuGKjrBFTUKUkCTQaMBFmY8lO
+# g5FyEiRTUAEyKs9kg51CDJISvAkpZGFVcTVMfIexchA2ZxYVnQBCg749l1d7ghb2
+# UVflUy0lNYEAwCs=
 # SIG # End signature block

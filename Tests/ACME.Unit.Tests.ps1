@@ -112,9 +112,57 @@ Describe 'ACME helper functions' {
                 (Test-NSACMECertificateRenewalRequired -Request $invalid).ShouldRenew | Should -BeTrue
                 (Test-NSACMECertificateRenewalRequired -Request $legacy).ShouldRenew | Should -BeFalse
             }
+
+            It 'prefers ACME order renewal metadata when available' {
+                $request = [pscustomobject]@{ RenewAfter = (Get-Date).AddDays(-1).ToString('o') }
+                $order = [pscustomobject]@{
+                    CertExpires = (Get-Date).AddDays(40).ToString('o')
+                    RenewAfter  = (Get-Date).AddDays(10).ToString('o')
+                }
+
+                $decision = Test-NSACMECertificateRenewalRequired -Request $request -AcmeOrder $order
+
+                $decision.ShouldRenew | Should -BeFalse
+                $decision.Source | Should -Be 'ACME order'
+                $decision.Strategy | Should -Be 'ACME/Posh-ACME renewal metadata.'
+                $decision.Summary | Should -Be 'Outside renewal window. Use -ForceCertRenew to renew now.'
+            }
+
+            It 'uses two-thirds certificate lifetime when renewal metadata is unavailable' {
+                $request = [pscustomobject]@{}
+                $certificate = [pscustomobject]@{
+                    notbefore = (Get-Date).AddDays(-10).ToString('o')
+                    notafter  = (Get-Date).AddDays(50).ToString('o')
+                }
+
+                $decision = Test-NSACMECertificateRenewalRequired -Request $request -NetScalerCertificate $certificate
+
+                $decision.ShouldRenew | Should -BeFalse
+                $decision.Source | Should -Be 'NetScaler certificate'
+                $decision.Strategy | Should -Match 'two-thirds'
+            }
+
+            It 'renews when the dynamic certificate lifetime window has started' {
+                $request = [pscustomobject]@{}
+                $certificate = [pscustomobject]@{
+                    NotBefore = (Get-Date).AddDays(-50)
+                    NotAfter  = (Get-Date).AddDays(10)
+                }
+
+                $decision = Test-NSACMECertificateRenewalRequired -Request $request -AcmeCertificate $certificate
+
+                $decision.ShouldRenew | Should -BeTrue
+                $decision.Source | Should -Be 'ACME certificate'
+            }
         }
 
         Context 'request normalization' {
+            It 'keeps the legacy CleanVault alias for Posh-ACME storage cleanup' {
+                $parameter = (Get-Command Request-NSACMECertificate).Parameters['CleanPoshACMEStorage']
+
+                $parameter.Aliases | Should -Contain 'CleanVault'
+            }
+
             It 'forces DNS validation for NetScaler DNS, alternate DNS, and wildcard requests' {
                 $netScalerDns = [pscustomobject]@{ CN = 'example.com'; SANs = ''; ValidationMethod = 'http'; UseNetScalerDNS = $true }
                 $alternateDns = [pscustomobject]@{ CN = 'example.com'; SANs = ''; ValidationMethod = 'http'; AlternateDNSValidationDomain = 'adns.example.com' }
@@ -140,6 +188,79 @@ Describe 'ACME helper functions' {
                 $request.CertDir | Should -Be 'C:\Certs'
                 $request.UseLbVip | Should -BeFalse
             }
+
+            It 'writes a reusable config file from a direct request' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    $configPath = Join-Path $dir 'GenLe-Config.json'
+                    $certDir = Join-Path $dir 'certs'
+                    Mock Set-NSACMEPoshACMEServer {}
+                    Mock Get-PAServer { [pscustomobject]@{ renewalInfo = 'https://example.com/acme/renewal-info'; DisableARI = $false } }
+                    Mock Connect-NSNode { [pscustomobject]@{ IsHA = $false; IsPrimary = $true } }
+                    Mock Test-NSACMECertificateRenewalRequired {
+                        [pscustomobject]@{
+                            ShouldRenew    = $false
+                            Reason         = 'unit test skip'
+                            Summary        = 'unit test skip'
+                            CertExpires    = (Get-Date).AddDays(30)
+                            Source         = 'unit'
+                            Strategy       = 'unit test'
+                            ExpireDays     = 30
+                            RenewAfterDays = $null
+                        }
+                    }
+
+                    Request-NSACMECertificate `
+                        -ManagementURL 'https://ns-01.domain.local' `
+                        -Username 'nsroot' `
+                        -Password 'Sup3rS3cretP@ssw0rd' `
+                        -CN 'example.com' `
+                        -SAN 'portal.example.com' `
+                        -ValidationMethod http `
+                        -CsVipName 'cs_example_http' `
+                        -CertKeyNameToUpdate 'san_example_com' `
+                        -CertDir $certDir `
+                        -EmailAddress 'hostmaster@example.com' `
+                        -ExternalAccountBindingKeyId 'eab-key-id' `
+                        -ExternalAccountBindingHmacKey 'eab-hmac-secret' `
+                        -ConfigFile $configPath `
+                        -SkipCertificateCheck `
+                        -DisableLogging `
+                        -NoConsoleOutput | Out-Null
+
+                    $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+                    $config.settings.ManagementURL | Should -Be 'https://ns-01.domain.local/'
+                    $config.settings.ADCCredentialUsername | Should -Be 'nsroot'
+                    $config.settings.ADCCredentialPassword.IsEncrypted | Should -BeTrue
+                    $config.settings.ExternalAccountBindingKeyId | Should -Be 'eab-key-id'
+                    $config.settings.ExternalAccountBindingHmacKey.IsEncrypted | Should -BeTrue
+                    ConvertFrom-NSACMECertificateLegacySecret -Object $config.settings.ExternalAccountBindingHmacKey -AsClearText | Should -Be 'eab-hmac-secret'
+                    $config.settings.PSObject.Properties.Name | Should -Not -Contain 'SMTPCredential'
+                    $config.certrequests[0].CN | Should -Be 'example.com'
+                    $config.certrequests[0].SANs | Should -Be 'portal.example.com'
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            It 'requires production or a custom directory for providers without staging' {
+                {
+                    Request-NSACMECertificate `
+                        -ManagementURL 'https://ns-01.domain.local' `
+                        -Username 'nsroot' `
+                        -Password 'Sup3rS3cretP@ssw0rd' `
+                        -CN 'example.com' `
+                        -ValidationMethod http `
+                        -CsVipName 'cs_example_http' `
+                        -CertDir 'C:\Certs' `
+                        -EmailAddress 'hostmaster@example.com' `
+                        -CertificateProvider ZeroSSL `
+                        -DisableLogging `
+                        -NoConsoleOutput
+                } | Should -Throw -ExpectedMessage "*does not have a configured staging environment*"
+            }
+
         }
 
         Context 'ACME logging' {
@@ -162,6 +283,15 @@ Describe 'ACME helper functions' {
                 $script:NSACMECertificateSensitiveValues.Add('LegacySecret123!')
 
                 ConvertTo-NSACMECertificateSafeText -InputObject 'value=LegacySecret123!' | Should -Be 'value=**SENSITIVE**'
+            }
+
+            It 'masks local profile paths' {
+                $path = Join-Path $env:LOCALAPPDATA 'Posh-ACME\LE_STAGE\299195143\example.com\fullchain.pfx'
+
+                $safeText = ConvertTo-NSACMECertificateSafeText -InputObject "PFX $path"
+
+                $safeText | Should -Be 'PFX <LOCALAPPDATA>\Posh-ACME\LE_STAGE\299195143\example.com\fullchain.pfx'
+                $safeText | Should -Not -Match ([regex]::Escape($env:LOCALAPPDATA))
             }
 
             It 'writes jsonl log records with masked data' {
@@ -207,6 +337,33 @@ Describe 'ACME helper functions' {
 
                     $line = Get-Content -LiteralPath $logPath | Select-Object -Last 1
                     $line | Should -Not -Match '`t'
+                    @($line -split "`t").Count | Should -Be 4
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                    $script:NSACMECertificateLogFile = $null
+                    $script:NSACMECertificateNoConsoleOutput = $false
+                }
+            }
+
+            It 'writes sanitized data fields in text log records' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    $logPath = Join-Path $dir 'acme.log'
+                    $script:NSACMECertificateLogFile = $logPath
+                    $script:NSACMECertificateLogLevel = 'Debug'
+                    $script:NSACMECertificateLogType = 'txt'
+                    $script:NSACMECertificateNoConsoleOutput = $true
+                    $script:NSACMECertificateSensitiveValues = [System.Collections.Generic.List[object]]::new()
+                    Add-NSACMECertificateSensitiveValue -Value 'TextSecret123!' -Placeholder '<PfxPassword>'
+
+                    Initialize-NSACMECertificateLog -Path $logPath -LogType txt
+                    Write-NSACMECertificateLog Debug 'Unit' 'Data check' -Data @{ Password = 'TextSecret123!'; CertKey = 'visible-cert' }
+
+                    $line = Get-Content -LiteralPath $logPath | Select-Object -Last 1
+                    $line | Should -Match 'CertKey=visible-cert'
+                    $line | Should -Match 'Password=<PfxPassword>'
+                    $line | Should -Not -Match 'TextSecret123!'
                     @($line -split "`t").Count | Should -Be 4
                 } finally {
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
@@ -265,6 +422,89 @@ Describe 'ACME helper functions' {
                     $fromFullChain.Thumbprint | Should -Not -Contain $leaf.Thumbprint
                 } finally {
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            It 'logs selected certificate chain artifact details' {
+                $leaf = New-TestCertificate -Subject 'leaf.example.com'
+                $intermediate = New-TestCertificate -Subject 'Intermediate CA'
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    $certPath = Join-Path $dir 'cert.cer'
+                    $chainPath = Join-Path $dir 'chain.cer'
+                    $logPath = Join-Path $dir 'acme.jsonl'
+                    Set-Content -LiteralPath $certPath -Value (ConvertTo-TestPem $leaf) -Encoding ASCII
+                    Set-Content -LiteralPath $chainPath -Value (ConvertTo-TestPem $intermediate) -Encoding ASCII
+
+                    $script:NSACMECertificateLogFile = $logPath
+                    $script:NSACMECertificateLogLevel = 'Info'
+                    $script:NSACMECertificateLogType = 'jsonl'
+                    $script:NSACMECertificateNoConsoleOutput = $true
+                    Initialize-NSACMECertificateLog -Path $logPath -LogType jsonl
+
+                    $result = Test-NSACMECertificateChainValidation -Certificate ([pscustomobject]@{ CertFile = $certPath; ChainFile = $chainPath; Thumbprint = $leaf.Thumbprint }) -Mode None
+
+                    $result.Validated | Should -BeFalse
+                    $result.Leaf.Thumbprint | Should -Be $leaf.Thumbprint
+                    $result.Chain.Count | Should -Be 1
+                    $records = @(Get-Content -LiteralPath $logPath | ForEach-Object { $_ | ConvertFrom-Json })
+                    $records.message | Should -Contain 'Selected certificate artifact paths.'
+                    ($records | Where-Object { $_.message -eq 'Selected Leaf certificate.' }).data.Thumbprint | Should -Be $leaf.Thumbprint
+                    ($records | Where-Object { $_.message -eq 'Selected Chain #1 certificate.' }).data.Thumbprint | Should -Be $intermediate.Thumbprint
+                    $records.message | Should -Contain "Leaf subject: $($leaf.Subject)"
+                    $records.message | Should -Contain "Chain #1 subject: $($intermediate.Subject)"
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                    $script:NSACMECertificateLogFile = $null
+                    $script:NSACMECertificateNoConsoleOutput = $false
+                }
+            }
+
+            It 'warns but continues when chain validation fails in Warn mode' {
+                $leaf = New-TestCertificate -Subject 'untrusted.example.com'
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    $certPath = Join-Path $dir 'cert.cer'
+                    $logPath = Join-Path $dir 'acme.jsonl'
+                    Set-Content -LiteralPath $certPath -Value (ConvertTo-TestPem $leaf) -Encoding ASCII
+                    $script:NSACMECertificateLogFile = $logPath
+                    $script:NSACMECertificateLogLevel = 'Info'
+                    $script:NSACMECertificateLogType = 'jsonl'
+                    $script:NSACMECertificateNoConsoleOutput = $true
+                    Initialize-NSACMECertificateLog -Path $logPath -LogType jsonl
+
+                    $result = Test-NSACMECertificateChainValidation -Certificate ([pscustomobject]@{ CertFile = $certPath; Thumbprint = $leaf.Thumbprint }) -Mode Warn
+
+                    $result.Validated | Should -BeTrue
+                    $result.IsValid | Should -BeFalse
+                    $result.Status.Count | Should -BeGreaterThan 0
+                    if ($result.Status -match '^UntrustedRoot:') {
+                        $records = @(Get-Content -LiteralPath $logPath | ForEach-Object { $_ | ConvertFrom-Json })
+                        $records.message | Should -Contain 'Staging root is untrusted. UntrustedRoot is expected.'
+                    }
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                    $script:NSACMECertificateLogFile = $null
+                    $script:NSACMECertificateNoConsoleOutput = $false
+                }
+            }
+
+            It 'stops deployment when chain validation fails in Fail mode' {
+                $leaf = New-TestCertificate -Subject 'untrusted.example.com'
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    $certPath = Join-Path $dir 'cert.cer'
+                    Set-Content -LiteralPath $certPath -Value (ConvertTo-TestPem $leaf) -Encoding ASCII
+                    $script:NSACMECertificateNoConsoleOutput = $true
+
+                    { Test-NSACMECertificateChainValidation -Certificate ([pscustomobject]@{ CertFile = $certPath; Thumbprint = $leaf.Thumbprint }) -Mode Fail } |
+                        Should -Throw -ExpectedMessage '*Certificate chain validation*'
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                    $script:NSACMECertificateNoConsoleOutput = $false
                 }
             }
 
@@ -354,6 +594,49 @@ Describe 'ACME helper functions' {
 
                 { Request-NSACMECertificateDnsOrder -Request $request -Domains @('example.com') -PfxSecret (ConvertTo-SecureString 'x' -AsPlainText -Force) -AcmeOptions @{} } |
                     Should -Throw -ExpectedMessage '*NetScaler session is required*'
+            }
+
+            It 'expands a single DNS plugin value for multi-name orders' {
+                $script:CapturedPlugin = $null
+                $script:CapturedDnsSleep = $null
+                function New-PACertificate {
+                    param(
+                        [string[]]$Domain,
+                        [string]$Contact,
+                        [bool]$AcceptTOS,
+                        [object[]]$Plugin,
+                        [hashtable]$PluginArgs,
+                        [int]$DnsSleep,
+                        [securestring]$PfxPassSecure,
+                        [string]$FriendlyName,
+                        [bool]$Force,
+                        [string]$CertKeyLength,
+                        [string]$ErrorAction
+                    )
+
+                    $script:CapturedPlugin = @($Plugin)
+                    $script:CapturedDnsSleep = $DnsSleep
+                    [pscustomobject]@{ MainDomain = 'example.com' }
+                }
+
+                try {
+                    $request = [pscustomobject]@{
+                        CN             = 'example.com'
+                        DNSPlugin      = 'Manual'
+                        EmailAddress   = 'hostmaster@example.com'
+                        FriendlyName   = 'example.com'
+                        KeyLength      = 2048
+                        ForceCertRenew = $false
+                    }
+
+                    Request-NSACMECertificateDnsOrder -Request $request -Domains @('example.com', '*.example.com') -PfxSecret (ConvertTo-SecureString 'x' -AsPlainText -Force) -AcmeOptions @{} | Out-Null
+
+                    $script:CapturedPlugin.Count | Should -Be 2
+                    $script:CapturedPlugin | Should -Be @('Manual', 'Manual')
+                    $script:CapturedDnsSleep | Should -Be 120
+                } finally {
+                    Remove-Item -Path Function:\New-PACertificate -ErrorAction SilentlyContinue
+                }
             }
 
         }

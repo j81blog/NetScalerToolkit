@@ -132,7 +132,22 @@
     }
 
     $plugin = if ($Request.DNSPlugin) { $Request.DNSPlugin } elseif ($AcmeOptions.DNSPlugin) { $AcmeOptions.DNSPlugin } else { 'Manual' }
+    $pluginValues = @($plugin)
+    if ($pluginValues.Count -eq 1 -and @($Domains).Count -gt 1) {
+        $expandedPlugin = @()
+        for ($index = 0; $index -lt @($Domains).Count; $index++) {
+            $expandedPlugin += [string]$pluginValues[0]
+        }
+        $plugin = $expandedPlugin
+    }
     $pluginArgs = if ($Request.DNSParams) { ConvertTo-NSACMECertificateHashtable -InputObject $Request.DNSParams } else { ConvertTo-NSACMECertificateHashtable -InputObject $AcmeOptions.DNSParams }
+    $dnsSleep = if ($Request.DNSWaitTime -and [int]$Request.DNSWaitTime -gt 0) {
+        [int]$Request.DNSWaitTime
+    } elseif ($AcmeOptions.DNSWaitTime -and [int]$AcmeOptions.DNSWaitTime -gt 0) {
+        [int]$AcmeOptions.DNSWaitTime
+    } else {
+        120
+    }
 
     $params = @{
         Domain          = $Domains
@@ -140,7 +155,7 @@
         AcceptTOS       = $true
         Plugin          = $plugin
         PluginArgs      = $pluginArgs
-        DnsSleep        = if ($Request.DNSWaitTime) { [int]$Request.DNSWaitTime } else { [int]$AcmeOptions.DNSWaitTime }
+        DnsSleep        = $dnsSleep
         PfxPassSecure   = $PfxSecret
         FriendlyName    = $Request.FriendlyName
         Force           = ([bool]$Force -or [bool]$Request.ForceCertRenew)
@@ -155,15 +170,33 @@
     if ($AcmeOptions.DnsAlias) { $params.DnsAlias = $AcmeOptions.DnsAlias }
     if ($AcmeOptions.AlwaysNewKey) { $params.AlwaysNewKey = $true }
 
-    Write-NSACMECertificateLog Info 'ACME' "Requesting DNS certificate for $($Domains -join ', ') using plugin '$plugin'."
-    New-PACertificate @params
+    Write-NSACMECertificateLog Info 'ACME' "Requesting DNS certificate for $($Domains -join ', ') using plugin '$($pluginValues[0])'."
+    Write-NSACMECertificateLog Debug 'ACME' "DNS propagation wait is $dnsSleep seconds." -Data ([ordered]@{
+            Plugin    = $pluginValues[0]
+            DnsSleep  = $dnsSleep
+            Domains   = ($Domains -join ', ')
+            DnsAlias  = if ($AcmeOptions.DnsAlias) { @($AcmeOptions.DnsAlias) -join ', ' } else { $null }
+        }) -ConsoleDataKeys @('DnsSleep', 'Plugin')
+    try {
+        New-PACertificate @params
+    } catch {
+        if ($_.Exception.Message -match 'Incorrect TXT record') {
+            Write-NSACMECertificateLog Warning 'ACME' 'DNS-01 validation saw stale or missing TXT records.' -Data ([ordered]@{
+                    Plugin   = $pluginValues[0]
+                    DnsSleep = $dnsSleep
+                    Domains  = ($Domains -join ', ')
+                    Action   = 'Remove old _acme-challenge TXT values, wait for public DNS, or increase DNSWaitTime.'
+                }) -ConsoleDataKeys @('DnsSleep', 'Action')
+        }
+        throw
+    }
 }
 
 # SIG # Begin signature block
 # MIImdwYJKoZIhvcNAQcCoIImaDCCJmQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBkG6dfWEbaoV7F
-# 07JEzKTZqzpIUpvQVLunEXHaL99VJaCCIAowggYUMIID/KADAgECAhB6I67aU2mW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsIpjcwxLAxVQB
+# RJaBQ40r9xziOQI9FOVkYXjDoTj75KCCIAowggYUMIID/KADAgECAhB6I67aU2mW
 # D5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYDVQQK
 # Ew9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRpbWUg
 # U3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1OTU5
@@ -339,31 +372,31 @@
 # cnR1bSBDb2RlIFNpZ25pbmcgMjAyMSBDQQIQCDJPnbfakW9j5PKjPF5dUTANBglg
 # hkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3
 # DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEV
-# MC8GCSqGSIb3DQEJBDEiBCBX6GyIWxAc62+u8AhO0C3fpRJVn0Ggjkt6gZ9QT3sc
-# MjANBgkqhkiG9w0BAQEFAASCAYCe6Q3RO0tmjRTpJlMIPHiDkZQQQItjRPnkd5nz
-# KEIjafaH+e4CUZpUTdzgJLBwiO/GUcrXWaa7sytz9uql9TQpp2XI8VauO7ccUoGc
-# fS2+txxEgOThLYBjXONjZyLWVk7fWHSD172UdrP2TWhnDlyWY6tAXzZmyxZ7yEwJ
-# wHieu/wTfrBxBNcXzZxX3ofVWTBdt+2kfj+Yte52FQwEoV61KsHRfOG0Xx6B+rKI
-# aCYiMyYHuDx2cmps8babm27c5i4KNhq7Oim56/+oCzIFG7zW06Ufz0QNfaS/fxYI
-# 2YI7aE8ElXQJoKHwGZcbumgeP8EQXJHCP25P3KPqPgdti5pCplniLq0USUUt+6Nv
-# YpNT5uGo2Fr8/nZJpWH3xFSRXeICuEzxJkVFern1rMcqsqL+kw7G4oBiH2PI51mV
-# d0B828cbVdzb6EkJoIsRgp3HizR5vek7vQf/HIZ9Hsv28bo9BQHtDkupaLo6WCZd
-# nrWJIWFr6WBHKkxQC58JJLNPjZihggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
+# MC8GCSqGSIb3DQEJBDEiBCCfp8ATmmHfV8JbML1PTj2X3DzdQBFPR129voENaXsP
+# OzANBgkqhkiG9w0BAQEFAASCAYCJAGtOTBXqqkqMnd+axkofdtTGFTyFvfejpzCh
+# zu0q7zU1uFOq3TN2uE8rK4RL4ElTU+xRTA/gcq+m71scM/ceQo5jhdvhK2S+bdy5
+# E18L66Z5c+rCzkhV/fhnygVXAu6KQAfVOA073gmedjaFWTY68HxKuqMQlkMOsW+n
+# /XQNm6xpCGHV7Fi5Y65C7DxgGDfU9mIHOKqLZL5DYxPJsBlVDWuo+6Wuzyqz6gM8
+# 6VLF4SrC76fY3RCnZ/bYnDXRpaMXwHwsJ6OzFofS91ZFRBsTka0Ek9QVVR2YbGCg
+# jjcHKy0d6THSfMMrGVgqGlM4QXp4BUWB0KCjxvqOVSMss0inlM1RSG3Pm5PYZFMS
+# WnL0up7Fjiyyt6mP4fUk00/c2eaArtLhmZAccpAI/X7W33z7nE9qWWEcW8Ebg1LO
+# iTASH8skJgMZU9WfcYFFFIJGTILeobRGd7Ls8unkVZVcALTvlpbfhnmpisan05qI
+# mel1KVIBnoOxmi53ptQNgK3nJPehggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
 # AQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
 # KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNgIRAKQp
 # O24e3denNAiHrXpOtyQwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG9w0BCQMxCwYJ
-# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDExOTUyMjhaMD8GCSqGSIb3
-# DQEJBDEyBDCQLhuX1/94uCCTKW13lO1QqJM6V6xJ0KAHG6V6jRphEWZPCaC3wEqC
-# tkv+osrp2NowDQYJKoZIhvcNAQEBBQAEggIAu6wqCe9V6jBnvzQl8uXwLGB5X0rL
-# Wn2vAv0z+C8iSpcIiR5Zwcnl9tblGVyw7y70LR6F6zhhSV3p45+X2K7wvhcrhHJO
-# GDgsS36rNfF/IjIlNO1dxLlpaFj02jzmpIF8ORIvRRNVAvOuDMQV/yP7NtdQlC/M
-# 2ylsW+M9pULassP2ooyKCiEFF015Cry7C8q+sSi3a6FNgFj9+Xse8vUN4b+CFG67
-# onwtfcXilpqR3empCAq+TNMc2P+0xOmomXG0XIQHLuJ5gDbIlnrfScS4ERlBrGpM
-# 8vQcQzddTnGfEV7LSGAcPfrXSphpdRho/3Lj6zyiFAs+daTf8GDQINctgluBEK1H
-# ozNbyvXC5Ei9cCL27CO4mKGlZ8NR3z/1LzxSjn8Nvk3t3PIXKj/xTFSDF0p9IIVX
-# KDk1Gcm7LFy5uWsz1pr1u7jMtXIWaGjzkosYe5+VrvABU7wqhtB5zbEQjBouMgEx
-# xTnLuKRN/XZxoGa78XHiMELueC09KB+MZtdETVOp5DVXbYlPLQa3ZZzf2TQQ5X4m
-# uF3IcF2AMFgqyuOhbOUISP4Q2jx520abMdSAcNDZ/DCdG+yZ+Z25bDyJCmFWlwXp
-# fdfvdhXSOJ1XFin0Cp46a1Tq8TypELr+YKwV1xqpj2UaNb11YNYy60TyQdoAzgTQ
-# ODh2pZHTC1ApIkg=
+# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDQxMDE0MTRaMD8GCSqGSIb3
+# DQEJBDEyBDD3o476c/FnLL5wtly1Gj6dSQ6oCG34d9NuaAlkX3AxIHNLycRQFx1w
+# WW7a2JjnXYwwDQYJKoZIhvcNAQEBBQAEggIANeyEHhLFcDjpcvOmuXso7Rz9trIC
+# eKJLW6rKSSSk6TXzgutx5RNLTQGMECCzo1XZwthHOZJbgt79NajQmajtyeTkfAp5
+# +0o9EsMtvGeH4/FBbKKhTylGBhihV8le7IkWu5p4019TgkgLyb5XNl0Kdt+3QFWI
+# ROFun/RmPW8eWxXWI8ANjNWUVQhWBHtGeicDhoSzG94407GGzXZm6TG7felzT0nl
+# vmNjgIBe/O2I0MUhlT9L96ZyVas1r3lHnkmilRjlqziPGtr4sPCI6nsKgDg3tXuF
+# oodMzooh3afQmueYlkem9qaC4zEYJDW2PSXJP0gFv7V3H9Pybjk3UzJMl6cRHYUt
+# //5E7e7mh0x18yPFnpme6d44IlkyPnGfCbwrafr+i2lsHWanYnJkNOTcXjRrxLS+
+# yN7t/SRkCQV//Hg+3lZ1KrEWYV2iTHwzHG0ku5hmC9ew3UOqAAH9Og0PBBWvYnn6
+# TgaKcaEZ6v01t0PtgzBv0EQ6Q+JWDWmb+IdEuWPH3j1tynauGF5KtTsJOAWCB5vb
+# MRwtU/KZYtyg438muvgq7IpXRtqj3gioXyrvBaAuE7vpj3q1xsbLbc1vSkIs4BAO
+# spLvTXoIxnFwFQDTErCq3HPBr2wYhlfZR+mguRYp6vTkTU3Rj8S574cQ6VBGspNp
+# ctd9ra5BAmSubhw=
 # SIG # End signature block

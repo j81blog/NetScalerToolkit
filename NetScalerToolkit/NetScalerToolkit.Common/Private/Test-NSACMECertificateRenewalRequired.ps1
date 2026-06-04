@@ -4,13 +4,24 @@
         Determines whether a certificate request should be renewed.
 
     .DESCRIPTION
-        Evaluates legacy GenLeCertForNS CertExpires and RenewAfter metadata. A
-        request is renewed when forced, when RenewAfter is missing or invalid, or
-        when the current time is equal to or later than RenewAfter.
+        Evaluates renewal metadata from ACME order state, certificate validity,
+        and legacy GenLeCertForNS request metadata. A request is renewed when
+        forced, when the selected renewal window has passed, or when no reliable
+        renewal source is available.
 
     .PARAMETER Request
-        Certificate request object from command parameters or an AutoRun config
-        file.
+        Certificate request object from command parameters or an AutoRun config file.
+
+    .PARAMETER AcmeOrder
+        Refreshed Posh-ACME order object. When RenewAfter is available, this is
+        the preferred decision source.
+
+    .PARAMETER AcmeCertificate
+        Existing ACME certificate object or X509 certificate used for dynamic
+        renewal calculation when ACME order RenewAfter is unavailable.
+
+    .PARAMETER NetScalerCertificate
+        Existing NetScaler sslcertkey object used as a fallback renewal source.
 
     .PARAMETER Force
         Forces renewal regardless of CertExpires or RenewAfter values.
@@ -25,6 +36,15 @@
     param(
         [Parameter(Mandatory)]
         [object]$Request,
+
+        [Parameter()]
+        [object]$AcmeOrder,
+
+        [Parameter()]
+        [object]$AcmeCertificate,
+
+        [Parameter()]
+        [object]$NetScalerCertificate,
 
         [Parameter()]
         [switch]$Force
@@ -61,60 +81,188 @@
         }
     }
 
+    function Get-NSACMECertificateObjectValue {
+        [CmdletBinding()]
+        param(
+            [Parameter()]
+            [object]$InputObject,
+
+            [Parameter(Mandatory)]
+            [string[]]$Name
+        )
+
+        if ($null -eq $InputObject) { return $null }
+
+        foreach ($propertyName in $Name) {
+            if ($InputObject.PSObject.Properties.Name -contains $propertyName) {
+                $value = $InputObject.$propertyName
+                if ($null -ne $value -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
+                    return $value
+                }
+            }
+        }
+
+        return $null
+    }
+
+    function Get-NSACMECertificateValidityWindow {
+        [CmdletBinding()]
+        param(
+            [Parameter()]
+            [object]$InputObject
+        )
+
+        if ($null -eq $InputObject) { return $null }
+
+        $notBefore = $null
+        $notAfter = $null
+
+        if ($InputObject -is [System.Security.Cryptography.X509Certificates.X509Certificate2]) {
+            $notBefore = $InputObject.NotBefore
+            $notAfter = $InputObject.NotAfter
+        } else {
+            $notBefore = ConvertFrom-NSACMECertificateDateValue -Value (Get-NSACMECertificateObjectValue -InputObject $InputObject -Name @('NotBefore', 'notbefore', 'CertNotBefore', 'certnotbefore', 'clientcertnotbefore', 'ValidFrom', 'validfrom'))
+            $notAfter = ConvertFrom-NSACMECertificateDateValue -Value (Get-NSACMECertificateObjectValue -InputObject $InputObject -Name @('NotAfter', 'notafter', 'CertNotAfter', 'certnotafter', 'clientcertnotafter', 'ValidTo', 'validto', 'CertExpires', 'certexpires'))
+        }
+
+        if (-not $notAfter) {
+            $daysToExpiration = Get-NSACMECertificateObjectValue -InputObject $InputObject -Name @('DaysToExpiration', 'daystoexpiration')
+            if ($daysToExpiration -as [double]) {
+                $notAfter = (Get-Date).AddDays([double]$daysToExpiration)
+            }
+        }
+
+        if (-not $notBefore -or -not $notAfter) { return $null }
+        if ($notAfter -le $notBefore) { return $null }
+
+        [pscustomobject]@{
+            NotBefore = $notBefore
+            NotAfter  = $notAfter
+        }
+    }
+
+    function New-NSACMECertificateRenewalDecision {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory)]
+            [bool]$ShouldRenew,
+
+            [Parameter(Mandatory)]
+            [string]$Reason,
+
+            [Parameter(Mandatory)]
+            [string]$Summary,
+
+            [Parameter()]
+            [Nullable[datetime]]$CertExpires,
+
+            [Parameter()]
+            [Nullable[datetime]]$RenewAfter,
+
+            [Parameter(Mandatory)]
+            [string]$Source,
+
+            [Parameter(Mandatory)]
+            [string]$Strategy
+        )
+
+        $now = Get-Date
+        [pscustomobject]@{
+            ShouldRenew    = $ShouldRenew
+            Reason         = $Reason
+            Summary        = $Summary
+            CertExpires    = $CertExpires
+            RenewAfter     = $RenewAfter
+            ExpireDays     = if ($CertExpires) { [int]($CertExpires - $now).TotalDays } else { $null }
+            RenewAfterDays = if ($RenewAfter) { [int]($RenewAfter - $now).TotalDays } else { $null }
+            Source         = $Source
+            Strategy       = $Strategy
+        }
+    }
+
+    function Test-NSACMECertificateRenewalWindow {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory)]
+            [datetime]$RenewAfter,
+
+            [Parameter()]
+            [Nullable[datetime]]$CertExpires,
+
+            [Parameter(Mandatory)]
+            [string]$Source,
+
+            [Parameter(Mandatory)]
+            [string]$Strategy
+        )
+
+        $now = Get-Date
+        if ($CertExpires -and $now -ge $CertExpires) {
+            return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "Certificate expired on $($CertExpires.ToString('yyyy-MM-dd HH:mm:ss'))." -Summary 'Certificate expired.' -CertExpires $CertExpires -RenewAfter $RenewAfter -Source $Source -Strategy $Strategy
+        }
+
+        if ($now -lt $RenewAfter) {
+            return New-NSACMECertificateRenewalDecision -ShouldRenew $false -Reason "Certificate is still valid and outside the renewal window. Renewal can start after $($RenewAfter.ToString('yyyy-MM-dd HH:mm:ss')). Use -ForceCertRenew (or -Force) to renew now." -Summary 'Outside renewal window. Use -ForceCertRenew to renew now.' -CertExpires $CertExpires -RenewAfter $RenewAfter -Source $Source -Strategy $Strategy
+        }
+
+        New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "Renewal window has started ($($RenewAfter.ToString('yyyy-MM-dd HH:mm:ss')))." -Summary 'Renewal window started.' -CertExpires $CertExpires -RenewAfter $RenewAfter -Source $Source -Strategy $Strategy
+    }
+
+    function Get-NSACMECertificateCalculatedRenewAfter {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory)]
+            [datetime]$NotBefore,
+
+            [Parameter(Mandatory)]
+            [datetime]$NotAfter
+        )
+
+        $lifetime = $NotAfter - $NotBefore
+        $NotBefore.AddTicks([int64]($lifetime.Ticks * 2 / 3))
+    }
+
     $now = Get-Date
     $certExpires = ConvertFrom-NSACMECertificateDateValue -Value $Request.CertExpires
     $renewAfter = ConvertFrom-NSACMECertificateDateValue -Value $Request.RenewAfter
-    $expireDays = if ($certExpires) { [int]($certExpires - $now).TotalDays } else { $null }
-    $renewAfterDays = if ($renewAfter) { [int]($renewAfter - $now).TotalDays } else { $null }
 
     if ($Force) {
-        return [pscustomobject]@{
-            ShouldRenew    = $true
-            Reason         = 'ForceCertRenew was specified.'
-            CertExpires    = $certExpires
-            RenewAfter     = $renewAfter
-            ExpireDays     = $expireDays
-            RenewAfterDays = $renewAfterDays
+        return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason 'ForceCertRenew was specified.' -Summary 'Forced renewal.' -CertExpires $certExpires -RenewAfter $renewAfter -Source 'Force' -Strategy 'Forced renewal.'
+    }
+
+    $orderCertExpires = ConvertFrom-NSACMECertificateDateValue -Value (Get-NSACMECertificateObjectValue -InputObject $AcmeOrder -Name @('CertExpires', 'certexpires'))
+    $orderRenewAfter = ConvertFrom-NSACMECertificateDateValue -Value (Get-NSACMECertificateObjectValue -InputObject $AcmeOrder -Name @('RenewAfter', 'renewafter'))
+    if ($orderRenewAfter) {
+        return Test-NSACMECertificateRenewalWindow -RenewAfter $orderRenewAfter -CertExpires $orderCertExpires -Source 'ACME order' -Strategy 'ACME/Posh-ACME renewal metadata.'
+    }
+
+    foreach ($source in @(
+            [pscustomobject]@{ Name = 'ACME certificate'; Certificate = $AcmeCertificate },
+            [pscustomobject]@{ Name = 'NetScaler certificate'; Certificate = $NetScalerCertificate }
+        )) {
+        $validity = Get-NSACMECertificateValidityWindow -InputObject $source.Certificate
+        if ($validity) {
+            $calculatedRenewAfter = Get-NSACMECertificateCalculatedRenewAfter -NotBefore $validity.NotBefore -NotAfter $validity.NotAfter
+            return Test-NSACMECertificateRenewalWindow -RenewAfter $calculatedRenewAfter -CertExpires $validity.NotAfter -Source $source.Name -Strategy 'Dynamic two-thirds certificate lifetime fallback.'
         }
     }
 
-    if (-not $renewAfter) {
-        return [pscustomobject]@{
-            ShouldRenew    = $true
-            Reason         = 'RenewAfter is missing or invalid.'
-            CertExpires    = $certExpires
-            RenewAfter     = $renewAfter
-            ExpireDays     = $expireDays
-            RenewAfterDays = $renewAfterDays
-        }
+    if ($renewAfter) {
+        return Test-NSACMECertificateRenewalWindow -RenewAfter $renewAfter -CertExpires $certExpires -Source 'request metadata' -Strategy 'Legacy RenewAfter request metadata.'
     }
 
-    if ($now -lt $renewAfter) {
-        return [pscustomobject]@{
-            ShouldRenew    = $false
-            Reason         = "Certificate can be replaced after $($renewAfter.ToString('yyyy-MM-dd HH:mm:ss'))."
-            CertExpires    = $certExpires
-            RenewAfter     = $renewAfter
-            ExpireDays     = $expireDays
-            RenewAfterDays = $renewAfterDays
-        }
+    if ($certExpires -and $now -ge $certExpires) {
+        return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "Certificate expired on $($certExpires.ToString('yyyy-MM-dd HH:mm:ss'))." -Summary 'Certificate expired.' -CertExpires $certExpires -RenewAfter $null -Source 'request metadata' -Strategy 'Legacy certificate expiry metadata.'
     }
 
-    [pscustomobject]@{
-        ShouldRenew    = $true
-        Reason         = "RenewAfter has passed ($($renewAfter.ToString('yyyy-MM-dd HH:mm:ss')))."
-        CertExpires    = $certExpires
-        RenewAfter     = $renewAfter
-        ExpireDays     = $expireDays
-        RenewAfterDays = $renewAfterDays
-    }
+    New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason 'No ACME renewal window or certificate validity metadata was available.' -Summary 'No reliable renewal metadata.' -CertExpires $certExpires -RenewAfter $null -Source 'none' -Strategy 'Renew when no safe skip decision can be made.'
 }
 
 # SIG # Begin signature block
 # MIImdwYJKoZIhvcNAQcCoIImaDCCJmQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCddbi+e7u+MV2a
-# d0dkhTPYGN3PYP+b1mlh6gGhttUkBqCCIAowggYUMIID/KADAgECAhB6I67aU2mW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDucGJYNJx0AMnv
+# i19f8/7dNThFztooCjjo2al3dhRjuKCCIAowggYUMIID/KADAgECAhB6I67aU2mW
 # D5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYDVQQK
 # Ew9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRpbWUg
 # U3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1OTU5
@@ -290,31 +438,31 @@
 # cnR1bSBDb2RlIFNpZ25pbmcgMjAyMSBDQQIQCDJPnbfakW9j5PKjPF5dUTANBglg
 # hkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3
 # DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEV
-# MC8GCSqGSIb3DQEJBDEiBCCW4aDmCH98n/LL87v1teL5MhDqovo6U7SIAPRXL6NA
-# ajANBgkqhkiG9w0BAQEFAASCAYA6MSpvo+Tc4p4drZf2HdPrTNmcKsMLNMtk7RX7
-# 6QgfWywzDJC+USVQaplbNVUJELZ4T4zdSGBLHqE52mwjMPi+7EkmVe82kZE5KTO2
-# 8gOQSWZBX4LWFG8W799KZNeSf4LEX5Xa+8aVnCW0yqgexpoOyqUXlQ9QKN4Xi6yF
-# roT0orCotBN7OI6LGjcmMKM0D7fY/sFe4Lmbuw76r3n4FK14W+o035Yo5NSWv1R5
-# rcWKEba81R40nPnrHDmkgRVN+3WPa20E7IbNAmzMP2Coe+c9fReXTqP9Rjd61Mod
-# H/0RuiGwBRwRnJ1UFAfhRUDDYnmXDezfYqs/t94s2v0haD8w6nNCPBQvHITQvX98
-# kZ502YqRDjPhKMw4kXJQzbUEp3Q2YtpKfBXaAY7JlBwI77ZaIX30KVDvMA2PaGfp
-# x6AbOr/5ZKbavUl1hqmurG+uLC8cG6yxItVsbbQ/qRC0Zdomddnt5Uu60ASlptyl
-# R0PhWtWwZkcXv+rrCoz0hkoevmahggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
+# MC8GCSqGSIb3DQEJBDEiBCAV1c4jSRcZcvvfE8lKf82s21I/vaK6f+KyP39ABwLv
+# STANBgkqhkiG9w0BAQEFAASCAYA+dWDCQtr8eFaehnKjZLRhayf6O7zRVrgh2rGR
+# 3D9XVkfRc0I3KgrkhjT7ENtK5ZdKqlv6zFY12A8A1Nbhs9TeQO2kjYMbDFG5NS0H
+# 9xppW/VuTTnt/wkFUDTS1/K2tDazN9kYDOsoTG9NbazgLQSdd8YMVKuXO2+I7Boz
+# uCnzgEXOsb7xEHBnFsEJHVu9YBpN5N3JLVgJbz+Bz7hvwZvKZNhgPGx3vYivn+gf
+# fQ6Mb6dXu5Dvc8PwwFSbl6z1b5QOZToCKqpvBFJRg3ZEzok1ewNhwEBTBn4Gb4uS
+# 0hk26sMeEokhHARTiDM0DyC9wqJvzHKr4FxVFgCx+cjsAiiftZbktLfXZ8WcySMa
+# hPf0M682qMGvsy4pkMAx7l6c9JbHn9lf1lYQ24tc8jEIZP1vl76dx2OSSxnT02/s
+# I/bWm9tG2UhY/SLVB9+LyvlpcmMtTSm+X0eOJW142UVKMqD82afrJ/F61wKbT01V
+# U1moME8AQ81bA/0QHY4vaxhWWRWhggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
 # AQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
 # KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNgIRAKQp
 # O24e3denNAiHrXpOtyQwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG9w0BCQMxCwYJ
-# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDExOTUyNTJaMD8GCSqGSIb3
-# DQEJBDEyBDBdAaC6XNqIzxVnxHdIBi7D38JRqRZPmjtkykLjG2q9dJi96M/GUBFp
-# s6L4xPBy0hwwDQYJKoZIhvcNAQEBBQAEggIAIBDMDdG10upcIgc0c0yABzuw6zxb
-# bDWOu1XDwH4LZjgkE+9vj83hf0xLU+pHGkR2uhIp81XIi4SesTBkYemgdThOCrsD
-# dg2HEoHjRogQ+jxcSNLFv5zxVu/BnQhF2fptIP/xr+lyYYPDcrClhcwUfhTkBB7l
-# JNVQxzpGgG2vrVC/mvw5g4iPEjnT0lPkbQDbrBeFpkelWNIeGVew6JmO5CFjBP+3
-# ajWYZesEvZ35r+EoB0bL+nt7qksCRfD60LhFsJTJ+k67vLJTTws884ZvPNz7SP8E
-# 4b0DTzE1Wi99hTFisAMnI+iTyobvGqEY9cvqH2AUSwcGMfxYjTTsm5qr2Z5XqI1F
-# WEyEK4Ly9KOXwZ5DoYEPq/uKFu7mJDOfHlI5FGc7us8poms333JGMRdj5izOncLy
-# kBShuA7G0QWqi/FGfRZg0zk19U8hXm0nTvHSrfO5dHMJF8x3nNUZfT6D8Tlly1cB
-# uO+3vlAVgS212Yvu+X7ENUHwGjUafc4a7Fe75alyBflpkVNa9YxTaWYDDzQtHcrF
-# Z2VE0lTtk23hozBIFd5PMWdVRpLewlFb0C6wIftUkFhnSVePsF2XUhLu7avrMthv
-# inNmAUWsly6l4HmMQwhpofrHgM8MbiFdgwDSWZe4qmwyWzd5fx8e22/rgV8NJZhP
-# mZEgL94VPGXZp2w=
+# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDQxMDE0MjBaMD8GCSqGSIb3
+# DQEJBDEyBDACBdBCzhMonlgu4HYOayJrDxahawQ2nHxg/dD6x6MRWfj+HNvla7a2
+# /Qlop+94lzswDQYJKoZIhvcNAQEBBQAEggIAawgrspAL/gHBSDR8JW+t1Yb3BlLH
+# UE7LJYtc/SAWc1qxy+Y+zLKMhZjkDIHDLQ6UERCHNMCEt5giOxZdbhgyF5jqDJvC
+# TKF4kWztXc1bRA3lt59Imr4X/xOFGScUrlRZAtCRs9h2txndXhXSiMZFr7DYpwO8
+# Bf2v147QP4m/5wZmJQ8/cupKIFYsXSRdkOBnxfjS9vt57r070pCZV03cJzmpvXei
+# 4V/kwYJA+GN+CfXpGJASrq8aEh0t+boADAz1SP39XPTWA54fv5CrTLPAIp6/mkct
+# TKBQqawxQ25GPCCfYm3Zm3KCXPrXtp+9vkajjjuWiCofYjE9VK/RAdfovERcli0i
+# Cfu4Aj60JFBx75pTUXo7uZ6urA59kLePSbdayuDSdgaHvQRC+J8qMxZK1b5w5PyI
+# eb0rosAs5uBEjpqTBE5rAHWhOUpdyYUkXMiPxF+NAX/3wqpWA9ROldMTpNUgRnZY
+# lKnS1KhGoW7H7U7cJdFx0K/KkQPMNFoKkZg9zree4MS4OT7CTRUet5u4cJbnijRk
+# 0I6appXt3mDQ0TgHW59YKun3+noLb1lujoPWBG2tq7vxD0315LWjbs4fBOys0S04
+# qbSSD4+tsnOqak0h1K3YG7Tw05SA45/msNHxwwpHXCD3CpPMHFE31sPsWG+ukg9O
+# rdQB5YEFqJl7lN4=
 # SIG # End signature block

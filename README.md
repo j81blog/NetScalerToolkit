@@ -1,6 +1,18 @@
 # NetScalerToolkit
 
-PowerShell module for the NetScaler ADC NITRO API.
+NetScalerToolkit is a PowerShell module for Citrix NetScaler automation through the NITRO API.
+
+It includes common session and transport functions, generated Configuration and Statistics commands, and certificate automation for ACME and externally issued certificates.
+
+## Documentation
+
+The full documentation site is planned for:
+
+https://netscalertoolkit.j81.nl/
+
+The site contains the getting started guide, session handling, certificate scenarios, ACME provider examples, NetScaler certificate deployment flows, cleanup guidance, and the generated module reference.
+
+Documentation source is kept in `Docs/`.
 
 ## Install From Source
 
@@ -11,36 +23,88 @@ Import-Module .\NetScalerToolkit\NetScalerToolkit.psd1 -Force
 Get-Command -Module NetScalerToolkit
 ```
 
-## Connect
+## Install From GitHub
+
+The repository includes installer scripts for users who want to install the module directly from the GitHub repository into their current-user PowerShell module path:
+
+```powershell
+irm https://raw.githubusercontent.com/j81blog/NetScalerToolkit/main/Install-ModuleFromGithubMain.ps1 | iex
+```
+
+From a local checkout:
+
+```powershell
+.\Install-ModuleFromGithubMain.ps1
+```
+
+Use the development branch installer when testing unreleased changes:
+
+```powershell
+irm https://raw.githubusercontent.com/j81blog/NetScalerToolkit/dev/Install-ModuleFromGithubDev.ps1 | iex
+```
+
+From a local checkout:
+
+```powershell
+.\Install-ModuleFromGithubDev.ps1
+```
+
+When run from a local checkout, the installer scripts copy the local `NetScalerToolkit` module folder into the current-user module path and import it.
+
+## Connect To NetScaler
+
+Create a credential and connect to a NetScaler node or HA pair:
 
 ```powershell
 $credential = Get-Credential
 
-Connect-NSNode `
-    -ManagementUrl 'https://ns.example.local' `
-    -Credential $credential `
-    -SkipCertificateCheck
+$connectParams = @{
+    ManagementURL        = 'https://ns-01.domain.local'
+    Credential           = $credential
+    HA                   = $true
+    PassThru             = $true
+    SkipCertificateCheck = $true
+}
+
+$session = Connect-NSNode @connectParams
 ```
 
 `Connect-NSNode` detects the appliance version after login. Generated commands use the detected version to choose compatible metadata. Current generated metadata supports NetScaler `13.1` and `14.1`.
 
-When connecting directly to an HA node, use `-HA` to let the module detect the peer state and switch to the primary node when needed. Connecting to a secondary node without `-HA` produces a warning.
+When `-HA` is used, the module detects the HA state and switches to the primary node when needed. Connecting directly to a secondary node without `-HA` produces a warning.
 
-## Examples
+Use `-SkipCertificateCheck` only when the appliance management certificate is self-signed, expired, or issued by a private CA that is not trusted by the current machine. The documentation site has more detail about session handling and connection patterns.
+
+## Basic Usage
 
 ```powershell
 Invoke-NSGetLBVServer
 Invoke-NSGetLBVServer -Name 'lb_test'
 Invoke-NSGetLBVServerStats -Name 'lb_test'
 Invoke-NSPing -HostName '192.0.2.10' -C 1
-
-Invoke-NSAddLBVServer `
-    -Name 'lb_test' `
-    -ServiceType HTTP `
-    -IPv46 '192.0.2.10' `
-    -Port 80 `
-    -PassThru
 ```
+
+Example create operation:
+
+```powershell
+$lbParams = @{
+    Name        = 'lb_test'
+    ServiceType = 'HTTP'
+    IPv46       = '192.0.2.10'
+    Port        = 80
+    PassThru    = $true
+}
+
+Invoke-NSAddLBVServer @lbParams
+```
+
+## Certificate Automation
+
+`Request-NSACMECertificate` automates ACME certificate requests and NetScaler deployment workflows. The module supports DNS-01 through Posh-ACME plugins, HTTP-01 validation, PFX deployment, certificate replacement, and generated JSON configuration files.
+
+Start with the certificate section on the documentation site for the supported scenarios and examples.
+
+The repository root also contains `GenLeCertForNS.ps1`, a compatibility wrapper for existing batch files and scheduled tasks that used the older script flow. New automation should call `Request-NSACMECertificate` directly where possible.
 
 ## Update From PowerShell Gallery
 
@@ -50,50 +114,16 @@ After the module is published to the PowerShell Gallery, update it with:
 Update-NetScalerToolkit -Confirm:$false
 ```
 
-The command checks the latest gallery version first. If the gallery version is newer than the loaded module version, it installs that exact version with `Install-Module`; otherwise it returns a status object showing that the current version is already up to date. Before publication, the command returns `Status = NotPublished`.
+Before publication, the command returns `Status = NotPublished`.
 
-Example scheduled task action:
+## Command Reference
 
-```powershell
-New-ScheduledTaskAction `
-    -Execute 'pwsh.exe' `
-    -Argument '-NoProfile -Command "Import-Module NetScalerToolkit; Update-NetScalerToolkit -Confirm:$false"'
-```
-
-## GenLeCertForNS Wrapper
-
-`GenLeCertForNS.ps1` in the repository root is a compatibility wrapper for existing batch files and scheduled tasks. It imports the local repository module when present; otherwise it imports the installed `NetScalerToolkit` module. If the module is not installed, it installs the latest gallery version for the current user and then forwards all arguments to `Request-NSACMECertificate`.
-
-For compatibility with legacy GenLeCertForNS usage against self-signed NetScaler management certificates, the wrapper adds `-SkipCertificateCheck` by default for NetScaler-connected operations unless the caller already specified it. Call `Request-NSACMECertificate` directly when strict management certificate validation is required.
-
-The wrapper does not update the module on every certificate run. To opt in to an update before a run, add `-AutoUpdate`. The wrapper installs the latest gallery version before import when it is using an installed module. Direct `Request-NSACMECertificate -AutoUpdate` calls also check for updates, but if the module is already loaded the updated version is used after restarting PowerShell or re-importing the module.
+The generated command reference is part of the documentation site. Use PowerShell discovery locally when working from a checkout:
 
 ```powershell
-.\GenLeCertForNS.ps1 -AutoUpdate -ConfigFile .\GenLeCertForNS.json -AutoRun
-```
-
-## Current Scope
-
-Generated configuration support currently includes 390 profile-backed resources across AAA, analytics, API, AppFlow, AppFW, AppQoE, audit, authentication, authorization, autoscale, Azure, bot, cache, cloud, cluster, CMP, content inspection, CR, CS, DB, DNS, endpoint, FEO, FIS, GSLB, HA, ICA, INAT, IPsec, Kafka, LB, LLDP, LSN, MAP, NAT64, network, NS, NTP, PCP, policy, QUIC, RDP, responder, rewrite, SNMP, SSL, stream, system, TM, transform, tunnel, user, video optimization, VPN, and utility categories.
-
-Write-capable generated resources currently include:
-
-- `lbvserver`, `nspartition`, `service`, `server`, and `csvserver` get/add/set/remove/enable/disable where supported by NITRO.
-- `appflowcollector` get/add/set/remove.
-- `aaagroup_intranetip_binding`, `aaagroup_auditsyslogpolicy_binding`, `sslservice_sslcipher_binding`, `sslservicegroup_sslcipher_binding`, and `sslvserver_sslcipher_binding` get/add/remove.
-- `appfwarchive` and `systemfile` get/remove.
-- `ping`, `ping6`, `traceroute`, and `traceroute6` as generated `Invoke-NS<Action><Resource>` commands.
-
-Additional generated configuration resources are read-only until their write operations are profiled and validated.
-
-Generated statistics support currently includes 80 generated `Invoke-NSGet*Stats` commands. Use this to inspect the generated statistics surface:
-
-```powershell
+Get-Command -Module NetScalerToolkit
 Get-Command -Module NetScalerToolkit -Name 'Invoke-NSGet*Stats'
+Get-Help Connect-NSNode -Full
 ```
 
-## Low-Level Requests
-
-`Invoke-NSRestRequest` accepts either a raw HTTP `-Method` (`GET`, `POST`, `PUT`, `DELETE`) or a documented NITRO `-Operation`. NITRO operations such as `SAVE`, `IMPORT`, `EXPORT`, `UNSET`, `ENABLE`, `DISABLE`, `PING`, and `TRACEROUTE` are not HTTP methods; the helper resolves them to the correct HTTP verb and `action=` query where that generic mapping is known.
-
-The generator and source conversion scripts are private project tooling and are not part of this public module repository.
+Generated configuration support includes profile-backed resources across the NetScaler NITRO surface. Additional generated resources may be read-only until their write operations are profiled and validated.

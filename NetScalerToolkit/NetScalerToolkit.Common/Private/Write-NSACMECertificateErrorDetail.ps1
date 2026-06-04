@@ -12,23 +12,38 @@
     )
 
     $exception = $ErrorRecord.Exception
+    $details = [ordered]@{
+        Type = $exception.GetType().FullName
+        Message = $exception.Message
+        ErrorId = $ErrorRecord.FullyQualifiedErrorId
+        Category = if ($ErrorRecord.CategoryInfo) { [string]$ErrorRecord.CategoryInfo } else { $null }
+        Target = $ErrorRecord.TargetObject
+    }
+    Write-NSACMECertificateLog Debug $Component 'Exception details.' -Data $details -ConsoleDataKeys @('Type', 'Category')
     if ($exception.InnerException) {
-        Write-NSACMECertificateLog Warning $Component "Inner error: $($exception.InnerException.Message)"
-    }
-    if ($ErrorRecord.FullyQualifiedErrorId) {
-        Write-NSACMECertificateLog Debug $Component "Error id: $($ErrorRecord.FullyQualifiedErrorId)"
-    }
-    if ($ErrorRecord.CategoryInfo) {
-        Write-NSACMECertificateLog Debug $Component "Category: $($ErrorRecord.CategoryInfo)"
+        Write-NSACMECertificateLog Warning $Component 'Inner exception.' -Data ([ordered]@{
+            Type = $exception.InnerException.GetType().FullName
+            Message = $exception.InnerException.Message
+        }) -ConsoleDataKeys @('Type', 'Message')
     }
 
+    # Walk inner exceptions so transport-level causes are visible at Debug log level.
     $current = $exception
     $depth = 0
     while ($current -and $depth -lt 5) {
+        if ($depth -gt 0) {
+            Write-NSACMECertificateLog Debug $Component "Inner exception $depth." -Data ([ordered]@{
+                Type = $current.GetType().FullName
+                Message = $current.Message
+            }) -ConsoleDataKeys @('Type', 'Message')
+        }
         foreach ($key in @($current.Data.Keys)) {
             $value = $current.Data[$key]
             if ($null -ne $value) {
-                Write-NSACMECertificateLog Debug $Component "Exception data ${key}: $value"
+                Write-NSACMECertificateLog Debug $Component 'Exception data.' -Data ([ordered]@{
+                    Name = $key
+                    Value = $value
+                }) -ConsoleDataKeys @('Name', 'Value')
             }
         }
         $current = $current.InnerException
@@ -36,15 +51,26 @@
     }
 
     if ($ErrorRecord.ScriptStackTrace) {
-        Write-NSACMECertificateLog Debug $Component "Stack trace: $($ErrorRecord.ScriptStackTrace)"
+        Write-NSACMECertificateLog Debug $Component 'Script stack trace:' -NoConsoleData
+        foreach ($line in @($ErrorRecord.ScriptStackTrace -split '\r?\n|\r' | Where-Object { $_ })) {
+            Write-NSACMECertificateLog Debug $Component "  $line" -NoConsoleData
+        }
+    }
+    if ($ErrorRecord.InvocationInfo) {
+        Write-NSACMECertificateLog Debug $Component 'Failure location.' -Data ([ordered]@{
+            ScriptName = $ErrorRecord.InvocationInfo.ScriptName
+            Line = $ErrorRecord.InvocationInfo.ScriptLineNumber
+            Offset = $ErrorRecord.InvocationInfo.OffsetInLine
+            Command = $ErrorRecord.InvocationInfo.Line
+        }) -ConsoleDataKeys @('ScriptName', 'Line')
     }
 }
 
 # SIG # Begin signature block
 # MIImdwYJKoZIhvcNAQcCoIImaDCCJmQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDUYdNEBcuA/Krp
-# H63CTnBgGX27oMDvAS4adO/iT8m5QKCCIAowggYUMIID/KADAgECAhB6I67aU2mW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC6iusp0qc+UoHl
+# ulXL97eCneiGPZ/Gy9pFJxTEbcqvmKCCIAowggYUMIID/KADAgECAhB6I67aU2mW
 # D5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYDVQQK
 # Ew9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRpbWUg
 # U3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1OTU5
@@ -220,31 +246,31 @@
 # cnR1bSBDb2RlIFNpZ25pbmcgMjAyMSBDQQIQCDJPnbfakW9j5PKjPF5dUTANBglg
 # hkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3
 # DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEV
-# MC8GCSqGSIb3DQEJBDEiBCDB4EHMAji1KRq+pSdvkl8zuhB/g3YZ2vgBk73dQdDr
-# FDANBgkqhkiG9w0BAQEFAASCAYAA/Zps65urfRpn/yLjLLyZeEtoQTkmjxFVSnVb
-# wWeJ77KcC0SFPIpCM3pd6DT+Jr8aWigwdB3ZAd0+n21UEJawOypJ5fiLHq4ES71B
-# eKPb0RqUmVi/Rz/UXVw0N/SN5XRkkdn5pHS+oOaH4gFKf84G4HO76zQZKmhzI5NX
-# goDDlLfkgVBguqV6hh1M6IKvKlxFeF1eE3/z92hGu40VaGD1UpnE1+cXJDSoLmjZ
-# cVzMvBFz665xuvcYFFXSr6ly+9MjHfzpt6krklDmfXTTQk1rd6FAMHsGPv7zIHbq
-# Di2CAa6uPZ/XRPxD9YtN2lkRqgLepJKFSutCR4pFuy1izs9nE9Z+7Aaa4h+HTaZe
-# R/qLoYwLoFLfwSKCTqEgqXHPhxJMl9bjCLuSmxEbTYoPIhjnnWrlzXwcsZbf8+8u
-# PHpd7ephqW+Otx0sagSeHvsXhfJZByMUg5ckyWn3uQ1Eb5byVIjuPXMYt82FmWyj
-# Z1qhuuHNPfHhZ/78MqWg3QSUtX2hggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
+# MC8GCSqGSIb3DQEJBDEiBCCPxOYLgUPEboJq8isWWEpAUGmm7miY2Dw1rTZHphoS
+# mTANBgkqhkiG9w0BAQEFAASCAYA3ENLJTaAX0Ek0hJPM7r+B+4KJzSbOdX4p+Q1f
+# sYkkI0qz4rvyVMBOouGqJTSzyJl/ez7sB5kj5jc0pQSNifSalJfvqGDISE5K6AlC
+# IgO5WV9Hfy6AKhb1NwAHmuTr9yXpofXkR7nT1khwxlf5OomR3RkKg57HNUXvBGAx
+# sB8fzSaCTaII5WKXepAdlFy++Mnzb9PxigPTO8pGiVeuAQ3l669EyiAwEV9pEtHG
+# DZYNz3KKRO2HVPE05lhm/WYcMCjDyyZneuqgI/+qEF8NZsgqPDX82osU7U/k5Nfp
+# V1jaFag7q81m/Vd+NNBn0F8QgJ20Nuiksg5XlFKsxOBBkjwVrH9aOfFvFVQX/LKJ
+# rQ6rZXZGVvdxQYz7pX4dBXUB3dwNEURiCkEN4rADL2rkgtsEFOdlRbZr0d5RMHcv
+# Qd+xjU9UgFNyRnY46otafPPdYPt6jR9CEEgsuDdri1s2yb45IbpjhFZWfJ2QwgM7
+# 1Jhk6PPhXZPw4bcmOPKsRzum0ZChggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
 # AQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
 # KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNgIRAKQp
 # O24e3denNAiHrXpOtyQwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG9w0BCQMxCwYJ
-# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDExOTUzMDhaMD8GCSqGSIb3
-# DQEJBDEyBDDhabR2llUGBZZ9KGGPFytRmAfw3Koxie0Bdp4tKFHnbDgqFVD6H6En
-# r02pzXx7RRowDQYJKoZIhvcNAQEBBQAEggIAYtlGfh0iaF2sAcpY4WxvCccZg2Jq
-# sQUXQSNcFK7/ewgZZTxwkMm3CBzefUVKZKqpShaipJzF0yLONS3cQSlzzbVxSUfh
-# 3aEcQSO0c2KkfIuMEfQc9eJAKJTmQO58VhVBOnzLCxNv2+6d969JuJdhVHtFwoOx
-# mbBVbHHCb3wLVGTummTTJ5iP+f9QJwmDSeXTgiatguvRtnWKoUyX1TmWigSoZZhN
-# RjWYET2GKdQ/Yb7NYifygkLJI7jd0WVa0PqB7sMQ4n9rSS6BRjtqv8UnJMQI2AMl
-# 6AXEGBCxW4J94TDOqHH6ZHOG2udwDs+8pLeu0h+q6M6+IeJwckddBs3UhFuadY1h
-# xuiA3X3H9dBWsJTCvmafDXW3qt56dtINsGXaHK13k0D6qQSab40reAjaOtGT6cz4
-# Iy/UiecMFTaKD39C6gpWUHrRcwkI9ysERnq+J1ZMNaGU3+qgFBiGujGaaHdV3x/c
-# 8bMiCuZqvRmR+a6OJWx2tUCwrQANbUFs3I2QJOxgaPiRIfV0lLgWSh6tA4U5zcea
-# 6qXyiZph0eTU9VpnAVeZMnNPBgJb0oIe6z9pHVlSLvZmZ8CNNveyyySz9ihUb1xB
-# msPq1UDattwBbAD3WhEy4nL+y4dnazxTv4ozx8Qc6JFnXypva1DpXST6D/0ZpgaK
-# Ss0rXpDul/XZABo=
+# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDQwNzQwMjlaMD8GCSqGSIb3
+# DQEJBDEyBDBC/5TI4qsFKSB2vRNON3VITO3DIA4zvsrP/kf87QFLI4fnMGumY9uN
+# DazRnsWAr0IwDQYJKoZIhvcNAQEBBQAEggIAaAx7VjS7qOQZvUXD3wccMfnG1gGb
+# Pgfg1W8hk8EUZKHNolVIwTqdOZq+9tSb2iHuG4pbiAOvucvGMem0jdRItZ0zWJ5c
+# VHLsSN8p4v+iQjhn0VSqRDeOiaYBI4dwlZw8+EQbMJRd5tTKf3DUGaKsu+rI3CSj
+# m3DPvbu45i13pggdbAwrikUr+Fi++3H9lhyFzjuE1U/WUS2oJEaNY9DoWNIeU4M/
+# KxtTHdK8XG9ifA4qJptV4sTYHtiwDbAvOHyt9TNkxW3aZ5OBrL4rOd1tY0zp55CI
+# h+y3GJJfmbAusxoJqeo5MRSnOIeDEVya7kFd9BjtEgw09ELEqo63pzWSu209LkjD
+# 81S8aXlZOAOPSdWotVGqZFhJTO0ZGN0t7loUgYoMgOZDniAI8hY6oqnxStStivwu
+# kcF2xLoFILjVDn4CA6F4DYK87WStQJYm4KiJJKCxbwRVsfBcCNzMUAlkhHz54ZAS
+# kp9H5yON/pz3BtGXaZt2LpZlOTIvOdQF2MaxLQtrewyWAybgTRE9aDmACVj7EHvD
+# 17OA7rJf/Y/v3dgau+b3r8HkDtOHqjsx7+RBgsQo1REgHVxHN9fjSPjB3gEXcwVS
+# KFK/cBATUAx6+7qrIGtTRTZVdo4edJojEzMvsSdECQgdYjP5o7Vk3t3aEXpKLv1A
+# uUZfvXX1/RLlBMc=
 # SIG # End signature block

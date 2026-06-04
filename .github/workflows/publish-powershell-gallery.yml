@@ -46,9 +46,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Show PowerShell versions
+      - name: Show PowerShell versions2026.604.1545
         shell: pwsh
         run: |
           $PSVersionTable

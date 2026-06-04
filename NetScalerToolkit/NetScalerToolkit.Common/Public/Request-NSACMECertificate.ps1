@@ -12,7 +12,7 @@
         [Parameter(ParameterSetName = 'Help', Mandatory = $true)][Alias('h')][Switch]$Help,
         [Parameter(ParameterSetName = 'CleanADC', Mandatory = $true)][Alias('CleanNS')][Switch]$CleanADC,
         [Parameter(ParameterSetName = 'CleanTestCertificate', Mandatory = $true)][Switch]$RemoveTestCertificates,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanTestCertificate')][Switch]$CleanPoshACMEStorage,
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanTestCertificate')][Alias('CleanVault')][Switch]$CleanPoshACMEStorage,
         [Parameter(ParameterSetName = 'CommandPolicy', Mandatory = $true)][Parameter(ParameterSetName = 'CommandPolicyUser', Mandatory = $true)][Parameter(ParameterSetName = 'LECertificatesHTTP', Mandatory = $true)][Parameter(ParameterSetName = 'LECertificatesDNS', Mandatory = $true)][Parameter(ParameterSetName = 'CleanADC', Mandatory = $true)][Parameter(ParameterSetName = 'CleanTestCertificate', Mandatory = $true)][Alias('URL', 'NSManagementURL')][String]$ManagementURL,
         [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Parameter(ParameterSetName = 'CleanTestCertificate')][Alias('User', 'NSUsername', 'ADCUsername')][String]$Username,
         [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Parameter(ParameterSetName = 'CleanTestCertificate')][Alias('NSPassword', 'ADCPassword')][Object]$Password,
@@ -23,7 +23,7 @@
         [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][ValidateSet('http', 'dns')][String]$ValidationMethod = 'http',
         [Parameter(ParameterSetName = 'LECertificatesDNS')][String]$DNSPlugin = 'Manual',
         [Parameter(ParameterSetName = 'LECertificatesDNS')][Object]$DNSParams = @{},
-        [Parameter(ParameterSetName = 'LECertificatesDNS')][Int]$DNSWaitTime = 30,
+        [Parameter(ParameterSetName = 'LECertificatesDNS')][Int]$DNSWaitTime = 120,
         [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Alias('NSCertNameToUpdate')][String]$CertKeyNameToUpdate,
         [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$RemovePrevious,
         [Parameter(ParameterSetName = 'LECertificatesHTTP', Mandatory = $true)][Parameter(ParameterSetName = 'LECertificatesDNS', Mandatory = $true)][Parameter(ParameterSetName = 'CleanExpiredCerts', Mandatory = $true)][String]$CertDir,
@@ -96,7 +96,11 @@
         [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'AutoRun')][Parameter(ParameterSetName = 'CleanADC')][Parameter(ParameterSetName = 'CleanTestCertificate')][Switch]$SkipCertificateCheck,
         [ValidateSet('LetsEncrypt', 'ZeroSSL', 'Google', 'SSLCom', 'Actalis', 'CustomAcme')][String]$CertificateProvider = 'LetsEncrypt',
         [String]$AcmeDirectoryUrl,
+        [Alias('ExtAcctKID')][String]$ExternalAccountBindingKeyId,
+        [Alias('ExtAcctHMACKey')][Object]$ExternalAccountBindingHmacKey,
+        [ValidateSet('HS256', 'HS384', 'HS512')][Alias('ExtAcctAlgorithm')][String]$ExternalAccountBindingAlgorithm = 'HS256',
         [Switch]$UseModernPfxEncryption,
+        [ValidateSet('None', 'Warn', 'Fail')][String]$CertificateChainValidation = 'Warn',
         [String]$PreferredChain,
         [String]$Profile,
         [String[]]$DnsAlias,
@@ -113,6 +117,7 @@
         $script:NSACMECertificateSensitiveValues = [System.Collections.Generic.List[object]]::new()
         $script:NSACMECertificateAutoUpdateResult = $null
         $script:NSACMETermsOfServiceLogged = $false
+        $ProgressPreference = 'SilentlyContinue'
 
         $script:NSACMECertificateNoConsoleOutput = [bool]$NoConsoleOutput
         if ($NoConsoleOutput) {
@@ -161,9 +166,9 @@
             if ($settings.LogType) { $LogType = $settings.LogType; $script:NSACMECertificateLogType = $LogType }
         } else {
             $requests = @([pscustomobject]@{ Enabled = $true; CN = $CN; SANs = ($SAN -join ','); FriendlyName = $FriendlyName; CsVipName = $CsVipName; UseLbVip = [bool]$UseLbVip; EnableVipBefore = [bool]$EnableVipBefore; DisableVipAfter = [bool]$DisableVipAfter; CertKeyNameToUpdate = $CertKeyNameToUpdate; RemovePrevious = [bool]$RemovePrevious; CertDir = $CertDir; EmailAddress = $EmailAddress; KeyLength = $KeyLength; ValidationMethod = $ValidationMethod; DNSPlugin = $DNSPlugin; DNSParams = $DNSParams; DNSWaitTime = $DNSWaitTime; AlternateDNSValidationDomain = $AlternateDNSValidationDomain; AlternateDNSValidationDomainSkipCheck = [bool]$AlternateDNSValidationDomainSkipCheck; UseNetScalerDNS = [bool]$UseNetScalerDNS; ForceCertRenew = [bool]$ForceCertRenew; DisableIPCheck = [bool]$DisableIPCheck; PfxPassword = $PfxPassword; UpdateIIS = [bool]$UpdateIIS; IISSiteToUpdate = $IISSiteToUpdate; UpdateGlobalVPNCertBinding = [bool]$UpdateGlobalVPNCertBinding; GlobalVPNCertBindingIncludeCA = [bool]$GlobalVPNCertBindingIncludeCA; GlobalVPNCertBindingCrlCheck = $GlobalVPNCertBindingCrlCheck; GlobalVPNCertBindingOcspCheck = $GlobalVPNCertBindingOcspCheck; PostPoSHScriptFilename = $PostPoSHScriptFilename; PostPoSHScriptExtraParameters = $PostPoSHScriptExtraParameters; CleanExpiredCertsOnDisk = [bool]$CleanExpiredCertsOnDisk; CleanExpiredCertsOnDiskDays = $CleanExpiredCertsOnDiskDays })
-            $settings = [pscustomobject]@{ ManagementURL = $ManagementURL; SvcName = $SvcName; SvcDestination = $SvcDestination; LbName = $LbName; RspName = $RspName; RsaName = $RsaName; CspName = $CspName; CsaName = $CsaName; CsVipBinding = $CsVipBinding; TrafficDomain = $TrafficDomain; SaveADCConfig = [bool]$SaveADCConfig; DisableIPCheck = [bool]$DisableIPCheck; SendMail = [bool]$SendMail; SMTPTo = $SMTPTo; SMTPFrom = $SMTPFrom; SMTPCredential = $SMTPCredential; SMTPServer = $SMTPServer; SMTPPort = $SMTPPort; SMTPUseSSL = [bool]$SMTPUseSSL; LogAsAttachment = [bool]$LogAsAttachment }
+            $settings = [pscustomobject]@{ ManagementURL = $ManagementURL; SvcName = $SvcName; SvcDestination = $SvcDestination; LbName = $LbName; RspName = $RspName; RsaName = $RsaName; CspName = $CspName; CsaName = $CsaName; CsVipBinding = $CsVipBinding; TrafficDomain = $TrafficDomain; SaveADCConfig = [bool]$SaveADCConfig; DisableIPCheck = [bool]$DisableIPCheck; SendMail = [bool]$SendMail; SMTPTo = $SMTPTo; SMTPFrom = $SMTPFrom; SMTPCredential = $SMTPCredential; SMTPServer = $SMTPServer; SMTPPort = $SMTPPort; SMTPUseSSL = [bool]$SMTPUseSSL; LogAsAttachment = [bool]$LogAsAttachment; ExternalAccountBindingKeyId = $ExternalAccountBindingKeyId; ExternalAccountBindingHmacKey = $ExternalAccountBindingHmacKey; ExternalAccountBindingAlgorithm = $ExternalAccountBindingAlgorithm; CertificateChainValidation = $CertificateChainValidation }
         }
-        foreach ($name in 'SvcName', 'SvcDestination', 'LbName', 'RspName', 'RsaName', 'CspName', 'CsaName', 'CsVipBinding', 'TrafficDomain', 'SaveADCConfig', 'SendMail', 'SMTPTo', 'SMTPFrom', 'SMTPServer', 'SMTPPort', 'SMTPUseSSL', 'LogAsAttachment') {
+        foreach ($name in 'SvcName', 'SvcDestination', 'LbName', 'RspName', 'RsaName', 'CspName', 'CsaName', 'CsVipBinding', 'TrafficDomain', 'SaveADCConfig', 'SendMail', 'SMTPTo', 'SMTPFrom', 'SMTPServer', 'SMTPPort', 'SMTPUseSSL', 'LogAsAttachment', 'CertificateChainValidation') {
             if (-not ($settings.PSObject.Properties.Name -contains $name)) { $settings | Add-Member -NotePropertyName $name -NotePropertyValue (Get-Variable $name -ValueOnly) }
         }
         if (-not ($settings.PSObject.Properties.Name -contains 'SMTPCredential')) { $settings | Add-Member -NotePropertyName SMTPCredential -NotePropertyValue $SMTPCredential }
@@ -205,9 +210,10 @@
         $ManagementURL = ([string]$ManagementURL).TrimEnd('/') + '/'
         $settings.ManagementURL = $ManagementURL
         $configChanged = $false
+        $config = if ($AutoRun) { $config } else { [pscustomobject]@{ settings = $settings; certrequests = $requests } }
 
         if ($AutoRun) {
-            foreach ($propertyName in 'ADCCredentialPassword', 'SMTPCredentialPassword') {
+            foreach ($propertyName in 'ADCCredentialPassword', 'SMTPCredentialPassword', 'ExternalAccountBindingHmacKey') {
                 if (($settings.PSObject.Properties.Name -contains $propertyName) -and $settings.$propertyName -and ($settings.$propertyName.PSObject.Properties.Name -contains 'IsEncrypted') -and -not $settings.$propertyName.IsEncrypted) {
                     $settings.$propertyName = ConvertTo-NSACMECertificateLegacySecret -Object $settings.$propertyName
                     $configChanged = $true
@@ -220,8 +226,40 @@
                     $configChanged = $true
                 }
             }
+        } elseif ($ConfigFile) {
+            Set-NSACMECertificateNoteProperty -InputObject $settings -Name ADCCredentialUsername -Value $Credential.UserName
+            Set-NSACMECertificateNoteProperty -InputObject $settings -Name ADCCredentialPassword -Value (ConvertTo-NSACMECertificateLegacySecret -Object $Credential.Password)
+            if ($settings.SMTPCredential -is [pscredential] -and $settings.SMTPCredential -ne [pscredential]::Empty) {
+                Set-NSACMECertificateNoteProperty -InputObject $settings -Name SMTPCredentialUsername -Value $settings.SMTPCredential.UserName
+                Set-NSACMECertificateNoteProperty -InputObject $settings -Name SMTPCredentialPassword -Value (ConvertTo-NSACMECertificateLegacySecret -Object $settings.SMTPCredential.Password)
+            }
+            if ($ExternalAccountBindingHmacKey) {
+                Set-NSACMECertificateNoteProperty -InputObject $settings -Name ExternalAccountBindingHmacKey -Value (ConvertTo-NSACMECertificateLegacySecret -Object $ExternalAccountBindingHmacKey)
+            }
+            foreach ($request in @($requests)) {
+                if (($request.PSObject.Properties.Name -contains 'PfxPassword') -and $request.PfxPassword) {
+                    $request.PfxPassword = ConvertTo-NSACMECertificateLegacySecret -Object $request.PfxPassword
+                }
+            }
+            $configChanged = $true
         }
 
+        if (-not $ExternalAccountBindingKeyId -and ($settings.PSObject.Properties.Name -contains 'ExternalAccountBindingKeyId')) { $ExternalAccountBindingKeyId = $settings.ExternalAccountBindingKeyId }
+        if (-not $ExternalAccountBindingHmacKey -and ($settings.PSObject.Properties.Name -contains 'ExternalAccountBindingHmacKey')) { $ExternalAccountBindingHmacKey = $settings.ExternalAccountBindingHmacKey }
+        if (-not $PSBoundParameters.ContainsKey('ExternalAccountBindingAlgorithm') -and ($settings.PSObject.Properties.Name -contains 'ExternalAccountBindingAlgorithm') -and $settings.ExternalAccountBindingAlgorithm) { $ExternalAccountBindingAlgorithm = $settings.ExternalAccountBindingAlgorithm }
+        $externalAccountBindingHmacClearText = if ($ExternalAccountBindingHmacKey) { ConvertFrom-NSACMECertificateLegacySecret -Object $ExternalAccountBindingHmacKey -AsClearText } else { $null }
+        if ($ExternalAccountBindingKeyId) { Add-NSACMECertificateSensitiveValue -Value $ExternalAccountBindingKeyId -Placeholder '<ExternalAccountBindingKeyId>' }
+        if ($externalAccountBindingHmacClearText) { Add-NSACMECertificateSensitiveValue -Value $externalAccountBindingHmacClearText -Placeholder '<ExternalAccountBindingHmacKey>' }
+        Write-NSACMECertificateLog Debug 'Config' "Loaded $(@($requests).Count) enabled certificate request(s)."
+
+        $providersWithStaging = @('LetsEncrypt', 'Google')
+        if (-not $Production -and -not $AcmeDirectoryUrl -and $CertificateProvider -notin $providersWithStaging) {
+            $message = "Certificate provider '$CertificateProvider' does not have a configured staging environment. Rerun with -Production, or specify -AcmeDirectoryUrl for a custom ACME directory."
+            Write-NSACMECertificateLog Error 'ACME' $message
+            throw $message
+        }
+
+        # Resolve the Posh-ACME server alias before account or order operations.
         $serverName = if ($AcmeDirectoryUrl) {
             $AcmeDirectoryUrl
         } elseif ($Production) {
@@ -250,6 +288,7 @@
         Write-NSACMECertificateLog Info 'NetScaler' "Connecting to $ManagementURL as $($Credential.UserName)."
         try {
             $nsSession = Connect-NSNode -ManagementURL $ManagementURL -Credential $Credential -SkipCertificateCheck:$SkipCertificateCheck -HA -PassThru -ErrorAction Stop
+            Write-NSACMECertificateLog Debug 'NetScaler' "Connected node state: $($nsSession.ConnectedNodeState); HA=$([bool]$nsSession.IsHA); Version=$($nsSession.Version)."
         } catch {
             if (-not $SkipCertificateCheck -and $_.Exception.Message -match 'trust relationship|certificate|SSL/TLS|remote certificate') {
                 Write-NSACMECertificateLog Error 'NetScaler' "TLS trust validation failed for '$ManagementURL'. If this NetScaler uses a self-signed or private CA management certificate, rerun with -SkipCertificateCheck or install the issuing CA certificate in the Windows trust store."
@@ -306,18 +345,91 @@
             $challengeBindings = @()
             $requestVipEnabled = $false
             try {
+            # Normalize one request at a time so AutoRun can continue after a later request fails.
             $normalizedRequest = Normalize-NSACMECertificateRequest -Request $request -DefaultCertDir $CertDir
             $domains = $normalizedRequest.Domains
             $effectiveForceCertRenew = [bool]$ForceCertRenew -or [bool]$request.ForceCertRenew
+            Write-NSACMECertificateLog Debug 'Request' "CN=$($request.CN); Validation=$($request.ValidationMethod); Domains=$($domains -join ', '); Force=$effectiveForceCertRenew."
             if ($request.ValidationMethod -eq 'http' -and -not $request.CsVipName -and -not $request.UseLbVip) { throw "CsVipName is required for HTTP validation unless UseLbVip is set. CN=$($request.CN)" }
             if (-not (Test-Path -LiteralPath $request.CertDir)) { New-Item -ItemType Directory -Path $request.CertDir -Force | Out-Null }
-            $renewalDecision = Test-NSACMECertificateRenewalRequired -Request $request -Force:$effectiveForceCertRenew
+            $existingAcmeOrder = $null
+            $existingAcmeCertificate = $null
+            $existingNetScalerCertificate = $null
+            try {
+                $existingAcmeOrder = Get-PAOrder -MainDomain $request.CN -Refresh -ErrorAction Stop
+                if ($existingAcmeOrder) {
+                    Write-NSACMECertificateLog Debug 'CheckCertRenewal' "Loaded ACME order metadata for $($request.CN)." -Data ([ordered]@{
+                            Status      = $existingAcmeOrder.status
+                            CertExpires = $existingAcmeOrder.CertExpires
+                            RenewAfter  = $existingAcmeOrder.RenewAfter
+                        }) -ConsoleDataKeys @('RenewAfter', 'CertExpires')
+                }
+            } catch {
+                Write-NSACMECertificateLog Debug 'CheckCertRenewal' "No usable ACME order metadata found for $($request.CN): $($_.Exception.Message)"
+            }
+            try {
+                $existingPoshCertificate = Get-PACertificate -MainDomain $request.CN -ErrorAction Stop
+                if ($existingPoshCertificate.CertFile -and (Test-Path -LiteralPath $existingPoshCertificate.CertFile)) {
+                    $existingAcmeCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($existingPoshCertificate.CertFile)
+                    Write-NSACMECertificateLog Debug 'CheckCertRenewal' "Loaded existing ACME certificate validity for $($request.CN)." -Data ([ordered]@{
+                            NotBefore  = $existingAcmeCertificate.NotBefore.ToString('yyyy-MM-dd HH:mm:ss')
+                            NotAfter   = $existingAcmeCertificate.NotAfter.ToString('yyyy-MM-dd HH:mm:ss')
+                            Thumbprint = $existingAcmeCertificate.Thumbprint
+                        }) -ConsoleDataKeys @('NotAfter', 'Thumbprint')
+                }
+            } catch {
+                Write-NSACMECertificateLog Debug 'CheckCertRenewal' "No usable ACME certificate file found for $($request.CN): $($_.Exception.Message)"
+            }
+            if ($request.CertKeyNameToUpdate) {
+                try {
+                    $existingNetScalerCertificate = Invoke-NSGetSSLCertKey -Session $nsSession -CertKey $request.CertKeyNameToUpdate -ReturnNullOnNotFound -ErrorAction Stop
+                    if ($existingNetScalerCertificate) {
+                        Write-NSACMECertificateLog Debug 'CheckCertRenewal' "Loaded NetScaler certkey '$($request.CertKeyNameToUpdate)' for renewal fallback." -Data ([ordered]@{
+                                CertKey     = $request.CertKeyNameToUpdate
+                                NotBefore   = $existingNetScalerCertificate.notbefore
+                                NotAfter    = $existingNetScalerCertificate.notafter
+                                CertExpires = $existingNetScalerCertificate.certexpires
+                            }) -ConsoleDataKeys @('NotAfter', 'CertExpires')
+                    }
+                } catch {
+                    Write-NSACMECertificateLog Warning 'CheckCertRenewal' "Could not inspect NetScaler certkey '$($request.CertKeyNameToUpdate)' for renewal fallback: $($_.Exception.Message)"
+                }
+            }
+            $renewalDecision = Test-NSACMECertificateRenewalRequired -Request $request -AcmeOrder $existingAcmeOrder -AcmeCertificate $existingAcmeCertificate -NetScalerCertificate $existingNetScalerCertificate -Force:$effectiveForceCertRenew
+            if ($renewalDecision.CertExpires) {
+                Set-NSACMECertificateNoteProperty -InputObject $request -Name CertExpires -Value $renewalDecision.CertExpires.ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture)
+                $configChanged = $true
+            }
+            if ($renewalDecision.RenewAfter) {
+                Set-NSACMECertificateNoteProperty -InputObject $request -Name RenewAfter -Value $renewalDecision.RenewAfter.ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture)
+                $configChanged = $true
+            }
+            Set-NSACMECertificateNoteProperty -InputObject $request -Name RenewalSource -Value $renewalDecision.Source
+            Set-NSACMECertificateNoteProperty -InputObject $request -Name RenewalStrategy -Value $renewalDecision.Strategy
+            $acmeServerInfo = Get-PAServer
+            $acmeRenewalInfoSupported = [bool]($acmeServerInfo.renewalInfo -and -not $acmeServerInfo.DisableARI)
+            Set-NSACMECertificateNoteProperty -InputObject $request -Name AcmeProvider -Value $CertificateProvider
+            Set-NSACMECertificateNoteProperty -InputObject $request -Name AcmeServer -Value $serverName
+            Set-NSACMECertificateNoteProperty -InputObject $request -Name AcmeRenewalInfoSupported -Value $acmeRenewalInfoSupported
+            $configChanged = $true
+            $renewalDecisionData = [ordered]@{
+                Decision                 = if ($renewalDecision.ShouldRenew) { 'Renew' } else { 'Skip' }
+                Source                   = $renewalDecision.Source
+                Strategy                 = $renewalDecision.Strategy
+                Reason                   = $renewalDecision.Reason
+                CertExpires              = if ($renewalDecision.CertExpires) { $renewalDecision.CertExpires.ToString('yyyy-MM-dd HH:mm:ss') } else { $null }
+                RenewAfter               = if ($renewalDecision.RenewAfter) { $renewalDecision.RenewAfter.ToString('yyyy-MM-dd HH:mm:ss') } else { $null }
+                ExpireDays               = $renewalDecision.ExpireDays
+                RenewAfterDays           = $renewalDecision.RenewAfterDays
+                AcmeRenewalInfoSupported = $acmeRenewalInfoSupported
+            }
+            Write-NSACMECertificateLog Debug 'CheckCertRenewal' 'Renewal decision.' -Data $renewalDecisionData -ConsoleDataKeys @('Decision', 'Source', 'RenewAfter', 'CertExpires')
             if (-not $renewalDecision.ShouldRenew) {
-                Write-NSACMECertificateLog Info 'CheckCertRenewal' "$($request.CN) skipped. $($renewalDecision.Reason)"
+                Write-NSACMECertificateLog Info 'CheckCertRenewal' "$($request.CN) skipped. $($renewalDecision.Summary)"
                 $results += [pscustomobject]@{ CN = $request.CN; Domains = $domains; AcmeServer = $serverName; Production = [bool]$Production; ValidationMethod = $request.ValidationMethod; CertKeyName = $request.CertKeyNameToUpdate; PfxPath = $null; Thumbprint = $null; NotAfter = $renewalDecision.CertExpires; Status = 'Skipped'; Reason = $renewalDecision.Reason; LogFile = $script:NSACMECertificateLogFile }
                 continue
             }
-            Write-NSACMECertificateLog Info 'CheckCertRenewal' "$($request.CN) renewal required. $($renewalDecision.Reason)"
+            Write-NSACMECertificateLog Info 'CheckCertRenewal' "$($request.CN) renewal required. $($renewalDecision.Summary)"
             if ($request.ValidationMethod -eq 'http' -and $request.EnableVipBefore) {
                 foreach ($csVip in @($request.CsVipName)) { try { Invoke-NSEnableCSVServer -Session $nsSession -Name $csVip | Out-Null } catch { Write-NSACMECertificateLog Warning 'NetScaler' "Could not enable CS VIP $csVip`: $($_.Exception.Message)" } }
                 $requestVipEnabled = $true
@@ -327,10 +439,26 @@
             Write-NSACMECertificateLog Info 'ACME' "Ensuring ACME account for $($request.EmailAddress)."
             try { $account = Get-PAAccount -List -Refresh -ErrorAction Stop | Where-Object { $_.Contact -contains "mailto:$($request.EmailAddress)" -or $_.Contact -contains $request.EmailAddress } | Select-Object -First 1 } catch { $account = $null }
             $accountKeyLength = if ([string]$request.KeyLength -match '^\d+$') { [int]$request.KeyLength } else { 2048 }
-            if (-not $account) { $account = New-PAAccount -Contact $request.EmailAddress -KeyLength $accountKeyLength -AcceptTOS -Force -ErrorAction Stop }
+            if (-not $account) {
+                Write-NSACMECertificateLog Debug 'ACME' "Creating ACME account for $($request.EmailAddress) with account key length $accountKeyLength."
+                $newAccountParams = @{
+                    Contact     = $request.EmailAddress
+                    KeyLength   = $accountKeyLength
+                    AcceptTOS   = $true
+                    Force       = $true
+                    ErrorAction = 'Stop'
+                }
+                if ($ExternalAccountBindingKeyId -and $externalAccountBindingHmacClearText) {
+                    $newAccountParams.ExtAcctKID = $ExternalAccountBindingKeyId
+                    $newAccountParams.ExtAcctHMACKey = $externalAccountBindingHmacClearText
+                    $newAccountParams.ExtAcctAlgorithm = $ExternalAccountBindingAlgorithm
+                }
+                $account = New-PAAccount @newAccountParams
+            }
             Set-PAAccount -ID $account.ID -Force | Out-Null
                 $cert = $null
                 if ($request.ValidationMethod -eq 'dns') {
+                    Write-NSACMECertificateLog Debug 'ACME' "Requesting DNS order for $($request.CN) with plugin '$DNSPlugin'."
                     $acmeOptions = @{
                         DNSPlugin              = $DNSPlugin
                         DNSParams              = $DNSParams
@@ -350,13 +478,17 @@
                     if (-not $cert) { $cert = Get-PACertificate -MainDomain $request.CN -ErrorAction Stop }
                 } else {
                     Write-NSACMECertificateLog Info 'ACME' "Creating ACME HTTP order for $($domains -join ', ')."
+                    Write-NSACMECertificateLog Debug 'ACME' "HTTP validation uses CS VIP(s): $(@($request.CsVipName) -join ', '); UseLbVip=$([bool]$request.UseLbVip)."
                     $orderParams = @{ Domain = $domains; AlwaysNewKey = ([bool]$AlwaysNewKey -or $effectiveForceCertRenew); KeyLength = [string]$request.KeyLength; Force = $true; FriendlyName = $request.FriendlyName; PfxPassSecure = $pfxSecret }
                     if ($UseModernPfxEncryption) { $orderParams.UseModernPfxEncryption = $true }
                     if ($PreferredChain) { $orderParams.PreferredChain = $PreferredChain }
                     if ($Profile) { $orderParams.Profile = $Profile }
                     if ($LifetimeDays) { $orderParams.LifetimeDays = $LifetimeDays }
                     if ($ValidationTimeout) { $orderParams.ValidationTimeout = $ValidationTimeout }
-                    if ($effectiveForceCertRenew) { try { Remove-PAOrder -MainDomain $request.CN -Force -ErrorAction SilentlyContinue | Out-Null } catch {} }
+                    if ($effectiveForceCertRenew) {
+                        Write-NSACMECertificateLog Debug 'ACME' "Removing existing ACME order for $($request.CN) before creating a forced order."
+                        try { Remove-PAOrder -MainDomain $request.CN -Force -ErrorAction SilentlyContinue | Out-Null } catch {}
+                    }
                     $order = New-PAOrder @orderParams -ErrorAction Stop
                     Initialize-NSACMECertificateHttpValidationConfig -Session $nsSession -Settings $settings -Request $request
                     if (-not $request.UseLbVip) {
@@ -372,9 +504,11 @@
                     $null = Complete-PAOrder -Order (Get-PAOrder -MainDomain $request.CN -Refresh) -ErrorAction Stop
                     $cert = Get-PACertificate -MainDomain $request.CN -ErrorAction Stop
                 }
-                $deploy = Install-NSACMECertificateNetScalerCertificate -Session $nsSession -Settings $settings -Request $request -Certificate $cert -PfxSecret $pfxSecret -IsProduction:$Production
+                $deploy = Install-NSACMECertificateNetScalerCertificate -Session $nsSession -Settings $settings -Request $request -Certificate $cert -PfxSecret $pfxSecret -CertificateChainValidation $settings.CertificateChainValidation -IsProduction:$Production
+                Write-NSACMECertificateLog Debug 'Deploy' "Installed NetScaler certkey '$($deploy.CertKeyName)' from PFX '$($deploy.PfxFileName)'."
                 $x509 = if ($cert.CertFile -and (Test-Path $cert.CertFile)) { [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.CertFile) } else { $null }
                 try {
+                    # Store Posh-ACME renewal metadata back into generated config files.
                     $completedOrder = Get-PAOrder -MainDomain $request.CN -Refresh -ErrorAction Stop
                     if ($completedOrder.CertExpires) {
                         Set-NSACMECertificateNoteProperty -InputObject $request -Name CertExpires -Value $completedOrder.CertExpires
@@ -384,6 +518,11 @@
                         Set-NSACMECertificateNoteProperty -InputObject $request -Name RenewAfter -Value $completedOrder.RenewAfter
                         $configChanged = $true
                     }
+                    Set-NSACMECertificateNoteProperty -InputObject $request -Name RenewalSource -Value 'ACME order'
+                    Set-NSACMECertificateNoteProperty -InputObject $request -Name RenewalStrategy -Value 'ACME/Posh-ACME renewal metadata.'
+                    Set-NSACMECertificateNoteProperty -InputObject $request -Name AcmeProvider -Value $CertificateProvider
+                    Set-NSACMECertificateNoteProperty -InputObject $request -Name AcmeServer -Value $serverName
+                    Set-NSACMECertificateNoteProperty -InputObject $request -Name AcmeRenewalInfoSupported -Value ([bool]((Get-PAServer).renewalInfo -and -not (Get-PAServer).DisableARI))
                     Set-NSACMECertificateNoteProperty -InputObject $request -Name CurrentCertIsProduction -Value ([bool]$Production)
                     $configChanged = $true
                 } catch {
@@ -420,6 +559,7 @@
                 $results += [pscustomobject]@{ CN = $request.CN; Domains = $domains; AcmeServer = $serverName; Production = [bool]$Production; ValidationMethod = $request.ValidationMethod; CertKeyName = $request.CertKeyNameToUpdate; PfxPath = $null; Thumbprint = $null; NotAfter = $null; Status = 'Failed'; Reason = $_.Exception.Message; LogFile = $script:NSACMECertificateLogFile }
                 if ($StopOnError) { throw }
             } finally {
+                # Per-order challenge bindings are short-lived; reusable HTTP objects are cleaned after all requests.
                 Remove-NSACMECertificateHttpChallengeBinding -Session $nsSession -ChallengeBindings $challengeBindings -Settings $settings
                 if ($requestVipEnabled -and $request.ValidationMethod -eq 'http' -and $request.DisableVipAfter) { foreach ($csVip in @($request.CsVipName)) { try { Invoke-NSDisableCSVServer -Session $nsSession -Name $csVip | Out-Null } catch { Write-NSACMECertificateLog Warning 'NetScaler' "Could not disable CS VIP $csVip`: $($_.Exception.Message)" } } }
             }
@@ -435,15 +575,20 @@
             $body = ($results | Format-List | Out-String)
             Send-NSACMECertificateMail -Settings $settings -Subject "Request-NSACMECertificate $subjectStatus" -Body $body -LogFile $script:NSACMECertificateLogFile
         }
-        if ($AutoRun -and $configChanged -and $ConfigFile) {
+        if ($ConfigFile -and $configChanged) {
             try {
-                Write-NSACMECertificateLog Info 'ConfigFile' "Saving updated renewal metadata to '$ConfigFile'."
+                $configAction = if ($AutoRun) { 'updated renewal metadata' } else { 'request configuration' }
+                Write-NSACMECertificateLog Info 'ConfigFile' "Saving $configAction to '$ConfigFile'."
                 if ($config.settings.PSObject.Properties.Name -contains 'SMTPCredential') {
                     $config.settings.PSObject.Properties.Remove('SMTPCredential')
                 }
+                $configDirectory = Split-Path -Path $ConfigFile -Parent
+                if (-not [string]::IsNullOrWhiteSpace($configDirectory) -and -not (Test-Path -LiteralPath $configDirectory)) {
+                    New-Item -ItemType Directory -Path $configDirectory -Force | Out-Null
+                }
                 $config | ConvertTo-Json -Depth 20 | Out-File -LiteralPath $ConfigFile -Encoding Unicode -Force
             } catch {
-                Write-NSACMECertificateLog Warning 'ConfigFile' "Could not save updated renewal metadata to '$ConfigFile': $($_.Exception.Message)"
+                Write-NSACMECertificateLog Warning 'ConfigFile' "Could not save config file '$ConfigFile': $($_.Exception.Message)"
             }
         }
         if ($NoConsoleOutput) {
@@ -457,8 +602,8 @@
 # SIG # Begin signature block
 # MIImdwYJKoZIhvcNAQcCoIImaDCCJmQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBmYlpWJkLiOtC8
-# HresvM0POJ3e0dGTm9fJlWfsliVjf6CCIAowggYUMIID/KADAgECAhB6I67aU2mW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDGxUv2XvwDm65P
+# GJ/J60qllPsmPSUUpa9qBCB7GOvc2qCCIAowggYUMIID/KADAgECAhB6I67aU2mW
 # D5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYDVQQK
 # Ew9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRpbWUg
 # U3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1OTU5
@@ -634,31 +779,31 @@
 # cnR1bSBDb2RlIFNpZ25pbmcgMjAyMSBDQQIQCDJPnbfakW9j5PKjPF5dUTANBglg
 # hkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3
 # DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEV
-# MC8GCSqGSIb3DQEJBDEiBCAruBJxZxKszNgEYZnLUJNLz55Z3lLme914mUHlX7WW
-# XzANBgkqhkiG9w0BAQEFAASCAYDH5Y1/3N+5QEL7HtjDMor35c3qX1bexs9HDUe6
-# NNP1XBlVNICuHFjw2Dzfab480SfIXJRKkcah4KaEtZYSngXYy+kf/TzfNUFkT3lS
-# mR2SiOZMpGF+YPrtdlgGqJp5tTviDWI+Dj9kPxCcqmvZTE0vdiBiFol/qrqr/X2k
-# 4kmrvXMP5XEkkh03+IGDo8O+4o2jtsboz8B6OgPDe92RyWJIb75+S/plNYE9wxJm
-# 3/R8cHplN0rLyEaS/RZqKkUloxXRwddXXqFwmmxCIk7c0SRc3VppEal8DUFBkTGD
-# vAdsx2zvKACVN2hCg9Id5UlqrKen/onpV6+Zzak+66Jzk9RCaARrj4WliT8ndhK8
-# rSzqngbaaWrpTg5Km0h9VIbKtGsZFo1BIhA1ZuueH84Zz4ifMCqHIgfbip822fxC
-# 50zq8j3/0z2A4Kl+RI5YJTKzGjdeq96coTdAdhHdX1RTzdieMzKkZ+cKdJ0bWBJI
-# cwXqJ2QBdMUMoMFEH0dQpApF4mehggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
+# MC8GCSqGSIb3DQEJBDEiBCBJ40SH78zz7KhpZiGiYJ0PqjHGmP9NKIOEbpmNQtqf
+# XTANBgkqhkiG9w0BAQEFAASCAYCS+7LyvJ23gJIXJx49Ok5xowwr0Jvs2hLqozVC
+# P6qGhYg2jHS4rAaoHJt+QmKSSqgCKBHy/Rln08PK3FXiW1TJ+8vhY2CRrwNEo1vk
+# wZMOEc+YXuU29Uf9QHTUzMOSJWnqlGE5hef+xSTZpxwGfCxBaG0qIhjprOFXaLO0
+# 3CNfym5cHxXOi4UvWNp3QlOMODS2PeoIVVn7JQm1yDyl7AmkdKv3cgXUaYLR5baH
+# C95lkTQaWaD1gNhIwk7o5jmzN4EzQOpxSpLvlh9RD5SsY274lMzpOlfpFbMTWk3k
+# F1K59vyU5p6qGdwFPlPy+9gXmlvVbsJT7VHiYBOFs+YMV9pioUt/fqQBZL70/7f2
+# 16Nnmf/+I10fLxOBPhelFBNCCxcZ0rfxcEHbtHntPWvN2+m7wbSiYXYXdE7SWUpn
+# 893rIRGn0gHZlmTK8OxihVyZM/Ha4lGgn7d02E9oubzbWEX4Ju1QAMGKwepUjHVM
+# oSF9J//HTOQ/pHgq03DeWQ8E9KKhggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
 # AQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
 # KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNgIRAKQp
 # O24e3denNAiHrXpOtyQwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG9w0BCQMxCwYJ
-# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDExOTUzMzhaMD8GCSqGSIb3
-# DQEJBDEyBDAVbWTG+X0EyIHfU24N6lAQcCAD10I7iAUWR+z5j3VTNEN3LOdcY6AC
-# LBae7Y2Mo8kwDQYJKoZIhvcNAQEBBQAEggIABu1DzdlpItEYCGMAzTNTnEIWgP67
-# tz3rd7TV8fzFovzWnH+fpzeMSYOXp/160VwQTrhw8bbQzU9BOaRfsg0ohKEWbIAQ
-# mxo2GIp1oH3QPX+sWWM80s1juqZyomgm588CUHCLAdINrH3rwU8unoAVywQYXCE7
-# Jv2KTRWrQul2pqurze9eTP6HYFzrOhHRAe+iDgpJOlgqs/TZo6yv8NwSr3EbLzUf
-# hvFTpiz+nKWAzGfjfiAF/DDAlddZpAQxAXpZVYyb5OwQG9kMbaia0FRnsrSsl4ns
-# eGupBk7aJfXmHfdew+dyO2E0IboSD7Ay5pEhNVV/k7ff69SfaphxoHaAEtxWQJ54
-# qQoSY1morzeGaT8s849jp8ci+b8u05N+fJAYKrTmGeT+cGJ0d5nRl9GEYFONpoAa
-# Brbz7jzJ/is8W1yf/qbp6Bant9tIR/eRaiMjjXev8XVmsfOetZlisf4B9JlZCpSw
-# 7QtWWJn8t5gE/TNHkiauqhoI1vQixACVAMh2iCgv8M1EZke9Kf6oKPH/o5JrvQm2
-# pXkhxR/DqpjV2wAfib/jz754Uxg9LHxZ5nIMwnfY6hFtt9IUsArF0QdTC5ijOF4l
-# CMp90KJQSGMH932YgJDpKEMEzSt838bkGJQuTvjBobxD2+0BnZw9BTsIKE0+i/V5
-# y1r3d+QphNsfGPU=
+# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDQxMDE0MjVaMD8GCSqGSIb3
+# DQEJBDEyBDAUKhPd7MfhUpY23G4j1laFV/QxybBYYHWhHtsGLdtyOCsCsgkKF5ct
+# 3u/VPwQRPhEwDQYJKoZIhvcNAQEBBQAEggIAc5hKnFKuLd8Qo0QXvn3Wvt03SYcG
+# xWzcR7OUaAOJsCYflvhSQK8xBp/L9nmTqKO12BcH88uJ0ExyqFMSK6pPkrNugk5i
+# 1UhyOfxfcCDFTCNFlJQQvPp9qOIXZmOAOO0pAn1OBx7OtHeSUHjhEgqvJMROPeJp
+# 1vzUHpQrO13KfDIcs5rrKWcGm4ZxRKEY6lEb/vbRIaQwuvBJ9v/G41PcmQzma5vG
+# AlnZI/GrrvG/UyM6UtHvsWRAwqtHu1CEg1dC7SzBYF0tLP2JN7I/gY9coNJ+2TEZ
+# xQsI1g3ocJaP7Ctgv5pPnRq4ryi0iL0cGhEyadNry/Ff/5EfAanj8o5dV+PUEyYH
+# miGx5uEcLL0ZlvUZmeOroKUSr5SGaiSEewLtNktcFKDHFmZm02xLQxHpai8AaDju
+# nvFcovFiNyugGPpT6YIIvtoIAVJiRzt7LII92ud8411BN0AvFC0A7t4XRxs/XqrG
+# s9KaTQt8GH+kd1n7SjoXn21MhN+TrePII79qOc8WhXBuMxNrLdjL9zDPGudqvU8H
+# 45fymXych990tYSk000AlNlCAK6RJHIobsCTD2UiX7ZmdG/Grnmc+Jcc19DH3Yi7
+# Ndy1l8OwZ2ijdSHvv9eQGyDIhHONishKY9UW1xHcG7dnvJbAlVXsyEPD2ZyeiB64
+# YH1AQMvqNNZl008=
 # SIG # End signature block
