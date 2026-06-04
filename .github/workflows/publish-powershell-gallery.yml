@@ -6,7 +6,8 @@ on:
       - '**'
   push:
     branches:
-      - '**'
+      - main
+      - dev
   workflow_dispatch:
     inputs:
       publish:
@@ -74,12 +75,12 @@ jobs:
 
       - name: Resolve publish target
         id: publish_target
-        if: ${{ github.event_name == 'workflow_dispatch' }}
         shell: pwsh
         run: |
           .\.github\scripts\Resolve-NSToolkitCIPublishTarget.ps1 `
             -GitHubRepository '${{ github.repository }}' `
             -GitHubRef '${{ github.ref }}' `
+            -GitHubEventName '${{ github.event_name }}' `
             -PublishRequested '${{ inputs.publish }}' `
             -DryRunRequested '${{ inputs.dry_run_publish }}'
 
