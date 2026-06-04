@@ -145,8 +145,6 @@
             return Remove-NSACMECertificateExpiredDiskCertificate -CertDir $CertDir -Days $CleanExpiredCertsOnDiskDays
         }
 
-        Import-Module Posh-ACME -MinimumVersion 4.31.0 -ErrorAction Stop
-
         $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
         $settings = [pscustomobject]@{}
         $requests = @()
@@ -258,6 +256,8 @@
             Write-NSACMECertificateLog Error 'ACME' $message
             throw $message
         }
+
+        Import-Module Posh-ACME -MinimumVersion 4.31.0 -ErrorAction Stop
 
         # Resolve the Posh-ACME server alias before account or order operations.
         $serverName = if ($AcmeDirectoryUrl) {

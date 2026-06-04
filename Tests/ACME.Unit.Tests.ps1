@@ -37,6 +37,10 @@ Describe 'ACME helper functions' {
                 }
                 "-----BEGIN CERTIFICATE-----`n$($lines -join "`n")`n-----END CERTIFICATE-----`n"
             }
+
+            if (-not (Get-Command Get-PAServer -ErrorAction SilentlyContinue)) {
+                function Get-PAServer { }
+            }
         }
 
         Context 'secret and hashtable conversion' {
@@ -195,6 +199,7 @@ Describe 'ACME helper functions' {
                 try {
                     $configPath = Join-Path $dir 'GenLe-Config.json'
                     $certDir = Join-Path $dir 'certs'
+                    Mock Import-Module {} -ParameterFilter { $Name -eq 'Posh-ACME' }
                     Mock Set-NSACMEPoshACMEServer {}
                     Mock Get-PAServer { [pscustomobject]@{ renewalInfo = 'https://example.com/acme/renewal-info'; DisableARI = $false } }
                     Mock Connect-NSNode { [pscustomobject]@{ IsHA = $false; IsPrimary = $true } }
