@@ -1,131 +1,48 @@
-﻿function Connect-NSNode {
-    [CmdletBinding(DefaultParameterSetName = 'Session')]
+﻿if (-not $script:NSACMETestedPoshACMEVersion) { $script:NSACMETestedPoshACMEVersion = [version]'4.31.0' }
+if (-not $script:NSACMEMinimumPoshACMEVersion) { $script:NSACMEMinimumPoshACMEVersion = [version]'4.31.0' }
+if (-not $script:NSACMEMaximumPoshACMEVersion) { $script:NSACMEMaximumPoshACMEVersion = [version]'4.999.999' }
+
+function Import-NSACMECertificatePoshACME {
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
-        [uri] $ManagementUrl,
-
-        [Parameter(Mandatory)]
-        [pscredential] $Credential,
-
-        [Parameter(ParameterSetName = 'Session')]
-        [switch] $UseSessionCookie,
-
-        [Parameter(ParameterSetName = 'NitroHeader')]
-        [switch] $UseNitroHeader,
-
-        [Parameter()]
-        [switch] $SkipCertificateCheck,
-
-        [Parameter()]
-        [switch] $HA,
-
-        [Parameter(DontShow)]
-        [switch] $SuppressHAWarning,
-
-        [Parameter()]
-        [switch] $PassThru
+        [Switch]$SkipInstall
     )
 
-    $session = [pscustomobject] @{
-        PSTypeName = 'NetScalerToolkit.NSSession'
-        ManagementUrl = $ManagementUrl.AbsoluteUri.TrimEnd('/')
-        Version = $null
-        ApplianceVersion = $null
-        VersionText = $null
-        VersionRaw = $null
-        VersionInfo = $null
-        MetadataVersion = $null
-        SupportedMetadataVersions = @('13.1', '14.1')
-        MetadataVersionWarningKey = $null
-        NitroApiVersion = 'v1'
-        HAInfo = $null
-        IsHA = $false
-        IsStandalone = $false
-        ConnectedNodeIP = $null
-        ConnectedNodeState = $null
-        IsPrimary = $false
-        IsSecondary = $false
-        PrimaryIP = $null
-        SecondaryIP = $null
-        PrimarySession = $null
-        SecondarySession = $null
-        AuthenticationMode = if ($UseNitroHeader) { 'NitroHeader' } else { 'SessionCookie' }
-        Credential = $Credential
-        WebSession = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
-        SkipCertificateCheck = [bool] $SkipCertificateCheck
-        DefaultHeaders = @{
-            Accept = 'application/json'
-            'Content-Type' = 'application/json'
-        }
-        LastResponse = $null
-    }
+    $availableModules = @(Get-Module -ListAvailable -Name Posh-ACME -ErrorAction SilentlyContinue | Sort-Object Version -Descending)
+    $compatibleModules = @($availableModules | Where-Object {
+            $_.Version -ge $script:NSACMEMinimumPoshACMEVersion -and
+            $_.Version -le $script:NSACMEMaximumPoshACMEVersion
+        })
 
-    if ($UseNitroHeader) {
-        $versionResult = Get-NSNodeVersionInfo -Session $session
-        $session.Version = $versionResult.Version
-        $session.ApplianceVersion = $versionResult.Version
-        $session.VersionText = $versionResult.VersionText
-        $session.VersionRaw = $versionResult.VersionRaw
-        $session.VersionInfo = $versionResult.VersionInfo
-        Resolve-NSMetadataVersion -Session $session -SupportedVersion $session.SupportedMetadataVersions | Out-Null
-        $haInfo = Get-NSHAInfo -Session $session
-        Set-NSHASessionInfo -Session $session -HAInfo $haInfo | Out-Null
-
-        if ($session.IsSecondary -and -not $HA -and -not $SuppressHAWarning) {
-            Write-Warning ('Connected to secondary NetScaler node {0}. Primary node is {1}. Reconnect with -HA to automatically use the primary session and attach the secondary session.' -f $session.ConnectedNodeIP, $session.PrimaryIP)
+    if (-not $compatibleModules) {
+        if ($SkipInstall) {
+            $installCommand = "Install-Module -Name Posh-ACME -RequiredVersion $script:NSACMETestedPoshACMEVersion -Scope CurrentUser"
+            throw "Posh-ACME $script:NSACMEMinimumPoshACMEVersion or newer compatible v4 is required. Automatic installation was disabled with -SkipPoshACMEInstall. Install it manually with: $installCommand"
         }
 
-        if ($HA) {
-            $session = Connect-NSHANodeSessions -Session $session -Credential $Credential -SkipCertificateCheck:$SkipCertificateCheck -UseNitroHeader:$UseNitroHeader
+        Write-NSACMECertificateLog Info 'ACME' "Installing Posh-ACME v$script:NSACMETestedPoshACMEVersion."
+        try {
+            Install-Module -Name Posh-ACME -RequiredVersion $script:NSACMETestedPoshACMEVersion -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+        } catch {
+            Write-NSACMECertificateLog Debug 'ACME' "Installing Posh-ACME with -AllowClobber failed: $($_.Exception.Message). Retrying without -AllowClobber."
+            Install-Module -Name Posh-ACME -RequiredVersion $script:NSACMETestedPoshACMEVersion -Scope CurrentUser -Force -ErrorAction Stop
         }
 
-        Set-NSSession -Session $session | Out-Null
-
-        if ($PassThru) {
-            return $session
-        }
-
+        Import-Module Posh-ACME -RequiredVersion $script:NSACMETestedPoshACMEVersion -ErrorAction Stop
+        Write-NSACMECertificateLog Info 'ACME' "Loaded Posh-ACME v$script:NSACMETestedPoshACMEVersion."
         return
     }
 
-    $loginPayload = @{
-        login = @{
-            username = $Credential.UserName
-            password = $Credential.GetNetworkCredential().Password
-        }
-    }
-
-    Invoke-NSRestRequest -Session $session -Method POST -NitroPath 'nitro/v1/config/login' -Payload $loginPayload -RawResponse | Out-Null
-    $versionResult = Get-NSNodeVersionInfo -Session $session
-    $session.Version = $versionResult.Version
-    $session.ApplianceVersion = $versionResult.Version
-    $session.VersionText = $versionResult.VersionText
-    $session.VersionRaw = $versionResult.VersionRaw
-    $session.VersionInfo = $versionResult.VersionInfo
-    Resolve-NSMetadataVersion -Session $session -SupportedVersion $session.SupportedMetadataVersions | Out-Null
-    $haInfo = Get-NSHAInfo -Session $session
-    Set-NSHASessionInfo -Session $session -HAInfo $haInfo | Out-Null
-
-    if ($session.IsSecondary -and -not $HA -and -not $SuppressHAWarning) {
-        Write-Warning ('Connected to secondary NetScaler node {0}. Primary node is {1}. Reconnect with -HA to automatically use the primary session and attach the secondary session.' -f $session.ConnectedNodeIP, $session.PrimaryIP)
-    }
-
-    if ($HA) {
-        $session = Connect-NSHANodeSessions -Session $session -Credential $Credential -SkipCertificateCheck:$SkipCertificateCheck -UseNitroHeader:$UseNitroHeader
-    }
-
-    Set-NSSession -Session $session | Out-Null
-
-    if ($PassThru) {
-        return $session
-    }
+    $selectedModule = $compatibleModules | Select-Object -First 1
+    Import-Module Posh-ACME -RequiredVersion $selectedModule.Version -ErrorAction Stop
+    Write-NSACMECertificateLog Info 'ACME' "Loaded Posh-ACME v$($selectedModule.Version)."
 }
 
 # SIG # Begin signature block
 # MIImdwYJKoZIhvcNAQcCoIImaDCCJmQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCkvXe6jUSuL10F
-# yR/PyFvrjHLyDYRdig1ehxtrnJt7FqCCIAowggYUMIID/KADAgECAhB6I67aU2mW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCNHFq6XK+zl/Dl
+# X0Y88OAps/zNXj/1y/7qagHELplUAaCCIAowggYUMIID/KADAgECAhB6I67aU2mW
 # D5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYDVQQK
 # Ew9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRpbWUg
 # U3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1OTU5
@@ -301,31 +218,31 @@
 # cnR1bSBDb2RlIFNpZ25pbmcgMjAyMSBDQQIQCDJPnbfakW9j5PKjPF5dUTANBglg
 # hkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3
 # DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEV
-# MC8GCSqGSIb3DQEJBDEiBCDBDoWNvlFGa7COQ+0sQYJyXyq7roL8IYc8HJ8DKzOQ
-# tzANBgkqhkiG9w0BAQEFAASCAYAlV1WALu+hLymGEn01U4bd2BMhEuttuMmJmp4c
-# +qDphqmdm5qDthhlcv5Q3lnnFa0KWZcyPAAc8P7iRJy8BSE/4q2wHd6dCyRUR1Ja
-# 1aj+tjVmDtYdi57LFrAgU1HQILfSS80L03ig2O5WM5IDzc474ab7Gu4wt81E067d
-# 4v9/PM17H3du2hZ2xa/RMhI5nnZ34mCaxUOiqNn5TjrpQ0DK7vQM3PB7M7mJ+dRP
-# Xh4RRakFp+zMHP0Q2k0DJj2w6Io+vMkgeKsUNGaKu3+MsUMG5MKXOwWEnYJ1+/a2
-# vnhTdB5l3Xh9msJX6dHYxknv3a+99o7P173xpu2FWENdGUrX6qkZgVPMTVT/D9n1
-# ZAiD0/S/ciSY1u/My0b/Gtc+Ko6WNAlazTPYX9XVdZQU83g3tgZW9v8GabTbO5OJ
-# 3sxUIjo46lwPYdUESDW97pX35nmD5jYu7s9GkteiSLwMbUyilHFEW1LgmrQMUZqb
-# ho/Jze7MbLcnyVBx2WEJu+5bg/KhggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
+# MC8GCSqGSIb3DQEJBDEiBCD75jaApb3HcFB5I0Uao/RzSjlcTPdAsVqn9q+WFgUw
+# PDANBgkqhkiG9w0BAQEFAASCAYBORO2e4U3lgKZZQI3QU3/64G81LKu27VU6h+vP
+# imJKguKwfclBa5qG/PnY3xqLJkt+a3vuSD5gbTK/FzdddhzQ3liEetI7bUkNo9BH
+# GXLrX/Ome6fwrTZNjmxc/8AQgtfFNfyLfgiJPtsq+i3nIScWmfjrO/5Ed19n9g3L
+# 8cGKZYRRRrwRVA552FMAQi375ULe0gIVzClt8xSy2Bxr6hl41vhfpIHZo1/FTbLX
+# CbsvnU3+aXPnPFmWPueMS21JePyLHpe5OABFrJDvT90CqphirNS6OmKaDH0MOynB
+# xAWBOPTqWbd91kSBMWmz95qAOZGT3P5Eb1jQbJNxrgY2KQsB6beALJ0+gZ2Kri2U
+# O4KYMY0Clkn4lFe9GGR6FZvGqoHiYLF1UmLkp/X7JG7tYfdzVz+yDbBM1vE7O5WV
+# A75YTZlKBGv3T6OBUZbsMlGica/Y1M2FSxy/6Kusr1f8E09crllNnFxNg7f2yJtm
+# tP3Di7/nycmcfFBPqz2364b6CWChggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
 # AQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
 # KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNgIRAKQp
 # O24e3denNAiHrXpOtyQwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG9w0BCQMxCwYJ
-# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDQxODUwMTdaMD8GCSqGSIb3
-# DQEJBDEyBDCQh5WN97FfxTT0kNlAjivu7BlpNIHcp0D3peCdoCfxPSf2iy04P1+j
-# vMTbuthSkRswDQYJKoZIhvcNAQEBBQAEggIAQKICOOD2Dd5MDcXi1e9Y2yWuD+yk
-# MvTDl69rQXN3AXzJEOVV9EBU8pFLkURc4yObbHLJwAnwWUB0geSk5ycHRYynzJVz
-# HcubnDagClKJDdHW8ORYGlZuvtgvYqwiFTQGa4Jtbybpezgs8XATAZx0knAJqhas
-# AMlQMB/V5qKceybntX+4SnQO9W92oqKlbjSII+Nhf3Fafx8rCQ8POPMTVwAwMZcv
-# jHqttjIFVSlOfvDcNMgeJNRwQyjzLvyRKr8IlRIvWdgNAdGDeHUzEg5VcLlB/fDI
-# B+aIQ6hS1812LyG8rzKextvvD6n1jtp1zJquN5I5CB9yEMNFWIrmFsmvS7/nCvVW
-# SIV7r2vKH1TP3F+c/zdLVNHwlbrxTuydVDOXcuBxVul/I9f/uHfuRdBxnRN8QUGE
-# 6u2fZUb3TRmjMoWVdLEbapYD20PM5mzDC+7CmmRQgVoqKbfAV6sBlSssAhFZV8qU
-# T8OSB4UWYBTOtsJfIms7AppqCqb4wEGT1o9hqTGG/O/FqzMbwqxIJdJuNbHZuYmq
-# c+sm/x+7JwQyCrkRHJHXZ0bF7RVudr6Eyw5OSrLyDxzxMb/WMlhKJEAgwK0b9bYL
-# 1WW5+zjpyLraiAq8wd6I1KMmpSqhC5DbTnjdJBX1TVrGzs5mAZrvBYNZDOaPck5W
-# DRmj/2J3IgA9MlY=
+# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDQxODQ4NTZaMD8GCSqGSIb3
+# DQEJBDEyBDDClETJ0F3Iit8ri8qSUcahW8l9TaIoeMB3zbn9jz4Cj2ix6lO2XL8W
+# H/Y1AJ+ec44wDQYJKoZIhvcNAQEBBQAEggIAG6eXydDUMwQj9GAc/bblTwNRbluo
+# Hx+/nmhaSclUfQpr0+RlopT9xgLK/AXFAucmfFu0HMP8jUya8eIZK9DksidCAiga
+# fbWTfQ/25XWZ84LsJPqRehlvwhrH/UGQj6Y83uPcLT95alL5CR4IiaQKfY2Mn/jj
+# L8Q4OkbHpIn6UXNlgh91I06L6qW6meYY7hud6wblM3w6/BP1rA+UhPq5FurfjkrN
+# Wtu2IMSVmc4YaRr+u0/YuBECRK2ltWiwJMuOsDR5jv58mRalnV4Cd61JGTZ49uxi
+# U7rSUrVUo6hDn2Hh9+ZnBTxGOTC/0C5sdhuvwWhxeNSINQDI47Xy1LAA9q7TKFXN
+# 5Q+PDtIhe+qNcrCZcGY8DiAJHxGpvtW69thndl5Yc5Kda83ZjcHlSSkiDu4Kzgtd
+# Va2WrqPlv/6nJ2H4xCWu8gUtxDov3F57Jz8W2hwz46eoxPnTVhBZoixorGPvh7eU
+# RxrfwHS/Wfr6UDQsMJgIFI3qL3yaXnhK2lKPaOQb52Mjp71y1xxnqZUzfesbd9Y0
+# PQ5A59PxiQ9+BjYOAfBVVvUVAwHKHKz2ZuSDZ9XwdIbMnj88r7ZYNau+8FNBbmd1
+# FzYNpV5t++JsgdjHCTkfRpnoMo7oB4vbhA/EMCK+CBLx3LOnv0FF+T+reRO/kQaJ
+# IYO3vGrZgJB1lZc=
 # SIG # End signature block

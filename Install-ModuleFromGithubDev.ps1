@@ -2,6 +2,8 @@ $ModuleName = 'NetScalerToolkit'
 $RemoteBranch = 'dev'
 $GitHubOwner = 'j81blog'
 
+$ProgressPreference = 'SilentlyContinue'
+
 if ($PSVersionTable.PSEdition -eq 'Desktop') {
     $installPath = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPowerShell\Modules'
 } elseif ($IsWindows) {
