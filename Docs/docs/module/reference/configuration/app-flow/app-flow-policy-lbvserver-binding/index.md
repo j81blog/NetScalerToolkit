@@ -1,0 +1,8 @@
+﻿# AppFlowPolicyLBVServerBinding
+
+Module area: **Configuration**
+Feature area: **App Flow**
+
+| Action | Command |
+| --- | --- |
+| Get | [Invoke-NSGetAppFlowPolicyLBVServerBinding](get.md) |

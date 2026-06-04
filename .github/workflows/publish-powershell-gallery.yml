@@ -1,0 +1,118 @@
+name: Publish PowerShell Gallery
+
+on:
+  pull_request:
+    branches:
+      - '**'
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish when this branch is eligible. main publishes to PSGallery; dev publishes to Posh Test Gallery."
+        required: true
+        default: false
+        type: boolean
+      dry_run_publish:
+        description: "Run Publish-Module with -WhatIf instead of publishing."
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  MODULE_NAME: NetScalerToolkit
+  MODULE_ROOT: NetScalerToolkit
+  PACKAGE_ROOT: artifacts
+  PACKAGE_PATH: artifacts/NetScalerToolkit
+
+jobs:
+  validate-package-publish:
+    name: Validate, package, and optionally publish
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Show PowerShell versions
+        shell: pwsh
+        run: |
+          $PSVersionTable
+          powershell.exe -NoProfile -NoLogo -Command '$PSVersionTable'
+
+      - name: Install validation tools
+        shell: pwsh
+        run: .\.github\scripts\Install-NSToolkitCIPrerequisites.ps1
+
+      - name: Validate module
+        shell: pwsh
+        run: |
+          .\.github\scripts\Test-NSToolkitCIModule.ps1 `
+            -ModuleName $env:MODULE_NAME `
+            -ModuleRoot $env:MODULE_ROOT `
+            -TestsPath Tests
+
+      - name: Build clean package folder
+        shell: pwsh
+        run: |
+          .\.github\scripts\New-NSToolkitCIPackage.ps1 `
+            -ModuleName $env:MODULE_NAME `
+            -ModuleRoot $env:MODULE_ROOT `
+            -PackageRoot $env:PACKAGE_ROOT
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: NetScalerToolkit-package
+          path: |
+            artifacts/NetScalerToolkit
+            artifacts/package-file-list.txt
+
+      - name: Resolve publish target
+        id: publish_target
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: pwsh
+        run: |
+          .\.github\scripts\Resolve-NSToolkitCIPublishTarget.ps1 `
+            -GitHubRepository '${{ github.repository }}' `
+            -GitHubRef '${{ github.ref }}' `
+            -PublishRequested '${{ inputs.publish }}' `
+            -DryRunRequested '${{ inputs.dry_run_publish }}'
+
+      - name: Publish to PowerShell Gallery
+        if: ${{ steps.publish_target.outputs.repository == 'PSGallery' }}
+        shell: pwsh
+        env:
+          PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
+        run: |
+          .\.github\scripts\Publish-NSToolkitCIPackage.ps1 `
+            -ModuleName $env:MODULE_NAME `
+            -PackagePath $env:PACKAGE_PATH `
+            -Repository PSGallery `
+            -ApiKey $env:PSGALLERY_API_KEY `
+            -DryRun:([System.Convert]::ToBoolean('${{ steps.publish_target.outputs.dry_run }}'))
+
+      - name: Publish to Posh Test Gallery
+        if: ${{ steps.publish_target.outputs.repository == 'PSTestGallery' }}
+        shell: pwsh
+        env:
+          PSTESTGALLERY_API_KEY: ${{ secrets.PSTESTGALLERY_API_KEY }}
+        run: |
+          .\.github\scripts\Publish-NSToolkitCIPackage.ps1 `
+            -ModuleName $env:MODULE_NAME `
+            -PackagePath $env:PACKAGE_PATH `
+            -Repository PSTestGallery `
+            -ApiKey $env:PSTESTGALLERY_API_KEY `
+            -DryRun:([System.Convert]::ToBoolean('${{ steps.publish_target.outputs.dry_run }}'))
+
+      - name: Publish skipped
+        if: ${{ steps.publish_target.outputs.publish == 'true' && steps.publish_target.outputs.repository == 'None' }}
+        shell: pwsh
+        run: |
+          Write-Host '${{ steps.publish_target.outputs.reason }}'
+          Write-Host "PSGallery publishing is allowed only from refs/heads/main."
+          Write-Host "Posh Test Gallery publishing is allowed only from refs/heads/dev."

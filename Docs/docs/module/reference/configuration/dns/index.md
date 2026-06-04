@@ -1,0 +1,50 @@
+﻿# DNS
+
+Domain Name Service(DNS) configuration.
+
+| Resource | Commands |
+| --- | ---: |
+| [DNSAAAARecord](dnsaaaarecord/index.md) | 3 |
+| [DNSAction](dnsaction/index.md) | 5 |
+| [DNSAction64](dnsaction64/index.md) | 5 |
+| [DNSAddRecord](dnsadd-record/index.md) | 3 |
+| [DNSCAARecord](dnscaarecord/index.md) | 3 |
+| [DNSCNameRecord](dnscname-record/index.md) | 3 |
+| [DNSDsFile](dnsds-file/index.md) | 1 |
+| [DNSGlobalBinding](dnsglobal-binding/index.md) | 1 |
+| [DNSGlobalDNSPolicyBinding](dnsglobal-dnspolicy-binding/index.md) | 3 |
+| [DNSKey](dnskey/index.md) | 5 |
+| [DNSMXRecord](dnsmxrecord/index.md) | 5 |
+| [DNSNameServer](dnsname-server/index.md) | 7 |
+| [DNSNAPTRRecord](dnsnaptrrecord/index.md) | 3 |
+| [DNSNegativecacheRecordS](dnsnegativecache-record-s/index.md) | 1 |
+| [DNSNSECRecord](dnsnsecrecord/index.md) | 1 |
+| [DNSNSRecord](dnsnsrecord/index.md) | 3 |
+| [DNSParameter](dnsparameter/index.md) | 3 |
+| [DNSPolicy](dnspolicy/index.md) | 5 |
+| [DNSPolicy64](dnspolicy64/index.md) | 4 |
+| [DNSPolicy64Binding](dnspolicy64-binding/index.md) | 1 |
+| [DNSPolicy64LBVServerBinding](dnspolicy64-lbvserver-binding/index.md) | 1 |
+| [DNSPolicyBinding](dnspolicy-binding/index.md) | 1 |
+| [DNSPolicyDNSGlobalBinding](dnspolicy-dnsglobal-binding/index.md) | 1 |
+| [DNSPolicyDNSPolicyLabelBinding](dnspolicy-dnspolicy-label-binding/index.md) | 1 |
+| [DNSPolicyLabel](dnspolicy-label/index.md) | 4 |
+| [DNSPolicyLabelBinding](dnspolicy-label-binding/index.md) | 1 |
+| [DNSPolicyLabelDNSPolicyBinding](dnspolicy-label-dnspolicy-binding/index.md) | 3 |
+| [DNSPolicyLabelPolicyBindingBinding](dnspolicy-label-policy-binding-binding/index.md) | 1 |
+| [DNSProfile](dnsprofile/index.md) | 5 |
+| [DNSPTRRecord](dnsptrrecord/index.md) | 3 |
+| [DNSResolverentry](dnsresolverentry/index.md) | 1 |
+| [DNSSOARecord](dnssoarecord/index.md) | 5 |
+| [DNSSRVRecord](dnssrvrecord/index.md) | 5 |
+| [DNSSubnetCache](dnssubnet-cache/index.md) | 1 |
+| [DNSSuffix](dnssuffix/index.md) | 3 |
+| [DNSTXTRecord](dnstxtrecord/index.md) | 3 |
+| [DNSView](dnsview/index.md) | 3 |
+| [DNSViewBinding](dnsview-binding/index.md) | 1 |
+| [DNSViewDNSPolicyBinding](dnsview-dnspolicy-binding/index.md) | 1 |
+| [DNSViewGSLBServiceBinding](dnsview-gslbservice-binding/index.md) | 1 |
+| [DNSZone](dnszone/index.md) | 5 |
+| [DNSZoneBinding](dnszone-binding/index.md) | 1 |
+| [DNSZoneDNSKeyBinding](dnszone-dnskey-binding/index.md) | 1 |
+| [DNSZoneDomainBinding](dnszone-domain-binding/index.md) | 1 |

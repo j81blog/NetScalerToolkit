@@ -1,0 +1,8 @@
+﻿# NSKillAAASession
+
+Module area: **Configuration**
+Feature area: **NS**
+
+| Action | Command |
+| --- | --- |
+| Workflow | [Invoke-NSKillAAASession](workflow.md) |
