@@ -7,6 +7,9 @@ param(
     [string] $GitHubRef,
 
     [Parameter()]
+    [string] $GitHubEventName,
+
+    [Parameter()]
     [string] $PublishRequested,
 
     [Parameter()]
@@ -29,6 +32,10 @@ function ConvertTo-Bool {
 }
 
 $publish = ConvertTo-Bool -Value $PublishRequested
+if ($GitHubEventName -eq 'push') {
+    $publish = $true
+}
+
 $dryRun = ConvertTo-Bool -Value $DryRunRequested
 $repository = 'None'
 $reason = 'Publish was not requested.'
