@@ -47,4 +47,4 @@ Scheduled and repeated requests do not rely only on a static `RenewAfter` value.
 
 The repository includes a `GenLeCertForNS.ps1` wrapper script. Existing scheduled tasks, batch files, and command lines that call the old script name can continue to call that wrapper while the implementation runs through `Request-NSACMECertificate`.
 
-You can download a copy of the wrapper script here: [GenLeCertForNS.ps1](https://raw.githubusercontent.com/j81blog/NetScalerToolkit/refs/heads/master/GenLeCertForNS.ps1)
+You can download a copy of the wrapper script here: [GenLeCertForNS.ps1](https://raw.githubusercontent.com/j81blog/NetScalerToolkit/refs/heads/main/GenLeCertForNS.ps1)
