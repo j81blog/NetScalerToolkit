@@ -11,9 +11,6 @@ param(
     [string] $Repository,
 
     [Parameter()]
-    [string] $RepositorySourceLocation,
-
-    [Parameter()]
     [string] $ApiKey,
 
     [Parameter()]
@@ -23,12 +20,21 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if ($Repository -eq 'PSTestGallery') {
-    if ([string]::IsNullOrWhiteSpace($RepositorySourceLocation)) {
-        $RepositorySourceLocation = 'https://www.poshtestgallery.com/api/v2/'
-    }
+    $repositorySourceLocation = 'https://www.poshtestgallery.com/api/v2'
+    $repositoryPublishLocation = 'https://www.poshtestgallery.com/api/v2/package/'
+    $scriptSourceLocation = 'https://www.poshtestgallery.com/api/v2/items/psscript'
+    $scriptPublishLocation = 'https://www.poshtestgallery.com/api/v2/package/'
+
+    Write-Host "Using Posh Test Gallery endpoint: $repositorySourceLocation"
 
     if (-not (Get-PSRepository -Name PSTestGallery -ErrorAction SilentlyContinue)) {
-        Register-PSRepository -Name PSTestGallery -SourceLocation $RepositorySourceLocation -PublishLocation $RepositorySourceLocation -InstallationPolicy Trusted
+        Register-PSRepository `
+            -Name PSTestGallery `
+            -SourceLocation $repositorySourceLocation `
+            -PublishLocation $repositoryPublishLocation `
+            -ScriptSourceLocation $scriptSourceLocation `
+            -ScriptPublishLocation $scriptPublishLocation `
+            -InstallationPolicy Trusted
     }
 }
 

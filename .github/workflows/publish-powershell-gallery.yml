@@ -9,16 +9,8 @@ on:
       - '**'
   workflow_dispatch:
     inputs:
-      module_version:
-        description: "Optional module version to stamp into all manifests before packaging, for example 2026.601.2215."
-        required: false
-        type: string
-      prerelease:
-        description: "Optional prerelease label for PrivateData.PSData.Prerelease, for example preview1. Leave empty for stable."
-        required: false
-        type: string
       publish:
-        description: "Publish when this repo/branch is eligible. Main publishes to PSGallery; the configured dev repo publishes to PSTestGallery."
+        description: "Publish when this branch is eligible. main publishes to PSGallery; dev publishes to Posh Test Gallery."
         required: true
         default: false
         type: boolean
@@ -36,8 +28,6 @@ env:
   MODULE_ROOT: NetScalerToolkit
   PACKAGE_ROOT: artifacts
   PACKAGE_PATH: artifacts/NetScalerToolkit
-  DEV_REPOSITORY: ${{ vars.NSTOOLKIT_DEV_REPOSITORY }}
-  PSTESTGALLERY_URL: ${{ vars.PSTESTGALLERY_URL }}
 
 jobs:
   validate-package-publish:
@@ -46,9 +36,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
-      - name: Show PowerShell versions2026.604.1545
+      - name: Show PowerShell versions
         shell: pwsh
         run: |
           $PSVersionTable
@@ -57,15 +47,6 @@ jobs:
       - name: Install validation tools
         shell: pwsh
         run: .\.github\scripts\Install-NSToolkitCIPrerequisites.ps1
-
-      - name: Stamp module metadata
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        shell: pwsh
-        run: |
-          .\.github\scripts\Set-NSToolkitCIModuleMetadata.ps1 `
-            -ModuleRoot $env:MODULE_ROOT `
-            -ModuleVersion '${{ inputs.module_version }}' `
-            -Prerelease '${{ inputs.prerelease }}'
 
       - name: Validate module
         shell: pwsh
@@ -84,7 +65,7 @@ jobs:
             -PackageRoot $env:PACKAGE_ROOT
 
       - name: Upload package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: NetScalerToolkit-package
           path: |
@@ -99,7 +80,6 @@ jobs:
           .\.github\scripts\Resolve-NSToolkitCIPublishTarget.ps1 `
             -GitHubRepository '${{ github.repository }}' `
             -GitHubRef '${{ github.ref }}' `
-            -DevRepository $env:DEV_REPOSITORY `
             -PublishRequested '${{ inputs.publish }}' `
             -DryRunRequested '${{ inputs.dry_run_publish }}'
 
@@ -116,7 +96,7 @@ jobs:
             -ApiKey $env:PSGALLERY_API_KEY `
             -DryRun:([System.Convert]::ToBoolean('${{ steps.publish_target.outputs.dry_run }}'))
 
-      - name: Publish to PowerShell Test Gallery
+      - name: Publish to Posh Test Gallery
         if: ${{ steps.publish_target.outputs.repository == 'PSTestGallery' }}
         shell: pwsh
         env:
@@ -126,7 +106,6 @@ jobs:
             -ModuleName $env:MODULE_NAME `
             -PackagePath $env:PACKAGE_PATH `
             -Repository PSTestGallery `
-            -RepositorySourceLocation $env:PSTESTGALLERY_URL `
             -ApiKey $env:PSTESTGALLERY_API_KEY `
             -DryRun:([System.Convert]::ToBoolean('${{ steps.publish_target.outputs.dry_run }}'))
 
@@ -135,5 +114,5 @@ jobs:
         shell: pwsh
         run: |
           Write-Host '${{ steps.publish_target.outputs.reason }}'
-          Write-Host "PSGallery publishing is allowed only from refs/heads/main unless this is the configured dev repository."
-          Write-Host "PSTestGallery publishing is allowed only from the repository configured in variable NSTOOLKIT_DEV_REPOSITORY."
+          Write-Host "PSGallery publishing is allowed only from refs/heads/main."
+          Write-Host "Posh Test Gallery publishing is allowed only from refs/heads/dev."

@@ -7,9 +7,6 @@ param(
     [string] $GitHubRef,
 
     [Parameter()]
-    [string] $DevRepository,
-
-    [Parameter()]
     [string] $PublishRequested,
 
     [Parameter()]
@@ -37,14 +34,14 @@ $repository = 'None'
 $reason = 'Publish was not requested.'
 
 if ($publish) {
-    if (-not [string]::IsNullOrWhiteSpace($DevRepository) -and $GitHubRepository -ieq $DevRepository) {
-        $repository = 'PSTestGallery'
-        $reason = "Repository '$GitHubRepository' matches dev repository '$DevRepository'."
-    } elseif ($GitHubRef -eq 'refs/heads/main') {
+    if ($GitHubRef -eq 'refs/heads/main') {
         $repository = 'PSGallery'
         $reason = "Ref '$GitHubRef' is allowed to publish to PSGallery."
+    } elseif ($GitHubRef -eq 'refs/heads/dev') {
+        $repository = 'PSTestGallery'
+        $reason = "Ref '$GitHubRef' is allowed to publish to Posh Test Gallery."
     } else {
-        $reason = "Repository '$GitHubRepository' and ref '$GitHubRef' are not eligible for publishing."
+        $reason = "Ref '$GitHubRef' is not eligible for publishing."
     }
 }
 
