@@ -2,6 +2,8 @@
 
 The repository includes `GenLeCertForNS.ps1` as a compatibility wrapper for existing scheduled tasks and batch files.
 
+You can download a copy of the wrapper script here: [GenLeCertForNS.ps1](https://raw.githubusercontent.com/j81blog/NetScalerToolkit/refs/heads/main/GenLeCertForNS.ps1)
+
 The wrapper imports NetScalerToolkit and forwards all arguments to `Request-NSACMECertificate`. This means legacy command lines can keep using the old script name while new automation can call the module command directly.
 
 ## Existing Command Line
