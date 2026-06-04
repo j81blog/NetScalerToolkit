@@ -24,6 +24,9 @@
     to install the latest PowerShell Gallery version before forwarding to
     Request-NSACMECertificate.
 
+    Pass -SkipPoshACMEInstall to forward that opt-out switch to
+    Request-NSACMECertificate and disable automatic Posh-ACME installation.
+
 .EXAMPLE
     .\GenLeCertForNS.ps1 -CN example.com -CertDir C:\Certificates -NSManagementURL https://adc.example.com -NSUsername nsroot -NSPassword nsroot
 
@@ -64,12 +67,20 @@ function Install-LatestNetScalerToolkit {
 
     $availableVersion = $null
     $findModuleCommand = Get-Command -Name Find-Module -ErrorAction SilentlyContinue
-    if ($findModuleCommand) {
-        $available = Find-Module -Name NetScalerToolkit -Repository PSGallery -ErrorAction Stop
+    if ($findModuleCommand.Version -lt [Version]'2.2') {
+        Write-Warning "PowerShellGet 2.2 or higher is not available. Consider updating PowerShellGet to version 2.2 or later."
+        Write-warning "Install using: Install-Module PowerShellGet -Force -AllowClobber"
+        exit 1
+    } elseif ($findModuleCommand) {
+        $available = Find-Module -Name NetScalerToolkit -Repository PSGallery -AllowPrerelease -ErrorAction Stop
         if ($available) { $availableVersion = [string]$available.Version }
+    } else {
+        Write-Warning "Find-Module is not available. Cannot check for the latest NetScalerToolkit version in PSGallery. Consider updating PowerShellGet to version 2.2 or later."
+        Write-Warning "Install using: Install-Module PowerShellGet -Force -AllowClobber"
+        exit 1
     }
 
-    Install-Module -Name NetScalerToolkit -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+    Install-Module -Name NetScalerToolkit -Scope CurrentUser -Force -AllowClobber -AllowPrerelease -ErrorAction Stop
     [PSCustomObject]@{
         ModuleName       = 'NetScalerToolkit'
         AvailableVersion = $availableVersion
