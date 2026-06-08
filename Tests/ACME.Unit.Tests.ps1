@@ -266,6 +266,37 @@ Describe 'ACME helper functions' {
                 } | Should -Throw -ExpectedMessage "*does not have a configured staging environment*"
             }
 
+            It 'logs feature enable warning details and continues HTTP initialization when feature enable fails' {
+                Mock Invoke-NSEnableNsFeature { throw 'feature operation failed' }
+                Mock Write-NSACMECertificateLog {}
+                Mock Invoke-NSGetService { [pscustomobject]@{ name = 'svc_letsencrypt_cert_dummy' } }
+                Mock Invoke-NSGetLBVServer { [pscustomobject]@{ name = 'lb_letsencrypt_cert' } }
+                Mock Invoke-NSGetLBVServerServiceBinding { @() }
+                Mock Invoke-NSAddLBVServerServiceBinding {}
+
+                $request = [pscustomobject]@{
+                    UseLbVip = $true
+                }
+                $settings = [pscustomobject]@{
+                    SvcName        = 'svc_letsencrypt_cert_dummy'
+                    SvcDestination = '127.0.0.1'
+                    LbName         = 'lb_letsencrypt_cert'
+                    TrafficDomain  = 0
+                    CsVipBinding   = 100
+                    CsaName        = 'csa_letsencrypt'
+                    CspName        = 'csp_letsencrypt'
+                }
+
+                { Initialize-NSACMECertificateHttpValidationConfig -Session ([pscustomobject]@{}) -Settings $settings -Request $request } | Should -Not -Throw
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -ParameterFilter {
+                    $Level -eq 'Warning' -and
+                    $Component -eq 'NetScaler' -and
+                    $Message -like 'Could not enable one or more required NetScaler features*' -and
+                    $Data.Features -eq 'RESPONDER,SSL' -and
+                    $Data.Error -like '*feature operation failed*'
+                }
+            }
+
         }
 
         Context 'ACME logging' {
@@ -546,6 +577,48 @@ Describe 'ACME helper functions' {
                     $script:AddedCertKeys.Count | Should -Be 2
                     $script:Links[0] | Should -Be "leaf-cert->$($result[0].CertKeyName)"
                     $script:Links[1] | Should -Be "$($result[0].CertKeyName)->$($result[1].CertKeyName)"
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            It 'uploads the PFX with a certkey and expiry timestamp filename instead of fullchain.pfx' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    $pfxPath = Join-Path $dir 'fullchain.pfx'
+                    Set-Content -LiteralPath $pfxPath -Value 'unit-test-pfx' -Encoding ASCII
+                    $request = [pscustomobject]@{
+                        CN                  = 'leaf.example.com'
+                        CertKeyNameToUpdate = 'custom-cert-key'
+                    }
+                    $settings = [pscustomobject]@{
+                        SaveADCConfig = $false
+                    }
+                    $certificate = [pscustomobject]@{
+                        PfxFullChain = $pfxPath
+                        NotAfter     = [datetime]'2027-01-02T03:04:00'
+                    }
+
+                    Mock ConvertFrom-NSACMECertificateLegacySecret { 'pfx-pass' }
+                    Mock Test-NSACMECertificateChainValidation {}
+                    Mock Copy-NSACMECertificateNetScalerFile { $script:UploadedFiles += $FileName }
+                    Mock Invoke-NSGetSSLCertKey { $null }
+                    Mock Invoke-NSAddSSLCertKey {}
+                    Mock Invoke-NSUpdateSSLCertKey {}
+                    Mock Set-NSACMECertificateChainLink { @() }
+
+                    $result = Install-NSACMECertificateNetScalerCertificate `
+                        -Session ([pscustomobject]@{}) `
+                        -Settings $settings `
+                        -Request $request `
+                        -Certificate $certificate `
+                        -PfxSecret (ConvertTo-SecureString 'pfx-pass' -AsPlainText -Force) `
+                        -IsProduction
+
+                    $script:UploadedFiles.Count | Should -Be 1
+                    $script:UploadedFiles[0] | Should -Be 'custom-cert-key-202701020304.pfx'
+                    $result.PfxFileName | Should -Be 'custom-cert-key-202701020304.pfx'
                 } finally {
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                 }

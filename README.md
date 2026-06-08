@@ -103,6 +103,8 @@ Invoke-NSAddLBVServer @lbParams
 ## Certificate Automation
 
 `Request-NSACMECertificate` automates ACME certificate requests and NetScaler deployment workflows. The module supports DNS-01 through Posh-ACME plugins, HTTP-01 validation, PFX deployment, certificate replacement, and generated JSON configuration files.
+During deployment the uploaded PFX filename now follows the NetScaler certkey name with certificate expiry timestamp (for example `my-certkey-202701020304.pfx`) instead of a generic `fullchain.pfx`.
+When the provided chain misses a trust anchor, issuer completion checks local certificate stores for a currently valid issuer certificate and reuses an in-memory cache per PowerShell session to avoid repeated store scans.
 
 Start with the certificate section on the documentation site for the supported scenarios and examples.
 
