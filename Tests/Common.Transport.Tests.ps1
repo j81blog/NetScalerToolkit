@@ -217,5 +217,56 @@ Describe 'Common NITRO transport' {
             { Assert-NSParameterValue -ParameterName Feature -Value @('LB', 'RESPONDER') -AllowedValuesByVersion @{ '14.1' = @('LB', 'RESPONDER', 'CS') } -MetadataVersion '14.1' } | Should -Not -Throw
             { Assert-NSParameterValue -ParameterName Feature -Value @('LB', 'UNKNOWN') -AllowedValuesByVersion @{ '14.1' = @('LB', 'RESPONDER', 'CS') } -MetadataVersion '14.1' } | Should -Throw -ExpectedMessage '*UNKNOWN*'
         }
+
+        It 'continues when HA secondary session attachment fails' {
+            Mock Connect-NSNode {
+                throw 'Unable to connect to secondary node.'
+            } -ParameterFilter {
+                $ManagementUrl -like 'https://10.0.0.2/*'
+            }
+            Mock Write-Warning {}
+
+            $credential = [pscredential]::new('nsroot', (ConvertTo-SecureString 'unit-test' -AsPlainText -Force))
+            $session = [pscustomobject] @{
+                ManagementUrl = 'https://lb.example.test/'
+                IsHA = $true
+                IsSecondary = $false
+                ConnectedNodeIP = '10.0.0.1'
+                PrimaryIP = '10.0.0.1'
+                SecondaryIP = '10.0.0.2'
+                PrimarySession = $null
+                SecondarySession = $null
+                HAInfo = [pscustomobject] @{
+                    PrimaryNode = [pscustomobject] @{ id = 0; state = 'PRIMARY' }
+                    SecondaryNode = [pscustomobject] @{ id = 1; state = 'SECONDARY' }
+                }
+            }
+
+            $result = Connect-NSHANodeSessions -Session $session -Credential $credential
+
+            $result.PrimarySession | Should -Not -BeNullOrEmpty
+            $result.SecondarySession | Should -BeNullOrEmpty
+            Should -Invoke Write-Warning -Times 1 -ParameterFilter { $Message -like 'Unable to attach secondary HA session*' }
+        }
+
+        It 'throws when connected to secondary and failover to primary cannot be established' {
+            Mock Connect-NSNode {
+                throw 'Primary node is unreachable.'
+            } -ParameterFilter {
+                $ManagementUrl -like 'https://10.0.0.1/*'
+            }
+
+            $credential = [pscredential]::new('nsroot', (ConvertTo-SecureString 'unit-test' -AsPlainText -Force))
+            $session = [pscustomobject] @{
+                ManagementUrl = 'https://10.0.0.2/'
+                IsHA = $true
+                IsSecondary = $true
+                ConnectedNodeIP = '10.0.0.2'
+                PrimaryIP = '10.0.0.1'
+                SecondaryIP = '10.0.0.2'
+            }
+
+            { Connect-NSHANodeSessions -Session $session -Credential $credential } | Should -Throw -ExpectedMessage '*Primary node is unreachable*'
+        }
     }
 }
