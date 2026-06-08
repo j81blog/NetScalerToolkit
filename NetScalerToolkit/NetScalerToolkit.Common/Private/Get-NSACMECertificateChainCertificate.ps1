@@ -45,6 +45,140 @@
         return $certificates
     }
 
+    function Get-NSACMECertificateLeafCertificate {
+        param(
+            [Parameter(Mandatory)]
+            [object]$InputCertificate
+        )
+
+        if ($InputCertificate.CertFile) {
+            $leafFromCertFile = @(Read-NSACMECertificatePemFile -Path $InputCertificate.CertFile | Select-Object -First 1)
+            if ($leafFromCertFile.Count -gt 0) {
+                return $leafFromCertFile[0]
+            }
+        }
+
+        if ($InputCertificate.FullChainFile) {
+            $fullChain = @(Read-NSACMECertificatePemFile -Path $InputCertificate.FullChainFile)
+            if ($fullChain.Count -gt 0) {
+                if ($InputCertificate.Thumbprint) {
+                    $leafByThumbprint = @($fullChain | Where-Object { $_.Thumbprint -eq $InputCertificate.Thumbprint } | Select-Object -First 1)
+                    if ($leafByThumbprint.Count -gt 0) {
+                        return $leafByThumbprint[0]
+                    }
+                }
+
+                return $fullChain[0]
+            }
+        }
+
+        return $null
+    }
+
+    function Get-NSACMECertificateIssuerPath {
+        param(
+            [Parameter(Mandatory)]
+            [System.Security.Cryptography.X509Certificates.X509Certificate2]$LeafCertificate,
+
+            [Parameter(Mandatory)]
+            [System.Security.Cryptography.X509Certificates.X509Certificate2[]]$ChainCertificates
+        )
+
+        $orderedPath = @()
+        $remaining = @($ChainCertificates)
+        $expectedIssuer = $LeafCertificate.Issuer
+
+        while (-not [string]::IsNullOrWhiteSpace($expectedIssuer)) {
+            $nextCertificate = @($remaining | Where-Object { $_.Subject -eq $expectedIssuer } | Select-Object -First 1)
+            if ($nextCertificate.Count -eq 0) { break }
+
+            $orderedPath += $nextCertificate[0]
+            $remaining = @($remaining | Where-Object { $_.Thumbprint -ne $nextCertificate[0].Thumbprint })
+
+            if ($nextCertificate[0].Subject -eq $nextCertificate[0].Issuer) { break }
+            $expectedIssuer = $nextCertificate[0].Issuer
+        }
+
+        return @($orderedPath)
+    }
+
+    function Get-NSACMECertificateStoreIssuerCertificate {
+        param(
+            [Parameter(Mandatory)]
+            [string]$IssuerSubject,
+
+            [string[]]$ExcludeThumbprints = @()
+        )
+
+        if ($null -eq $script:NSACMECertificateIssuerStoreCache) {
+            $script:NSACMECertificateIssuerStoreCache = @{}
+        }
+
+        function Get-NSACMECertificateStoreCertificates {
+            param(
+                [Parameter(Mandatory)]
+                [string]$StorePath
+            )
+
+            if (-not $script:NSACMECertificateIssuerStoreCache.ContainsKey($StorePath)) {
+                $script:NSACMECertificateIssuerStoreCache[$StorePath] = @(
+                    Get-ChildItem -Path $StorePath -ErrorAction SilentlyContinue |
+                        Sort-Object NotAfter -Descending
+                )
+            }
+
+            return @($script:NSACMECertificateIssuerStoreCache[$StorePath])
+        }
+
+        $now = Get-Date
+        foreach ($storePath in 'Cert:\CurrentUser\Root', 'Cert:\LocalMachine\Root', 'Cert:\CurrentUser\CA', 'Cert:\LocalMachine\CA') {
+            $match = @(
+                Get-NSACMECertificateStoreCertificates -StorePath $storePath |
+                    Where-Object {
+                        $_.Subject -eq $IssuerSubject -and
+                        $_.NotBefore -le $now -and
+                        $_.NotAfter -gt $now -and
+                        ($ExcludeThumbprints -notcontains $_.Thumbprint)
+                    } |
+                    Select-Object -First 1
+            )
+
+            if ($match.Count -gt 0) {
+                return $match[0]
+            }
+        }
+
+        return $null
+    }
+
+    function Complete-NSACMECertificateIssuerPathFromTrustStore {
+        param(
+            [Parameter(Mandatory)]
+            [System.Security.Cryptography.X509Certificates.X509Certificate2[]]$IssuerPath,
+
+            [Parameter(Mandatory)]
+            [System.Security.Cryptography.X509Certificates.X509Certificate2[]]$KnownChainCertificates
+        )
+
+        if ($IssuerPath.Count -eq 0) {
+            return @($IssuerPath)
+        }
+
+        $completed = @($IssuerPath)
+        while ($true) {
+            $tail = $completed[$completed.Count - 1]
+            if ($tail.Subject -eq $tail.Issuer) { break }
+
+            $knownThumbprints = @($KnownChainCertificates + $completed | Select-Object -ExpandProperty Thumbprint -Unique)
+            $next = Get-NSACMECertificateStoreIssuerCertificate -IssuerSubject $tail.Issuer -ExcludeThumbprints $knownThumbprints
+            if ($null -eq $next) { break }
+
+            $completed += $next
+        }
+
+        return @($completed)
+    }
+
     $chain = @()
     if ($Certificate.ChainFile) {
         $chain = @(Read-NSACMECertificatePemFile -Path $Certificate.ChainFile)
@@ -55,14 +189,28 @@
         $chain = @(Read-NSACMECertificatePemFile -Path $Certificate.FullChainFile | Where-Object { $_.Thumbprint -ne $leafThumbprint })
     }
 
+    if ($chain.Count -eq 0) {
+        return $chain
+    }
+
+    $leafCertificate = Get-NSACMECertificateLeafCertificate -InputCertificate $Certificate
+    if ($null -eq $leafCertificate) {
+        return $chain
+    }
+
+    $issuerPath = @(Get-NSACMECertificateIssuerPath -LeafCertificate $leafCertificate -ChainCertificates @($chain))
+    if ($issuerPath.Count -gt 0) {
+        return @(Complete-NSACMECertificateIssuerPathFromTrustStore -IssuerPath $issuerPath -KnownChainCertificates @($chain))
+    }
+
     return $chain
 }
 
 # SIG # Begin signature block
 # MIImdwYJKoZIhvcNAQcCoIImaDCCJmQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBzBdu4voFKOm3g
-# TNmiSJlK8TdS8JeAE1UJvrUn49qJX6CCIAowggYUMIID/KADAgECAhB6I67aU2mW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDzCsTp/UqH6CKF
+# vVKW0tXpQdCMwLOzo8vJxn7+2tO8W6CCIAowggYUMIID/KADAgECAhB6I67aU2mW
 # D5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYDVQQK
 # Ew9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRpbWUg
 # U3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1OTU5
@@ -238,31 +386,31 @@
 # cnR1bSBDb2RlIFNpZ25pbmcgMjAyMSBDQQIQCDJPnbfakW9j5PKjPF5dUTANBglg
 # hkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3
 # DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEV
-# MC8GCSqGSIb3DQEJBDEiBCCwaFCAhS3zAlkpunbN0ka0y/EEI/UAUa7qErltCcLb
-# QjANBgkqhkiG9w0BAQEFAASCAYCXKpLSEz6s+JxZzLyQb3QLT7OAA+qTzkwROLeH
-# /T3fx8OQgLi2w8irbzoFWVbFR7U2PBgu8OTnMcQFhSSguMxK3XjHQ+tJ8hHFlRU6
-# dGtNXCDzoR/P/TbwvWJ4IaSvmGmR4YtegVJ0QBgYcuT2WArCIqGLovNeBCPYnrXE
-# oYSsB2LExKBY5zKXSKdu5szHQ13ixbKHEgKSB7NLtex0LxuLseO/staWEy46L7d2
-# /zhwqtH1suRkMSoqdxqVwmrxLCauP2X+hCmIITMjVZ7PFKYlKk49k7Gh5D/K6Tji
-# 5r5HWJByJMk9Uce1BTT0SoYA2oWppgpd/115UNG9TqdLnyrPUSTr9nRqCeN5fzHC
-# mO73LZy3sQqrjjekeNDMEvpn7WkZaMh0UxdNDBGDd22MxrFTDMFqJpg6+7qXhS3q
-# IDgsyVlorkTwMLtbM5o1ydNjbPrGOJdqe1ZUgcD0dkqlti2ZYnhPzUDsytk0SOAL
-# K1zGCyGM4jPjMeyFlPyt91rvWz2hggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
+# MC8GCSqGSIb3DQEJBDEiBCCNYVpeF4LMIk3SaA1pY658Y8vUwBMOjFFxoHv2LOHZ
+# WjANBgkqhkiG9w0BAQEFAASCAYCzbVK1dwFqMBE4ZMZa5LG2hvBkVQkntjTaANv8
+# /QgzNcK7qP2mpH9YeinYNfDQ2FseKIMn1BdGU3HxMOSqOVMA6aJf2UZxx9bVe1el
+# g7YNiWbYChIBSalfFQG3SSmlwQ6tHB0iOv4m4EB6fumsdA31cGTuvQH8DMDmi6M5
+# zAJdonoccfYTbNB2R7FGLAv3coYH+88YeDCVZmFL2dHnk25zCtkwHqeSUDMlrIYf
+# TZLPIvK3POz0yjxvIj6TinxvAMTApF/IHaV6o3hJotATd+jWvs3VB2xJCRmU/JNX
+# iO/ogmKlfxuPSpyssuF9JB7y4/jzJKdSCSRLMeI+h0jk+UGeKXdv1lXZje2oaZLI
+# qLXx3FDpRWmverOeSz+mgDflljHXGh03NmuJYgv7Z80PaxnCSDMSZFfDIAOySrXp
+# AmM0m0+2A6pv5f4o3h+PUI4z09ZcF9TdEuPIrNo49y2JQsSAvjUO+/cdStovg3KE
+# vdm+MHribAjT+lCneiYd3y04Ij6hggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
 # AQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
 # KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNgIRAKQp
 # O24e3denNAiHrXpOtyQwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG9w0BCQMxCwYJ
-# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDQxODQ4NDdaMD8GCSqGSIb3
-# DQEJBDEyBDDD2F9/PKmqsSuPg6e9GD39pahyfyRG0HjlIUUv75A3ZT7U5JdF32tp
-# 5kf+rd3ENPAwDQYJKoZIhvcNAQEBBQAEggIAw6N9B80ofjn7ia45Tn/l0mUGq3R6
-# czI6TG7FUdCdLlEpKU6c8Bqm0JG8k8JArz2xlgamLq7lNuZy7CfItTGkmTA6+PO9
-# iiKoj+CS/bGxxKY2kmeXbDIAD3RLhfjuYNWe3zpWL4VVaX0zrsW4Fqgn0Kl1eJRh
-# TEB4lDD3lolf1y+fhTDoEB0xUsVIXyYhVvga+I7TmVol4wFw3ZKS5r/Ju/MmA7+b
-# 9uOIjHWOeL5blOrDmm5hTnAbXmxXDrGzTghl8gR6W4JA0UsqEZtaZKLr+PdNsmI8
-# sOxlYhNhgdBSNyLvj1YE39s1vzjRhYvD+iogOBbFA41Publj4lizk9pYYHwcigAJ
-# 62JeL/UUyt5foF7TxyCD95U3UQU7QI4jjzq7M2RJsYFHFUDlyRWfPxaGFJ6T+SjT
-# jkeAI7jdRti5mOABWM6r39l1MUUPEZDlN7TOqSAdE4NlthvezaEmYzV+16rbnKm4
-# PeMmWE2MadIXO1yv2E7nnGwNFEJJWEgBSWUfxvuGpBvX936jAv9LaKMmGnoqI1A7
-# qEeuZF+uGhb3P2yQ+1mgGkrLZXPc+Vhx8Oql0IPrqJvwTXNZiGjIiqsdp7+Cji4S
-# 56xakNmGm9yOkOAAdafrCdiHlY+JNejEnt9YeVWXHRMw8Iyjwg10+nO1bKcO+SO1
-# YI0tDSfg6ofbsas=
+# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDgxMjE2MzBaMD8GCSqGSIb3
+# DQEJBDEyBDCs3j7ggPuB3OYL9aNgu52x7v6F0IPDf1MJGLW5rSUMRIj8PNVOrd7Z
+# NzmyTXLDwEwwDQYJKoZIhvcNAQEBBQAEggIAUtDZec+EurA6CXIakoc4SmEBT9G2
+# AFfsc3nhwmCINdjTNwMZLNXfXfeSvN/pKIyDiz2UM40Djw6ubaMxG17pSV+oZQRB
+# rdtDlc8E0Rkc3dlSugd3P7X/VTLvhb/9ybZJnABlRCvkmPpRY1jVwUH2/sM6IUeg
+# pUEcLbqry35sYj8Yeo2GBblOvfwUnTmE6j7dldB67DW+K8VOEWUc7+Yctwwj9lBU
+# iSDn5U3BQ9f8XbkxB04C/Qtzk7Ihur+tcm5JKn0GEdC8z4miWcJ00wONFTH6RTIy
+# udZSYyJslAMNZ1uJKcXBrjsBkfkVcLkWLx0vEzo1cRz87MGy/CBZF9/ABRUJEhEr
+# 0kX9+0rEk/XtxpYzRSSI5phg+/MKVUkNC0KpDZhBywaM7wu7necpHXlbGVmWUF/h
+# 6ICA+zmsuaVO+rs9ACS76/TYWuQ7NRAry6++9vsYyy9cvM9vJmm/Xv+3Urzv2gR7
+# BrdBummQ5bIaj/4nmUUSoD6aWg0AnQAAYpWiUIbC6C6mHz2rYgkoYYQzZ97oyqxz
+# vMkL1o86hNIuFXFae+vEjQf+G1wGqOGuIp+A8WDuXYz99RVw3KQN8FTkEp4CkQLk
+# XwO+78GuFLxkJMAivF9yFQUR+2VsUnlnr/Jmz6g8r7qz1/YspHcBj+QC08J83uzg
+# i39r/FDBpbueuVQ=
 # SIG # End signature block
