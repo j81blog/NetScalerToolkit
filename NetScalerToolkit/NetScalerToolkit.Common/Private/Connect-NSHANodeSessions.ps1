@@ -71,22 +71,29 @@
             }
 
             Write-Verbose ('Connecting secondary session to node {0}.' -f $secondaryUri.AbsoluteUri)
-            $secondarySession = Connect-NSNode @connectParameters
+            try {
+                $secondarySession = Connect-NSNode @connectParameters
+            } catch {
+                Write-Warning ('Unable to attach secondary HA session using {0}. Continuing with active session only. Error: {1}' -f $secondaryUri.AbsoluteUri, $_.Exception.Message)
+                $secondarySession = $null
+            }
         }
 
-        $secondaryRecord = [pscustomobject] @{
-            ID = $null
-            State = 'Secondary'
-            IPAddress = $activeSession.SecondaryIP
-            Session = $secondarySession
-        }
+        if ($secondarySession) {
+            $secondaryRecord = [pscustomobject] @{
+                ID = $null
+                State = 'Secondary'
+                IPAddress = $activeSession.SecondaryIP
+                Session = $secondarySession
+            }
 
-        if ($activeSession.HAInfo -and $activeSession.HAInfo.SecondaryNode) {
-            $secondaryRecord.ID = $activeSession.HAInfo.SecondaryNode.id
-            $secondaryRecord.State = $activeSession.HAInfo.SecondaryNode.state
-        }
+            if ($activeSession.HAInfo -and $activeSession.HAInfo.SecondaryNode) {
+                $secondaryRecord.ID = $activeSession.HAInfo.SecondaryNode.id
+                $secondaryRecord.State = $activeSession.HAInfo.SecondaryNode.state
+            }
 
-        $activeSession.SecondarySession = $secondaryRecord
+            $activeSession.SecondarySession = $secondaryRecord
+        }
     }
 
     return $activeSession
@@ -95,8 +102,8 @@
 # SIG # Begin signature block
 # MIImdwYJKoZIhvcNAQcCoIImaDCCJmQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC5I5PQa3gv+OKJ
-# R/VK3aj/k91RF/UkeY9YBszf3k5lzKCCIAowggYUMIID/KADAgECAhB6I67aU2mW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAlUZkkkZ/Anjv1
+# ik9M0d9o41W4Fuo6qFn1gM3L//zrxaCCIAowggYUMIID/KADAgECAhB6I67aU2mW
 # D5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYDVQQK
 # Ew9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRpbWUg
 # U3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1OTU5
@@ -272,31 +279,31 @@
 # cnR1bSBDb2RlIFNpZ25pbmcgMjAyMSBDQQIQCDJPnbfakW9j5PKjPF5dUTANBglg
 # hkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3
 # DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEV
-# MC8GCSqGSIb3DQEJBDEiBCB13KY2LJyZb6dX/XpzogAxkieZRHQLAx6VrXdHIECw
-# fDANBgkqhkiG9w0BAQEFAASCAYBKL/m6G36U31v4gWvLQ9Jd/5pBDqtFvZVZ77wg
-# Qcp0C5fyxEntw0aZfpvgmlRlrEP5yEjXFsw2ino5vtERSYlOiuJTAsMQx0g03Xwi
-# eAVaRq+ctnQUqvOSuJOGgbUf0pSYFkK7L+tLSGtnDXr4+o1ynWAflDS10XHxH9Z5
-# b5HkmW/QhwlKEJega+O9WuEKU3ELds9CfgZ9Tn/vec87pnXt0PL5H7UmLI398jVk
-# JNXZ33RVHFsXArx+N8xbZ8XuX74QdcIWmlQl56MTJ6Xq8FQNjZ+l4CDzUfL3ghM0
-# v8QwygmUVOGPqD6CnNqbrvMwdbYu3Oezdv+HPPpDUjies4pHq+/mQS90uh1vChxj
-# ar5/aPlPKUzaf3yxizo1tahhqDJt48iRmEoa1CloM+TH1RN5tpxRlPV5jwvwZi5+
-# 0DRjh5BpYGWWEdkVdUt1yk7NnaqRNGZ7H99g6IWbYMJVItFuNt1CJO5dEDO5iOPc
-# sZkDyqeDW1TVYHH++t2sDIE3pLKhggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
+# MC8GCSqGSIb3DQEJBDEiBCC5R+YjxoRaaFPJ3cTfksvyMFpOAHagjMY2qs0TkDq8
+# xDANBgkqhkiG9w0BAQEFAASCAYCWBnn0iwOXWR5POpAo21P9yuJoZgO2tzScluTz
+# 6y4XfJwCKpR2HlEi2tFK7xHbtnsyh3zJOpOoATosz37T8WsQIzbZUrOaB9d+7FhA
+# SKJgaw0JFvPKimkAFQvmduWrtgIVVG6QQdUb5fjrbWvSTMUy1YJKKAd8x3P78TJ9
+# RSjhhu/HSbgxt2BR8wymt6276Ys+wpZN8u5Ml8fJrxWao8w5Ogu9RIZoZ+q/axaA
+# VeZlTqqVETgfoi/dgal5FgjRNDFGM+lQusMEiGz9ki1jiOrJ3t9wG1e2pjhwWVvc
+# AEomQqEqJhYhbt9d4VVXUbJkzxXcvjkhdfzSEb907Rq6nj1wMavoqElwg9B9Cvl/
+# 0hHHVKmKK7+L8yX30NNIbjbYrdrh56H7yw3PmZj+56bQf6bghR2RbM/7o0+SWbHE
+# 8WRAY/mNxaAWZj+qn65/GR1ZkNX8+EYtxfkZB777tTgBxUGUP5o9opGZKO6O+tph
+# vFAotsyiZj6yU+bkuI/HxhpvSoqhggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
 # AQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
 # KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNgIRAKQp
 # O24e3denNAiHrXpOtyQwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG9w0BCQMxCwYJ
-# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDQxODQ4MjVaMD8GCSqGSIb3
-# DQEJBDEyBDDM0Y3GhZda0GlawdSbRTxMFPQRa8hv8mjxb4ijd3Mr6/SUd1LhgIYD
-# UxtNTeNMqdMwDQYJKoZIhvcNAQEBBQAEggIAs79ubi4S84de/cTMi+NvbQMZA2XY
-# qvqk7OUU8p42W7pebRi4gHWJJm+OSz9u4BtWkViCFGChXt+ogTnu1A8X2WIp6OOo
-# Z7hsM5sf+QviVGfha/eyxNKmLWMyaMqBvpm2vJqpx9smzJyAf7KWGNppPOFtU1Wr
-# AhZjAprkl3es2dPeMGT3LbEsV4ymt2XyMfGD0HiWOhnJcdxzliyz6Wvd4PbwpC2b
-# 444qYRmurciPvwmfSu2fflNyV6lkSsr51YMeRB+9cBvAdmx2wZ9joEv862mumIRF
-# zwsOuiAkHoYzWgOGOKHzzt7YTwAu1YSosecipe8X5fOffTdwepzVwknN+unFCE+F
-# QpCIUQYKJgdsHG/Sk2czLS6yhd+NUrJOE/XqTaMLcHS0e96zuEs9MtlV5RTyBJVu
-# WII5cxBwLO4sHaDYdeW5jkGoKg4C8GI5MXg8j6zzBaYolNs3cqaoD0va00GsJgHb
-# 4xuzzch+WBC5tJX4ZSfT9zi82+m861ec8FlV+MIW9ym7q+JcyvmRxXz4XByiPgm+
-# MucrHRd91SZP3uqGxTomaqz4FYYl7kYG3vsdcDXPAYe47VWuhPI7vOOG4C39AD3s
-# 5z+yVnSP3Ph7v4/jlAinFwLuX9qFZ9rTukJVYvOgMTrqxoxgN2rkVCiRcnJavb+g
-# Rbscn44XP2pe0yc=
+# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDgwOTI5MDNaMD8GCSqGSIb3
+# DQEJBDEyBDBHpRC/90cXzSaMAGT6M1719PL/WQXbwZrezE+DSLIsTrwDCb8yj30w
+# EWuHypuLwoEwDQYJKoZIhvcNAQEBBQAEggIAEqla1MxumS60PbdGl4TD48jYsbpc
+# /9zqBVidU/U+/VO2mdjFuspgaQPoLYIRXg/v0PC48Z7ZnB1TqV7vYJ/b6lbqFoVc
+# La8P3fDZ+/wLBTA1kbzLkx3jAhcU3df5vUC/y1YkcEXpxlSsQLFpf38TsF3QtrvI
+# j9iJ0GRS9WN2/4OTVDv9KZZMEjjwH22fPxeaNFocjl1JUHogZ37bqzRhyRGGfnjr
+# xQ+/+nQAnLB/kOrmijVhAGI9ok+CiW+upMrL1M9ME9w/61KOyicjc1z9/gWg8JKU
+# BLafcpxyrlSeFib8LeqjXhA8MSC6fIgUhwj6lbCobaDdEf27wWkMQQRxscQebjR8
+# Z6ZoPJQQq7hR512ZIdinCqYGCAKaTt6VUk9uXAFeA2Jddkh4MpQQKS6EtNLHQ+cd
+# bf9PZbfePOsWZZe3C8DK8PRLpF8wf0szeyGr+6FzvfEgUsEKhMU2FNQ7ThTJOB7H
+# SeO94IWPhtqPJ6V1oAKnrzxvencIakFaicZr1uWmlBzGaw2r9RiJw746Kbchduoc
+# Yk8fQN86zPpw/3J9AADQMnVr9//q4fycUwRkUPJ2s3g4KRttw3LZ/5orCFOts5y4
+# NRe3nMg4MS+tYi6Ph9Iwni0pZVn+yN7J10sO0yJjrBgbz6isGkSmt35RG0hofOYu
+# Cj+DrCdFGUbaX3s=
 # SIG # End signature block

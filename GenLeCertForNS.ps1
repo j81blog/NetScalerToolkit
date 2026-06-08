@@ -42,6 +42,7 @@ $ErrorActionPreference = 'Stop'
 $updateNetScalerToolkit = [string]$env:NETSCALERTOOLKIT_WRAPPER_UPDATE -match '^(1|true|yes)$'
 $skipCertificateCheckSpecified = $false
 $skipCertificateCheckEligible = $true
+$cleanAllExpiredRequested = $false
 foreach ($argument in @($args)) {
     if ($argument -isnot [string]) { continue }
     if ($argument -ieq '-AutoUpdate') {
@@ -57,6 +58,9 @@ foreach ($argument in @($args)) {
     if ($argument -iin @('-Help', '-h', '-CleanAllExpiredCertsOnDisk')) {
         $skipCertificateCheckEligible = $false
     }
+    if ($argument -ieq '-CleanAllExpiredCertsOnDisk') {
+        $cleanAllExpiredRequested = $true
+    }
 }
 
 function Install-LatestNetScalerToolkit {
@@ -68,16 +72,18 @@ function Install-LatestNetScalerToolkit {
     $availableVersion = $null
     $findModuleCommand = Get-Command -Name Find-Module -ErrorAction SilentlyContinue
     if ($findModuleCommand.Version -lt [Version]'2.2') {
-        Write-Warning "PowerShellGet 2.2 or higher is not available. Consider updating PowerShellGet to version 2.2 or later."
-        Write-warning "Install using: Install-Module PowerShellGet -Force -AllowClobber"
-        exit 1
+        Install-Module PowerShellGet -Force -AllowClobber
+		Import-Module PowerShellGet -Force
+        $available = Find-Module -Name NetScalerToolkit -Repository PSGallery -AllowPrerelease -ErrorAction Stop
+        if ($available) { $availableVersion = [string]$available.Version }
     } elseif ($findModuleCommand) {
         $available = Find-Module -Name NetScalerToolkit -Repository PSGallery -AllowPrerelease -ErrorAction Stop
         if ($available) { $availableVersion = [string]$available.Version }
     } else {
-        Write-Warning "Find-Module is not available. Cannot check for the latest NetScalerToolkit version in PSGallery. Consider updating PowerShellGet to version 2.2 or later."
-        Write-Warning "Install using: Install-Module PowerShellGet -Force -AllowClobber"
-        exit 1
+        Install-Module PowerShellGet -Force -AllowClobber
+		Import-Module PowerShellGet -Force
+        $available = Find-Module -Name NetScalerToolkit -Repository PSGallery -AllowPrerelease -ErrorAction Stop
+        if ($available) { $availableVersion = [string]$available.Version }
     }
 
     Install-Module -Name NetScalerToolkit -Scope CurrentUser -Force -AllowClobber -AllowPrerelease -ErrorAction Stop
@@ -120,12 +126,16 @@ if ($localManifest) {
     }
 }
 
-$command = Get-Command Request-NSACMECertificate -ErrorAction Stop
+$commandName = 'Request-NSACMECertificate'
+$null = Get-Command $commandName -ErrorAction Stop
 try {
+    if ($cleanAllExpiredRequested) {
+        Write-Warning "GenLeCertForNS compatibility mode: forwarding -CleanAllExpiredCertsOnDisk to Request-NSACMECertificate."
+    }
     if ($skipCertificateCheckEligible -and -not $skipCertificateCheckSpecified) {
-        & $command -SkipCertificateCheck @args
+        & $commandName -SkipCertificateCheck @args
     } else {
-        & $command @args
+        & $commandName @args
     }
 } finally {
     if ([string]$env:NETSCALERTOOLKIT_WRAPPER_AUTOUPDATE_DONE -eq '1') {

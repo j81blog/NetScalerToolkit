@@ -12,9 +12,28 @@ Describe 'ACME NetScaler integration' -Skip:(-not $runIntegration) {
         }
 
         $password = ConvertTo-SecureString $env:NSTOOLKIT_TEST_PASSWORD -AsPlainText -Force
-        $credential = [pscredential]::new($env:NSTOOLKIT_TEST_USERNAME, $password)
-        $skipCertificateCheck = $env:NSTOOLKIT_TEST_SKIP_CERT_CHECK -eq 'true'
-        $script:IntegrationSession = Connect-NSNode -ManagementURL $env:NSTOOLKIT_TEST_NS_URL -Credential $credential -SkipCertificateCheck:$skipCertificateCheck -HA -PassThru -ErrorAction Stop
+        $script:IntegrationCredential = [pscredential]::new($env:NSTOOLKIT_TEST_USERNAME, $password)
+        $script:IntegrationSkipCertificateCheck = $env:NSTOOLKIT_TEST_SKIP_CERT_CHECK -eq 'true'
+        $script:IntegrationSession = Connect-NSNode -ManagementURL $env:NSTOOLKIT_TEST_NS_URL -Credential $script:IntegrationCredential -SkipCertificateCheck:$script:IntegrationSkipCertificateCheck -HA -PassThru -ErrorAction Stop
+    }
+
+    It 'keeps HA connections on the active primary node for configured management endpoints' -Tag 'HA' {
+        $targets = @($env:NSTOOLKIT_TEST_NS_URL)
+        foreach ($optionalTarget in @($env:NSTOOLKIT_TEST_NS_URL_SNIP, $env:NSTOOLKIT_TEST_NS_URL_NODE1, $env:NSTOOLKIT_TEST_NS_URL_NODE2)) {
+            if (-not [string]::IsNullOrWhiteSpace($optionalTarget)) {
+                $targets += $optionalTarget
+            }
+        }
+        $targets = @($targets | Select-Object -Unique)
+
+        foreach ($target in $targets) {
+            $session = Connect-NSNode -ManagementURL $target -Credential $script:IntegrationCredential -SkipCertificateCheck:$script:IntegrationSkipCertificateCheck -HA -PassThru -ErrorAction Stop
+
+            $session.IsHA | Should -BeTrue
+            $session.IsPrimary | Should -BeTrue
+            $session.ConnectedNodeState | Should -Be 'Primary'
+            [string]::IsNullOrWhiteSpace($session.PrimaryIP) | Should -BeFalse
+        }
     }
 
     It 'adds, reads, and removes a DNS TXT record' {

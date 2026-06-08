@@ -94,20 +94,85 @@
         [Switch]$NoConsoleOutput,
         [Switch]$AutoUpdate,
         [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'AutoRun')][Parameter(ParameterSetName = 'CleanADC')][Parameter(ParameterSetName = 'CleanTestCertificate')][Switch]$SkipCertificateCheck,
-        [ValidateSet('LetsEncrypt', 'ZeroSSL', 'Google', 'SSLCom', 'Actalis', 'CustomAcme')][String]$CertificateProvider = 'LetsEncrypt',
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
+        [ValidateSet('LetsEncrypt', 'ZeroSSL', 'Google', 'SSLCom', 'Actalis', 'CustomAcme')]
+        [String]$CertificateProvider = 'LetsEncrypt',
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
         [String]$AcmeDirectoryUrl,
-        [Alias('ExtAcctKID')][String]$ExternalAccountBindingKeyId,
-        [Alias('ExtAcctHMACKey')][Object]$ExternalAccountBindingHmacKey,
-        [ValidateSet('HS256', 'HS384', 'HS512')][Alias('ExtAcctAlgorithm')][String]$ExternalAccountBindingAlgorithm = 'HS256',
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
+        [Alias('ExtAcctKID')]
+        [String]$ExternalAccountBindingKeyId,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
+        [Alias('ExtAcctHMACKey')]
+        [Object]$ExternalAccountBindingHmacKey,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
+        [ValidateSet('HS256', 'HS384', 'HS512')]
+        [Alias('ExtAcctAlgorithm')]
+        [String]$ExternalAccountBindingAlgorithm = 'HS256',
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
         [Switch]$UseModernPfxEncryption,
-        [ValidateSet('None', 'Warn', 'Fail')][String]$CertificateChainValidation = 'Warn',
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
+        [ValidateSet('None', 'Warn', 'Fail')]
+        [String]$CertificateChainValidation = 'Warn',
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
         [String]$PreferredChain,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
         [String]$Profile,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
         [String[]]$DnsAlias,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
         [Int]$ValidationTimeout = 240,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
         [Int]$LifetimeDays,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
         [Switch]$AlwaysNewKey,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
         [Switch]$SkipPoshACMEInstall,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
         [Switch]$RemoveUploadedPfx
     )
 
@@ -546,9 +611,23 @@
                     try { Invoke-NSDeleteSystemFile -Session $nsSession -FileName $deploy.PfxFileName -FileLocation '/nsconfig/ssl/' -IgnoreNotFound -Confirm:$false | Out-Null }
                     catch { Write-NSACMECertificateLog Debug 'Deploy' "Uploaded PFX cleanup skipped: $($_.Exception.Message)" }
                 }
-                if ($request.RemovePrevious -and $Production -and $request.CertKeyNameToUpdate -and $deploy.CertKeyName -ne $request.CertKeyNameToUpdate) {
-                    try { Invoke-NSDeleteSSLCertKey -Session $nsSession -CertKey $request.CertKeyNameToUpdate -DeleteFromDevice -Confirm:$false | Out-Null }
-                    catch { Write-NSACMECertificateLog Warning 'Deploy' "RemovePrevious failed for '$($request.CertKeyNameToUpdate)': $($_.Exception.Message)" }
+                if ($request.RemovePrevious -and $Production -and $request.CertKeyNameToUpdate) {
+                    try {
+                        $removePreviousResult = Remove-NSACMECertificatePreviousCertKey `
+                            -Session $nsSession `
+                            -OldCertKeyName $request.CertKeyNameToUpdate `
+                            -NewCertKeyName $deploy.CertKeyName `
+                            -NewChainCertKeyName @($deploy.ChainCertKeyName) `
+                            -DeleteFromDevice
+                        $removePreviousMessage = if ($removePreviousResult.Reason) {
+                            "RemovePrevious: $($removePreviousResult.Status). $($removePreviousResult.Reason)"
+                        } else {
+                            "RemovePrevious: $($removePreviousResult.Status)."
+                        }
+                        Write-NSACMECertificateLog Info 'Deploy' $removePreviousMessage
+                    } catch {
+                        Write-NSACMECertificateLog Warning 'Deploy' "RemovePrevious failed for '$($request.CertKeyNameToUpdate)': $($_.Exception.Message)"
+                    }
                 }
                 $result = [pscustomobject]@{ CN = $request.CN; Domains = $domains; AcmeServer = $serverName; Production = [bool]$Production; ValidationMethod = $request.ValidationMethod; CertKeyName = $deploy.CertKeyName; PfxPath = $deploy.PfxPath; Thumbprint = if ($x509) { $x509.Thumbprint } else { $cert.Thumbprint }; NotAfter = if ($x509) { $x509.NotAfter } else { $null }; Status = 'Success'; LogFile = $script:NSACMECertificateLogFile }
                 $results += $result
@@ -603,8 +682,8 @@
 # SIG # Begin signature block
 # MIImdwYJKoZIhvcNAQcCoIImaDCCJmQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB+Z/4VOr/MssWh
-# PfPSZpTUGlmRJdvO4aiWrlb07//QHKCCIAowggYUMIID/KADAgECAhB6I67aU2mW
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBzZBTmvq76Rk9f
+# hnLd+QV7MepFYuAA1HIqIwTepRQgUaCCIAowggYUMIID/KADAgECAhB6I67aU2mW
 # D5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYDVQQK
 # Ew9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRpbWUg
 # U3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1OTU5
@@ -780,31 +859,31 @@
 # cnR1bSBDb2RlIFNpZ25pbmcgMjAyMSBDQQIQCDJPnbfakW9j5PKjPF5dUTANBglg
 # hkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3
 # DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEV
-# MC8GCSqGSIb3DQEJBDEiBCASZZImFBCU4ABdCAZtw5YexXG0BNP8XH1kPyOi+efc
-# XzANBgkqhkiG9w0BAQEFAASCAYA9Px5vJoxsD/xaQODvZHXy2Tl14+IISmGK/ccm
-# uIdRri3Jw2UbmWs90YcpFivJujEbL/FcTBj5MYCVOCoDsrhyuIibZV0ucHDhfB8h
-# 0CrZHrlbVJxrnTbVoN+XpzuhfD4pQlZWMosnM2g20ldC1rdmgPPGPTd4+MW0KKRT
-# 6AsB79JfGWGsV4zwR/9UTBZT5IrAx7FdLgh0nUI1ENI85maVnxW81Ph5dXb9gbkG
-# qjxymaovAOcG6v0uUnmCb5Mj96P3HCrfFT5+Cb09rJp1V+VITs68zvboq9We/fkE
-# Y3y9PR2oFX4hQ1sA2I8rBj/sscRPKVyvoScsRCEy/fPwEaT4NRmGf7fBKVdLsO/R
-# uIErs5JSyxGmsssjWereC9wKZ5blShOjPVJzh/K22X4aKS2juE0JOv+/MEln/oLX
-# iXPXjwXeutWzgfIBh9XZNMUXYbi7wr13HWzP79RyRUnz75SPXB/+WfCWVyp8VRZM
-# 2miP+rX25udcZCVqZiKlLeHcvlShggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
+# MC8GCSqGSIb3DQEJBDEiBCA2girB2DB9lIadXD4HKv2rAPUvW3fjmFz0iLdssZWr
+# YzANBgkqhkiG9w0BAQEFAASCAYBauggeetUrZaqQuU1lh5l6RoG41ojNaWnAfrz5
+# t+2fJmVhbL5VG4Q2jUH48DBka4t+kVMSwOxvsfdr90tAKdaYDuyizkC91OaGfDbn
+# PyH+nR+8teOIlJl2FQqHNp7VBrl+tZYiaNubKI2jrg8qi+9ZPagIGtZuoPUTj8IV
+# FmQ7uwPVbEWvOPZ+Kt1PUZCqZp8sgAznHbk9lXe24S4tew3uxnj7RTdEJlvWN1O6
+# lsQ6qjtWmm5RWvABusqiEt4vkHgQfsGM6jgsO/eKrgVbUeYPG3cXwQ8QJQOSH6kZ
+# ll4Vy94008f4Y9htVIyr+TFSGHsm9pM8kL/FXl36W1DiOGrtxjlbTK8BBU6V4ePP
+# oBfkdvgzqeevIPV4K3LpwbbClrGi04/3fUG6YXTIGZzQuKzQjz2uYHsd3oj3YxXb
+# pbpul5SIOz0Y7snAxUaPnYyIVHF7QVJ5T7kTTySIFf6/MzmxraxULkdcwHlFOfn6
+# T42jhyK/cuU3bOb4L3VsOciNNKehggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
 # AQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
 # KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNgIRAKQp
 # O24e3denNAiHrXpOtyQwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG9w0BCQMxCwYJ
-# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDQxODUwMzVaMD8GCSqGSIb3
-# DQEJBDEyBDCNgp39gt1j/QMRn2+n4ZsMGf3y/SbzJQ9Z+QasdCIDTKQzRP6BofS7
-# NLQj6OoLij0wDQYJKoZIhvcNAQEBBQAEggIAk7rYCupuZ7x8LbDfsRcKpQXFwvXi
-# NfyBnYMfSby9AiS9yhSiq57w7+V/W4QFtoX3crAe197jvWBgy5CessCkJ4cU+0Ch
-# c6je3Tgzrz43w8ptIit1b2DwnWo4qBhY8BJBgLL8yowCOJzzmsnrjJ5F1qAIO4jL
-# cmG9EmczDoAo/zCb/VE6Lf8aM2LyiNbHpF4I+9rK/yogpvt2zfB34ieFxfUCY7Ii
-# kaZMqLdoVjdhCrTTkAOkPNE1sok3v1rhIO+Q4dA78f7eGAVpkbMmPqLMAiK0WO2Q
-# lvbmxWc6h7gqVs6GhEbOK4QaKs1obBI5Mfqc+1obfnIUZRiFC4PlgdDhc3Xn7+fe
-# npYZNdzBp8r17FDGBFci6hEa7HVvJ8oka4iHXhEMuqRZJdiS10EegDahWAGMLoUm
-# PrDYaHvCg1pP6V3Mi1hsDcnDsj7ZIe+Unc9m482PJ2/7y4J8TxjmZR2wapxcgclg
-# M7eb8oBcKv7lwmtsnAoJbnXHZBMFxHlIWwQnna5ofqGlT75YQKJvqP7/aCnjUNsH
-# qtNx98ulGz90f3ETztb2l4Tenm1vSLZV2MDf6qIEITLU9mZNm+iyOLbZxQztLGTK
-# 0ZMGSycWFo+MMXiCSh7Rk62zmte8S8TSbjynT/vW/vGHBxLtT3BgGHiLf63wmyPB
-# Og6zPkxc0bKzilI=
+# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDgwOTI5MTBaMD8GCSqGSIb3
+# DQEJBDEyBDAZyrNrxihv5LMys/JbTXYhUXRBbdznWWppYHgQIK0nyMBsh8r6CmF3
+# QGGUNk8G2P8wDQYJKoZIhvcNAQEBBQAEggIAsddlJ2peF0IQSfM/Fd22BoaZLtg3
+# AVc7A+k5M7pzVDXMt0B2Oz4HZUUse+VRAuD16d5ho69IkzcPWN9iMzDkTuqsaGWA
+# XDUfpJDpPRCGPA+fS4M1FsQe6nO3Pt+MVpeTQgzamUIwKySQ0diL9EurL8x9X90Z
+# RWche1y2Ds6lo+5t8BbQCmfgQLDhDx1BdaWi2cPoUjl8VVvPm4IvMmqSAMFmE9DZ
+# xehExpDBIEOPrz4suucGD6xuSk4wxRpsn763pvqDbufqCMf4D+SFn5PcF5zOWqU1
+# XfDveitiy4NN3ezWUCErYCXaQZlKrjANTmU8i3omtyLVMpEViOmq+xk2E4kFZCEU
+# 7o8SZsmFO1Zb4nwOAOCoOaOUIQyKbumQ+n8dx/IgJNyoz+hOprgt5yNm6iFQMyEB
+# qhTKf5NBcfPIA+r6LO6OBUecwSsJvVH9mEjJ93rlmCYfBTX7Vgy+nPa9CjwnIjDs
+# f6XQXTyAFkYz63arz4r9rg7lPoXK8eZwOJd90xDiYnlkiR2aWEH/v1UbQCpLPVdy
+# bxFnrq0jYYGaYvJryI0sZLbxHx60gZPMP7/UUrPswUobXXoFW3EQvqgHXg/O9T4V
+# WGHFlEWVFPQR2t9ycsDKgd+ZMw+WeobbOKIK5CueARnzWvQHnOKaWYnXXqWYGFe2
+# PAgol6UdOCILdN8=
 # SIG # End signature block

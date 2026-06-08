@@ -593,6 +593,107 @@ Describe 'ACME helper functions' {
             }
         }
 
+        Context 'RemovePrevious safety helper' {
+            It 'skips when old and new certkey names are equal' {
+                Mock Invoke-NSGetSSLCertKey {}
+                Mock Invoke-NSGetVPNGlobalSSLCertKeyBinding {}
+                Mock Invoke-NSDeleteSSLCertKey {}
+
+                $result = Remove-NSACMECertificatePreviousCertKey -Session ([pscustomobject]@{}) -OldCertKeyName 'same-cert' -NewCertKeyName 'same-cert' -DeleteFromDevice
+
+                $result.Status | Should -Be 'Skipped'
+                $result.Reason | Should -Match 'equal'
+                Should -Invoke Invoke-NSGetSSLCertKey -Times 0
+                Should -Invoke Invoke-NSDeleteSSLCertKey -Times 0
+            }
+
+            It 'skips when old certkey is part of the new chain' {
+                Mock Invoke-NSGetSSLCertKey {}
+                Mock Invoke-NSGetVPNGlobalSSLCertKeyBinding {}
+                Mock Invoke-NSDeleteSSLCertKey {}
+
+                $result = Remove-NSACMECertificatePreviousCertKey -Session ([pscustomobject]@{}) -OldCertKeyName 'chain-ca' -NewCertKeyName 'leaf-cert' -NewChainCertKeyName @('chain-ca') -DeleteFromDevice
+
+                $result.Status | Should -Be 'Skipped'
+                $result.Reason | Should -Match 'chain'
+                Should -Invoke Invoke-NSGetSSLCertKey -Times 0
+                Should -Invoke Invoke-NSDeleteSSLCertKey -Times 0
+            }
+
+            It 'skips when old certkey is globally VPN-bound' {
+                Mock Invoke-NSGetSSLCertKey { [pscustomobject]@{ certkey = 'old-cert' } }
+                Mock Invoke-NSGetVPNGlobalSSLCertKeyBinding { @([pscustomobject]@{ certkeyname = 'old-cert' }) }
+                Mock Invoke-NSDeleteSSLCertKey {}
+
+                $result = Remove-NSACMECertificatePreviousCertKey -Session ([pscustomobject]@{}) -OldCertKeyName 'old-cert' -NewCertKeyName 'new-cert' -DeleteFromDevice
+
+                $result.Status | Should -Be 'Skipped'
+                $result.Reason | Should -Match 'VPN-bound'
+                Should -Invoke Invoke-NSDeleteSSLCertKey -Times 0
+            }
+
+            It 'skips when old certkey is globally VPN-bound as CA cert' {
+                Mock Invoke-NSGetSSLCertKey { [pscustomobject]@{ certkey = 'old-ca' } }
+                Mock Invoke-NSGetVPNGlobalSSLCertKeyBinding { @([pscustomobject]@{ cacert = 'old-ca' }) }
+                Mock Invoke-NSDeleteSSLCertKey {}
+
+                $result = Remove-NSACMECertificatePreviousCertKey -Session ([pscustomobject]@{}) -OldCertKeyName 'old-ca' -NewCertKeyName 'new-cert' -DeleteFromDevice
+
+                $result.Status | Should -Be 'Skipped'
+                $result.Reason | Should -Match 'VPN-bound'
+                Should -Invoke Invoke-NSDeleteSSLCertKey -Times 0
+            }
+
+            It 'skips when old certkey is globally VPN-bound as userdata encryption key' {
+                Mock Invoke-NSGetSSLCertKey { [pscustomobject]@{ certkey = 'old-ude' } }
+                Mock Invoke-NSGetVPNGlobalSSLCertKeyBinding { @([pscustomobject]@{ userdataencryptionkey = 'old-ude' }) }
+                Mock Invoke-NSDeleteSSLCertKey {}
+
+                $result = Remove-NSACMECertificatePreviousCertKey -Session ([pscustomobject]@{}) -OldCertKeyName 'old-ude' -NewCertKeyName 'new-cert' -DeleteFromDevice
+
+                $result.Status | Should -Be 'Skipped'
+                $result.Reason | Should -Match 'VPN-bound'
+                Should -Invoke Invoke-NSDeleteSSLCertKey -Times 0
+            }
+
+            It 'skips when old certkey does not exist' {
+                Mock Invoke-NSGetSSLCertKey { $null }
+                Mock Invoke-NSGetVPNGlobalSSLCertKeyBinding {}
+                Mock Invoke-NSDeleteSSLCertKey {}
+
+                $result = Remove-NSACMECertificatePreviousCertKey -Session ([pscustomobject]@{}) -OldCertKeyName 'missing-old' -NewCertKeyName 'new-cert' -DeleteFromDevice
+
+                $result.Status | Should -Be 'Skipped'
+                $result.Reason | Should -Match 'does not exist'
+                Should -Invoke Invoke-NSGetVPNGlobalSSLCertKeyBinding -Times 0
+                Should -Invoke Invoke-NSDeleteSSLCertKey -Times 0
+            }
+
+            It 'skips when VPN binding inspection fails' {
+                Mock Invoke-NSGetSSLCertKey { [pscustomobject]@{ certkey = 'old-cert' } }
+                Mock Invoke-NSGetVPNGlobalSSLCertKeyBinding { throw 'network issue' }
+                Mock Invoke-NSDeleteSSLCertKey {}
+
+                $result = Remove-NSACMECertificatePreviousCertKey -Session ([pscustomobject]@{}) -OldCertKeyName 'old-cert' -NewCertKeyName 'new-cert' -DeleteFromDevice
+
+                $result.Status | Should -Be 'Skipped'
+                $result.Reason | Should -Match 'Could not inspect VPN global bindings'
+                Should -Invoke Invoke-NSDeleteSSLCertKey -Times 0
+            }
+
+            It 'deletes the previous certkey when safety checks pass' {
+                Mock Invoke-NSGetSSLCertKey { [pscustomobject]@{ certkey = 'old-cert' } }
+                Mock Invoke-NSGetVPNGlobalSSLCertKeyBinding { @() }
+                Mock Invoke-NSDeleteSSLCertKey {}
+
+                $result = Remove-NSACMECertificatePreviousCertKey -Session ([pscustomobject]@{}) -OldCertKeyName 'old-cert' -NewCertKeyName 'new-cert' -DeleteFromDevice
+
+                $result.Status | Should -Be 'Deleted'
+                $result.CertKeyName | Should -Be 'old-cert'
+                Should -Invoke Invoke-NSDeleteSSLCertKey -Times 1 -ParameterFilter { $CertKey -eq 'old-cert' -and $DeleteFromDevice -eq $true }
+            }
+        }
+
         Context 'NetScaler DNS validation guardrails' {
             It 'requires a NetScaler session when UseNetScalerDNS is enabled' {
                 $request = [pscustomobject]@{ UseNetScalerDNS = $true; CN = 'example.com'; KeyLength = 2048; FriendlyName = 'example.com' }

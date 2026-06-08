@@ -73,6 +73,8 @@ $session = Connect-NSNode @connectParams
 
 When `-HA` is used, the module detects the HA state and switches to the primary node when needed. Connecting directly to a secondary node without `-HA` produces a warning.
 
+When the initial management endpoint is reachable (for example SNIP/load-balanced management URL) but direct secondary-node session attachment is not reachable from the caller network, HA connect logs a warning and continues with the active session. Primary failover remains strict: if the initial connection lands on a secondary node and the primary cannot be reached, connect fails.
+
 Use `-SkipCertificateCheck` only when the appliance management certificate is self-signed, expired, or issued by a private CA that is not trusted by the current machine. The documentation site has more detail about session handling and connection patterns.
 
 ## Basic Usage
