@@ -33,10 +33,29 @@
         return [pscustomobject]@{ Removed = 0; CertDir = $CertDir; Pattern = $null }
     }
 
-    $suffix = if ($CN) { [regex]::Escape($CN.Replace('*.', '')) } else { '\w+\.\w+' }
-    $pattern = '(?>CRT-SAN|LECRT)-[0-9]{8}-[0-9]{6}-' + $suffix
+    $suffix = if ($CN) { [regex]::Escape(($CN -replace '^\*\.', '')) } else { '.+' }
+    $pattern = '^(?>CRT-SAN|LECRT)-(?<Date>[0-9]{8})-(?<Time>[0-9]{6})-(?<Suffix>' + $suffix + ')$'
     $cutoff = (Get-Date).AddDays(-[int]$Days)
-    $folders = @(Get-ChildItem -LiteralPath $CertDir -Directory -ErrorAction Stop | Where-Object { $_.Name -match $pattern -and $_.CreationTime -lt $cutoff })
+    $folders = @()
+    foreach ($folder in @(Get-ChildItem -LiteralPath $CertDir -Directory -ErrorAction Stop)) {
+        $match = [regex]::Match($folder.Name, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if (-not $match.Success) { continue }
+
+        $folderTimestamp = $null
+        try {
+            $folderTimestamp = [datetime]::ParseExact(
+                ('{0}{1}' -f $match.Groups['Date'].Value, $match.Groups['Time'].Value),
+                'yyyyMMddHHmmss',
+                [System.Globalization.CultureInfo]::InvariantCulture
+            )
+        } catch {
+            $folderTimestamp = $folder.CreationTime
+        }
+
+        if ($folderTimestamp -lt $cutoff) {
+            $folders += $folder
+        }
+    }
     foreach ($folder in $folders) {
         if ($PSCmdlet.ShouldProcess($folder.FullName, 'Remove expired certificate folder')) {
             Remove-Item -LiteralPath $folder.FullName -Recurse -Force -ErrorAction Stop

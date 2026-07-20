@@ -31,13 +31,52 @@
 
     Write-NSACMECertificateLog Info 'NetScaler' 'Configuring HTTP validation prerequisites.'
     $features = if ($Request.UseLbVip) { @('RESPONDER', 'SSL') } else { @('LB', 'RESPONDER', 'CS', 'SSL') }
+    $featuresToEnable = @($features)
+
     try {
-        Invoke-NSEnableNsFeature -Session $Session -Feature $features | Out-Null
+        $featureState = Invoke-NSGetNsFeature -Session $Session -ErrorAction Stop
+        if ($featureState) {
+            $enabledFeatures = @()
+            foreach ($feature in $features) {
+                $property = @($featureState.PSObject.Properties | Where-Object { $_.Name -ieq $feature } | Select-Object -First 1)
+                if ($property.Count -eq 0) { continue }
+
+                $value = $property[0].Value
+                $isEnabled = $false
+                if ($value -is [bool]) {
+                    $isEnabled = [bool]$value
+                } elseif ($value -is [int]) {
+                    $isEnabled = ([int]$value -ne 0)
+                } elseif ($null -ne $value) {
+                    $text = ([string]$value).Trim().ToLowerInvariant()
+                    $isEnabled = $text -in @('on', 'enabled', 'true', '1')
+                }
+
+                if ($isEnabled) {
+                    $enabledFeatures += $feature
+                }
+            }
+
+            $featuresToEnable = @($features | Where-Object { $enabledFeatures -notcontains $_ })
+            if ($featuresToEnable.Count -eq 0) {
+                Write-NSACMECertificateLog Debug 'NetScaler' "All required NetScaler features are already enabled: $($features -join ',')."
+            } elseif ($featuresToEnable.Count -lt $features.Count) {
+                Write-NSACMECertificateLog Debug 'NetScaler' "Only missing NetScaler features will be enabled: $($featuresToEnable -join ',')."
+            }
+        }
     } catch {
-        Write-NSACMECertificateLog Warning 'NetScaler' 'Could not enable one or more required NetScaler features. Continuing because the features may already be enabled or not required for this appliance/license profile.' -Data ([ordered]@{
-            Features = ($features -join ',')
-            Error    = $_.Exception.Message
-        })
+        Write-NSACMECertificateLog Debug 'NetScaler' "Could not pre-check NetScaler feature state before enable: $($_.Exception.Message)"
+    }
+
+    if ($featuresToEnable.Count -gt 0) {
+        try {
+            Invoke-NSEnableNsFeature -Session $Session -Feature $featuresToEnable | Out-Null
+        } catch {
+            Write-NSACMECertificateLog Warning 'NetScaler' 'Could not enable one or more required NetScaler features. Continuing because the features may already be enabled or not required for this appliance/license profile.' -Data ([ordered]@{
+                Features = ($featuresToEnable -join ',')
+                Error    = $_.Exception.Message
+            })
+        }
     }
 
     if (-not $Request.UseLbVip) {

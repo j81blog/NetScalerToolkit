@@ -26,7 +26,7 @@
         [Parameter(ParameterSetName = 'LECertificatesDNS')][Int]$DNSWaitTime = 120,
         [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Alias('NSCertNameToUpdate')][String]$CertKeyNameToUpdate,
         [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$RemovePrevious,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP', Mandatory = $true)][Parameter(ParameterSetName = 'LECertificatesDNS', Mandatory = $true)][Parameter(ParameterSetName = 'CleanExpiredCerts', Mandatory = $true)][String]$CertDir,
+        [Parameter(ParameterSetName = 'LECertificatesHTTP', Mandatory = $true)][Parameter(ParameterSetName = 'LECertificatesDNS', Mandatory = $true)][Parameter(ParameterSetName = 'CleanExpiredCerts', Mandatory = $true)][Parameter(ParameterSetName = 'AutoRun')][String]$CertDir,
         [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Object]$PfxPassword = $null,
         [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][String]$EmailAddress,
         [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][ValidateScript({
@@ -417,6 +417,7 @@
             $effectiveForceCertRenew = [bool]$ForceCertRenew -or [bool]$request.ForceCertRenew
             Write-NSACMECertificateLog Debug 'Request' "CN=$($request.CN); Validation=$($request.ValidationMethod); Domains=$($domains -join ', '); Force=$effectiveForceCertRenew."
             if ($request.ValidationMethod -eq 'http' -and -not $request.CsVipName -and -not $request.UseLbVip) { throw "CsVipName is required for HTTP validation unless UseLbVip is set. CN=$($request.CN)" }
+            if ([string]::IsNullOrWhiteSpace([string]$request.CertDir)) { throw "CertDir is required. Provide -CertDir on the command line or set CertDir in the config for CN=$($request.CN)." }
             if (-not (Test-Path -LiteralPath $request.CertDir)) { New-Item -ItemType Directory -Path $request.CertDir -Force | Out-Null }
             $existingAcmeOrder = $null
             $existingAcmeCertificate = $null
@@ -570,6 +571,7 @@
                     $null = Complete-PAOrder -Order (Get-PAOrder -MainDomain $request.CN -Refresh) -ErrorAction Stop
                     $cert = Get-PACertificate -MainDomain $request.CN -ErrorAction Stop
                 }
+                $cert = Copy-NSACMECertificateArtifactsToCertDir -Certificate $cert -CertDir $request.CertDir -CommonName $request.CN
                 $deploy = Install-NSACMECertificateNetScalerCertificate -Session $nsSession -Settings $settings -Request $request -Certificate $cert -PfxSecret $pfxSecret -CertificateChainValidation $settings.CertificateChainValidation -IsProduction:$Production
                 Write-NSACMECertificateLog Debug 'Deploy' "Installed NetScaler certkey '$($deploy.CertKeyName)' from PFX '$($deploy.PfxFileName)'."
                 $x509 = if ($cert.CertFile -and (Test-Path $cert.CertFile)) { [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.CertFile) } else { $null }
