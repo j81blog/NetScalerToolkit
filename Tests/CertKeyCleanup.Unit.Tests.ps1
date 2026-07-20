@@ -71,8 +71,8 @@ Describe 'CertKey cleanup' {
 
             $plan.CertKeys[0].Removable | Should -BeFalse
             $plan.CertKeys[0].Reference | Should -Contain 'Invoke-NSGetSSLCertKeyCrldistributionBinding'
-            Assert-MockCalled Invoke-NSDeleteSSLCertKey -Times 0 -Scope It
-            Assert-MockCalled Invoke-NSDeleteSystemFile -Times 0 -Scope It
+            Should -Invoke Invoke-NSDeleteSSLCertKey -Times 0
+            Should -Invoke Invoke-NSDeleteSystemFile -Times 0
         }
 
         It 'removes an unreferenced certkey and then removes orphaned cert and key files' {
@@ -115,7 +115,7 @@ Describe 'CertKey cleanup' {
             $result.PSObject.Properties.Name | Should -Contain 'RemovedFiles'
             $result.PSObject.Properties.Name | Should -Not -Contain 'Summary'
             $result.RemovedFiles.FileName | Should -Be 'orphan.pem'
-            Assert-MockCalled Write-Host -Times 5 -Scope It
+            Should -Invoke Write-Host -Times 5
         }
 
         It 'does not remove a SAML referenced certkey' {
@@ -128,7 +128,7 @@ Describe 'CertKey cleanup' {
 
             $plan.CertKeys[0].Removable | Should -BeFalse
             $plan.CertKeys[0].Reference | Should -Contain 'SAML IdP certificate'
-            Assert-MockCalled Invoke-NSDeleteSSLCertKey -Times 0 -Scope It
+            Should -Invoke Invoke-NSDeleteSSLCertKey -Times 0
         }
 
         It 'uses the running config as a conservative certkey reference guard' {
@@ -142,7 +142,7 @@ bind vpn vserver vpn_gateway -certkeyName gateway_cert
 
             $plan.CertKeys[0].Removable | Should -BeFalse
             $plan.CertKeys[0].Reference | Should -Contain 'running config'
-            Assert-MockCalled Invoke-NSDeleteSSLCertKey -Times 0 -Scope It
+            Should -Invoke Invoke-NSDeleteSSLCertKey -Times 0
         }
 
         It 'does not remove files used as SSL DH files' {
@@ -153,7 +153,7 @@ bind vpn vserver vpn_gateway -certkeyName gateway_cert
 
             $plan.Files[0].Removable | Should -BeFalse
             $plan.Files[0].Reference | Should -Contain 'SSL DH file'
-            Assert-MockCalled Invoke-NSDeleteSystemFile -Times 0 -Scope It
+            Should -Invoke Invoke-NSDeleteSystemFile -Times 0
         }
 
         It 'does not remove default NetScaler SSL support files' {
@@ -167,7 +167,7 @@ bind vpn vserver vpn_gateway -certkeyName gateway_cert
 
             @($plan.Files | Where-Object Removable).Count | Should -Be 0
             $plan.Files.Reference | Should -Contain 'excluded file'
-            Assert-MockCalled Invoke-NSDeleteSystemFile -Times 0 -Scope It
+            Should -Invoke Invoke-NSDeleteSystemFile -Times 0
         }
 
         It 'adds cleanup operation context when a NITRO call fails' {
@@ -185,7 +185,7 @@ bind vpn vserver vpn_gateway -certkeyName gateway_cert
 
             $plan.CertKeys[0].Removable | Should -BeFalse
             $plan.CertKeys[0].Reference | Should -Contain 'reference check failed: Invoke-NSGetSSLCertKeySSLOCSPResponderBinding for certkey maybe_used'
-            Assert-MockCalled Invoke-NSDeleteSSLCertKey -Times 0 -Scope It
+            Should -Invoke Invoke-NSDeleteSSLCertKey -Times 0
         }
 
         It 'keeps all certkeys when a global certkey reference check fails' {
@@ -196,7 +196,7 @@ bind vpn vserver vpn_gateway -certkeyName gateway_cert
 
             $plan.CertKeys[0].Removable | Should -BeFalse
             $plan.CertKeys[0].Reference | Should -Contain 'reference check failed: Get SSL certificate links'
-            Assert-MockCalled Invoke-NSDeleteSSLCertKey -Times 0 -Scope It
+            Should -Invoke Invoke-NSDeleteSSLCertKey -Times 0
         }
 
         It 'keeps files when a global file reference check fails' {
@@ -207,7 +207,7 @@ bind vpn vserver vpn_gateway -certkeyName gateway_cert
 
             $plan.Files[0].Removable | Should -BeFalse
             $plan.Files[0].Reference | Should -Contain 'reference check failed: Get SSL profiles'
-            Assert-MockCalled Invoke-NSDeleteSystemFile -Times 0 -Scope It
+            Should -Invoke Invoke-NSDeleteSystemFile -Times 0
         }
 
         It 'continues when deleting one removable file fails' {
@@ -234,7 +234,7 @@ bind vpn vserver vpn_gateway -certkeyName gateway_cert
             $plan = Invoke-NSCleanCertKeyFiles -Session (New-TestNSSession) -NoSaveConfig -Confirm:$false -PassThru -WarningAction SilentlyContinue
 
             @($plan.Files).Count | Should -Be 0
-            Assert-MockCalled Invoke-NSDeleteSystemFile -Times 0 -Scope It
+            Should -Invoke Invoke-NSDeleteSystemFile -Times 0
         }
     }
 }
