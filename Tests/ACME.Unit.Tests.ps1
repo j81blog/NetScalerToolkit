@@ -266,7 +266,47 @@ Describe 'ACME helper functions' {
                 } | Should -Throw -ExpectedMessage "*does not have a configured staging environment*"
             }
 
+            It 'requires CertDir for AutoRun requests when not provided in config or command line' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    $configPath = Join-Path $dir 'GenLe-Config.json'
+                    $config = [pscustomobject]@{
+                        settings = [pscustomobject]@{
+                            ManagementURL = 'https://ns-01.domain.local'
+                            ADCCredentialUsername = 'nsroot'
+                            ADCCredentialPassword = ConvertTo-NSACMECertificateLegacySecret -Object 'Sup3rS3cretP@ssw0rd'
+                        }
+                        certrequests = @(
+                            [pscustomobject]@{
+                                Enabled = $true
+                                CN = 'example.com'
+                                ValidationMethod = 'http'
+                                CsVipName = @('cs_example_http')
+                            }
+                        )
+                    }
+                    $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+                    Mock Import-Module {} -ParameterFilter { $Name -eq 'Posh-ACME' }
+                    Mock Set-NSACMEPoshACMEServer {}
+                    Mock Get-PAServer { [pscustomobject]@{ renewalInfo = 'https://example.com/acme/renewal-info'; DisableARI = $false } }
+                    Mock Connect-NSNode { [pscustomobject]@{ IsHA = $false; IsPrimary = $true } }
+
+                    {
+                        Request-NSACMECertificate `
+                            -ConfigFile $configPath `
+                            -AutoRun `
+                            -Production `
+                            -StopOnError
+                    } | Should -Throw -ExpectedMessage '*CertDir is required*'
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
             It 'logs feature enable warning details and continues HTTP initialization when feature enable fails' {
+                Mock Invoke-NSGetNsFeature { [pscustomobject]@{} }
                 Mock Invoke-NSEnableNsFeature { throw 'feature operation failed' }
                 Mock Write-NSACMECertificateLog {}
                 Mock Invoke-NSGetService { [pscustomobject]@{ name = 'svc_letsencrypt_cert_dummy' } }
@@ -295,6 +335,39 @@ Describe 'ACME helper functions' {
                     $Data.Features -eq 'RESPONDER,SSL' -and
                     $Data.Error -like '*feature operation failed*'
                 }
+            }
+
+            It 'skips feature enable when required NetScaler features are already enabled' {
+                Mock Invoke-NSGetNsFeature { [pscustomobject]@{ lb = 'ON'; responder = 'ENABLED'; cs = $true; ssl = 1 } }
+                Mock Invoke-NSEnableNsFeature {}
+                Mock Write-NSACMECertificateLog {}
+                Mock Invoke-NSGetService { [pscustomobject]@{ name = 'svc_letsencrypt_cert_dummy' } }
+                Mock Invoke-NSGetCSVServer { [pscustomobject]@{ name = 'cs_letsencrypt' } }
+                Mock Invoke-NSGetLBVServer { [pscustomobject]@{ name = 'lb_letsencrypt_cert' } }
+                Mock Invoke-NSGetLBVServerServiceBinding { @([pscustomobject]@{ servicename = 'svc_letsencrypt_cert_dummy' }) }
+                Mock Invoke-NSAddLBVServerServiceBinding {}
+                Mock Invoke-NSAddCSAction {}
+                Mock Invoke-NSUpdateCSAction {}
+                Mock Invoke-NSAddCSPolicy {}
+                Mock Invoke-NSUpdateCSPolicy {}
+                Mock Invoke-NSAddCSVServerCSPolicyBinding {}
+
+                $request = [pscustomobject]@{
+                    UseLbVip   = $false
+                    CsVipName  = @('cs_letsencrypt')
+                }
+                $settings = [pscustomobject]@{
+                    SvcName        = 'svc_letsencrypt_cert_dummy'
+                    SvcDestination = '127.0.0.1'
+                    LbName         = 'lb_letsencrypt_cert'
+                    TrafficDomain  = 0
+                    CsVipBinding   = 100
+                    CsaName        = 'csa_letsencrypt'
+                    CspName        = 'csp_letsencrypt'
+                }
+
+                { Initialize-NSACMECertificateHttpValidationConfig -Session ([pscustomobject]@{}) -Settings $settings -Request $request } | Should -Not -Throw
+                Should -Invoke Invoke-NSEnableNsFeature -Times 0
             }
 
         }
@@ -426,6 +499,68 @@ Describe 'ACME helper functions' {
                     })
 
                 $output | Should -BeNullOrEmpty
+            }
+
+            It 'copies generated ACME certificate artifacts to the configured CertDir' {
+                $sourceRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                $targetRoot = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $sourceRoot | Out-Null
+                New-Item -ItemType Directory -Path $targetRoot | Out-Null
+                try {
+                    $orderDir = Join-Path $sourceRoot '3416058976'
+                    $domainDir = Join-Path $orderDir 'topdesk-va-upgr.vgmdiensten.nl'
+                    New-Item -ItemType Directory -Path $domainDir -Force | Out-Null
+                    Set-Content -LiteralPath (Join-Path $domainDir 'fullchain.pfx') -Value 'pfx' -Encoding ASCII
+                    Set-Content -LiteralPath (Join-Path $domainDir 'cert.pfx') -Value 'pfx' -Encoding ASCII
+                    Set-Content -LiteralPath (Join-Path $domainDir 'chain.cer') -Value 'chain' -Encoding ASCII
+                    Set-Content -LiteralPath (Join-Path $domainDir 'cert.cer') -Value 'cert' -Encoding ASCII
+                    Set-Content -LiteralPath (Join-Path $domainDir 'order.json') -Value '{}' -Encoding ASCII
+
+                    Mock Write-NSACMECertificateLog {}
+                    Mock Get-Date -ParameterFilter { $Format -eq 'yyyyMMdd-HHmmss' } { '20260523-020149' }
+                    $certificate = [pscustomobject]@{
+                        PfxFullChain  = (Join-Path $domainDir 'fullchain.pfx')
+                        PfxFile       = (Join-Path $domainDir 'cert.pfx')
+                        ChainFile     = (Join-Path $domainDir 'chain.cer')
+                        CertFile      = (Join-Path $domainDir 'cert.cer')
+                        FullChainFile = (Join-Path $domainDir 'fullchain.cer')
+                    }
+
+                    $result = Copy-NSACMECertificateArtifactsToCertDir -Certificate $certificate -CertDir $targetRoot -CommonName 'topdesk-va-upgr.vgmdiensten.nl'
+
+                    $expectedDir = Join-Path $targetRoot 'LECRT-20260523-020149-topdesk-va-upgr.vgmdiensten.nl'
+                    (Test-Path -LiteralPath (Join-Path $expectedDir 'fullchain.pfx')) | Should -BeTrue
+                    (Test-Path -LiteralPath (Join-Path $expectedDir 'cert.pfx')) | Should -BeTrue
+                    (Test-Path -LiteralPath (Join-Path $expectedDir 'chain.cer')) | Should -BeTrue
+                    (Test-Path -LiteralPath (Join-Path $expectedDir 'cert.cer')) | Should -BeTrue
+                    $result.PfxFullChain | Should -Be (Join-Path $expectedDir 'fullchain.pfx')
+                    $result.PfxFile | Should -Be (Join-Path $expectedDir 'cert.pfx')
+                    $result.ChainFile | Should -Be (Join-Path $expectedDir 'chain.cer')
+                    $result.CertFile | Should -Be (Join-Path $expectedDir 'cert.cer')
+                } finally {
+                    Remove-Item -LiteralPath $sourceRoot -Recurse -Force -ErrorAction SilentlyContinue
+                    Remove-Item -LiteralPath $targetRoot -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            It 'removes expired legacy LECRT folders by folder timestamp and CN filter' {
+                $certDir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $certDir | Out-Null
+                try {
+                    New-Item -ItemType Directory -Path (Join-Path $certDir 'LECRT-20250101-010101-topdesk-va-upgr.vgmdiensten.nl') | Out-Null
+                    New-Item -ItemType Directory -Path (Join-Path $certDir 'LECRT-20260501-010101-topdesk-va-upgr.vgmdiensten.nl') | Out-Null
+                    New-Item -ItemType Directory -Path (Join-Path $certDir 'LECRT-20250101-010101-other.vgmdiensten.nl') | Out-Null
+
+                    Mock Get-Date { [datetime]'2026-06-08T15:00:00' }
+                    $result = Remove-NSACMECertificateExpiredDiskCertificate -CertDir $certDir -Days 100 -CN 'topdesk-va-upgr.vgmdiensten.nl'
+
+                    $result.Removed | Should -Be 1
+                    (Test-Path -LiteralPath (Join-Path $certDir 'LECRT-20250101-010101-topdesk-va-upgr.vgmdiensten.nl')) | Should -BeFalse
+                    (Test-Path -LiteralPath (Join-Path $certDir 'LECRT-20260501-010101-topdesk-va-upgr.vgmdiensten.nl')) | Should -BeTrue
+                    (Test-Path -LiteralPath (Join-Path $certDir 'LECRT-20250101-010101-other.vgmdiensten.nl')) | Should -BeTrue
+                } finally {
+                    Remove-Item -LiteralPath $certDir -Recurse -Force -ErrorAction SilentlyContinue
+                }
             }
         }
 

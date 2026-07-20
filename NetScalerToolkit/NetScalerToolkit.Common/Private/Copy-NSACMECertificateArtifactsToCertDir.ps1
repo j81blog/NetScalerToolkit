@@ -1,74 +1,93 @@
-﻿function Remove-NSACMECertificateExpiredDiskCertificate {
+﻿function Copy-NSACMECertificateArtifactsToCertDir {
 <#
     .SYNOPSIS
-        Removes old local certificate output folders.
+        Copies generated Posh-ACME certificate artifacts to the configured CertDir.
 
     .DESCRIPTION
-        Removes legacy GenLeCertForNS certificate directories older than the requested
-        number of days. When CN is supplied, only folders for that domain are removed.
+        Preserves legacy script behavior by copying generated certificate files from
+        Posh-ACME storage into the request CertDir. The target folder uses the
+        legacy GenLeCertForNS format `LECRT-yyyyMMdd-HHmmss-<common-name>`.
+
+    .PARAMETER Certificate
+        Posh-ACME certificate object.
 
     .PARAMETER CertDir
-        Certificate directory to clean.
+        Target certificate directory configured for the request.
 
-    .PARAMETER Days
-        Minimum folder age in days.
-
-    .PARAMETER CN
-        Optional common name used to narrow cleanup.
+    .PARAMETER CommonName
+        Request common name used as a fallback leaf folder.
 
     .NOTES
-        Function  : Remove-NSACMECertificateExpiredDiskCertificate
+        Function  : Copy-NSACMECertificateArtifactsToCertDir
         Author    : John Billekens
         Copyright : Copyright (c) John Billekens Consultancy
-        Version   : 2026.0525.2218
+        Version   : 2026.0608.1619
 #>
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$CertDir,
-        [int]$Days = 100,
-        [string]$CN
+        [Parameter(Mandatory)]
+        [object]$Certificate,
+
+        [Parameter(Mandatory)]
+        [string]$CertDir,
+
+        [Parameter(Mandatory)]
+        [string]$CommonName
     )
 
-    if (-not (Test-Path -LiteralPath $CertDir)) {
-        return [pscustomobject]@{ Removed = 0; CertDir = $CertDir; Pattern = $null }
+    $sourcePath = @(
+        $Certificate.PfxFullChain,
+        $Certificate.PfxFile,
+        $Certificate.FullChainFile,
+        $Certificate.ChainFile,
+        $Certificate.CertFile
+    ) | Where-Object { $_ } | Select-Object -First 1
+
+    if (-not $sourcePath -or -not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        return $Certificate
     }
 
-    $suffix = if ($CN) { [regex]::Escape(($CN -replace '^\*\.', '')) } else { '.+' }
-    $pattern = '^(?>CRT-SAN|LECRT)-(?<Date>[0-9]{8})-(?<Time>[0-9]{6})-(?<Suffix>' + $suffix + ')$'
-    $cutoff = (Get-Date).AddDays(-[int]$Days)
-    $folders = @()
-    foreach ($folder in @(Get-ChildItem -LiteralPath $CertDir -Directory -ErrorAction Stop)) {
-        $match = [regex]::Match($folder.Name, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-        if (-not $match.Success) { continue }
+    $sourceDomainDir = Split-Path -Parent $sourcePath
+    if (-not (Test-Path -LiteralPath $sourceDomainDir -PathType Container)) {
+        return $Certificate
+    }
 
-        $folderTimestamp = $null
-        try {
-            $folderTimestamp = [datetime]::ParseExact(
-                ('{0}{1}' -f $match.Groups['Date'].Value, $match.Groups['Time'].Value),
-                'yyyyMMddHHmmss',
-                [System.Globalization.CultureInfo]::InvariantCulture
-            )
-        } catch {
-            $folderTimestamp = $folder.CreationTime
-        }
+    $leafFolderName = ($CommonName -replace '^\*\.', '') -replace '[^a-zA-Z0-9_.=@:-]', '_'
+    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $targetRoot = Join-Path $CertDir ("LECRT-{0}-{1}" -f $timestamp, $leafFolderName)
 
-        if ($folderTimestamp -lt $cutoff) {
-            $folders += $folder
+    if (-not (Test-Path -LiteralPath $targetRoot -PathType Container)) {
+        New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
+    }
+
+    foreach ($fileName in 'cert.cer', 'cert.key', 'cert.pfx', 'chain.cer', 'chain0.cer', 'chain1.cer', 'fullchain.cer', 'fullchain.pfx', 'order.json', 'request.csr') {
+        $sourceFile = Join-Path $sourceDomainDir $fileName
+        if (Test-Path -LiteralPath $sourceFile -PathType Leaf) {
+            Copy-Item -LiteralPath $sourceFile -Destination (Join-Path $targetRoot $fileName) -Force
         }
     }
-    foreach ($folder in $folders) {
-        if ($PSCmdlet.ShouldProcess($folder.FullName, 'Remove expired certificate folder')) {
-            Remove-Item -LiteralPath $folder.FullName -Recurse -Force -ErrorAction Stop
+
+    foreach ($propertyName in 'PfxFullChain', 'PfxFile', 'FullChainFile', 'ChainFile', 'CertFile', 'KeyFile', 'CSRFile', 'OrderFile') {
+        if (-not ($Certificate.PSObject.Properties.Name -contains $propertyName)) { continue }
+        $propertyValue = [string]$Certificate.$propertyName
+        if ([string]::IsNullOrWhiteSpace($propertyValue)) { continue }
+        if (-not (Test-Path -LiteralPath $propertyValue -PathType Leaf)) { continue }
+
+        $targetPath = Join-Path $targetRoot (Split-Path -Leaf $propertyValue)
+        if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
+            Set-NSACMECertificateNoteProperty -InputObject $Certificate -Name $propertyName -Value $targetPath
         }
     }
-    [pscustomobject]@{ Removed = $folders.Count; CertDir = $CertDir; Pattern = $pattern }
+
+    Write-NSACMECertificateLog Info 'ACME' "Copied ACME certificate artifacts for $CommonName to '$targetRoot'."
+    return $Certificate
 }
 
 # SIG # Begin signature block
 # MIInigYJKoZIhvcNAQcCoIInezCCJ3cCAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBfo1ZHQADHpSzl
-# ckvs3FY2LMm72H2cWH6QtLpJ//vNM6CCIR0wggZFMIIELaADAgECAhAIMk+dt9qR
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDY8cnLxJpLvTsd
+# KFMalGVrgCtzMqCQFjduQTWVAWM2hKCCIR0wggZFMIIELaADAgECAhAIMk+dt9qR
 # b2Pk8qM8Xl1RMA0GCSqGSIb3DQEBCwUAMFYxCzAJBgNVBAYTAlBMMSEwHwYDVQQK
 # ExhBc3NlY28gRGF0YSBTeXN0ZW1zIFMuQS4xJDAiBgNVBAMTG0NlcnR1bSBDb2Rl
 # IFNpZ25pbmcgMjAyMSBDQTAeFw0yNDA0MDQxNDA0MjRaFw0yNzA0MDQxNDA0MjNa
@@ -250,30 +269,30 @@
 # bmluZyAyMDIxIENBAhAIMk+dt9qRb2Pk8qM8Xl1RMA0GCWCGSAFlAwQCAQUAoIGE
 # MBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQB
 # gjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZIhvcNAQkE
-# MSIEIDsp7DEyehMtPZ+FkmgGswu9mKlIQulCFFMaSUyG6o0MMA0GCSqGSIb3DQEB
-# AQUABIIBgHNYPrV+ujl7VA5b+LW3bcO3Ve/UDtpgAQrM1UDenVioIaTywp6NCxFK
-# 83X/EoXJXZgR4MktvbqPfPh/TsCfRV6Jut8+hg4S8IthY02s023EwA+IqMEyWnbu
-# leiowCdabNbCLlywJ4TCEDMH9bvUZTX7p6QRUQE7Oog8dnZltpKHCI8b/GDnDwAD
-# 1KFBeO0wQss0HW+snOSRFVJ3aguN7phQjXiSzrWsv+sSfK0RSDUMWuPlAxsh3qF/
-# SvHJYRbOpMRw+5SMWPaMPW3O7GwGhsGDsVrQN3Xlzsom1CRH+Z/pEop/cc0msH6I
-# Z3zQUKaKamnmhS0QxmA7vRypD8rT6MEGcUH9Fjej4vWTj1MzngZ3kJwmNhLj9tPj
-# vhg7lzpUZX1WVyM/j2PgdawG6BZK9sZtfO1QOqSEVppgs5I25xfEVxMoX01YyzR7
-# UE6SEkHeEnEhpxlzEqQBGIfmvmmXrF3PCodbaswc1EzpdrkCf8euwKfb8Bzk9Ceh
-# 4N1tU/3lo6GCAyMwggMfBgkqhkiG9w0BCQYxggMQMIIDDAIBATBqMFUxCzAJBgNV
+# MSIEIBh10xZKCzP2iC6O1ALl+ouN75iSc343PHzdZViLbfSmMA0GCSqGSIb3DQEB
+# AQUABIIBgFEJKRq1NWoGvUynk8+MtdzFyvmtn9Fn+uxEjN7VlfPqPlxgx0LzxG+N
+# cC1JTSkc8WlgAcBaVig/1H29EshBMQHK0bV57VgtjUZYXVoK7c4fVcND94VtbhtT
+# taj2vR/x5LCJqKXw5t0OO6ORrCrNgTpN9hLUkZOnHszQJCC2cic7ACTAelIAJU2E
+# YSJGDII8wXw5m7NpCpElPCGky1Y3nSxiYtksO9i2BbpuwSfHP6lOvn2Mt6bF3P2i
+# Ighx5ewoEt0AYoDBIyBqqwey6l76WFYXl+l1L5fyDCkBF48Ta4h7boG8g9ZnaWi5
+# 04tHgL+vdQirEQC+Qh8qfIghAFB8ELRCwJodUiftaoN3cYnh8a8Ppek/SEPvwnah
+# ws+48AseRP4FnE/zg7Z7R5yMQa4fhB8PhiMbQ2rqBL98otu82//ssqjfkML5QtXt
+# 8lZc8fKTNg7AuaPu+XhskgO9dg9quBbJR5qvh7OdNWDJSrbDt6Veq96J2Ldgvhbe
+# GHVY65ehCqGCAyMwggMfBgkqhkiG9w0BCQYxggMQMIIDDAIBATBqMFUxCzAJBgNV
 # BAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxLDAqBgNVBAMTI1NlY3Rp
 # Z28gUHVibGljIFRpbWUgU3RhbXBpbmcgQ0EgUjQxAhEA507yVbBQT/rbpt/3/Iuj
 # FTANBglghkgBZQMEAgIFAKB5MBgGCSqGSIb3DQEJAzELBgkqhkiG9w0BBwEwHAYJ
-# KoZIhvcNAQkFMQ8XDTI2MDcyMDEyMjQ1OFowPwYJKoZIhvcNAQkEMTIEMErJwvOY
-# J3kCRvpPSk2PCVFY/EjfckLDQL8BexEpGnaHEbvI4DyDe5tKQ4AMHFF4hDANBgkq
-# hkiG9w0BAQEFAASCAgAwCouATvoVXmHD6EApArJvi++xYZvJOQ47ciz/kOjFlr4a
-# 3nz3ni5OkXDcO4P+LHkIWCCGkgk8cnIVL+ZhTrJSxKqfP+23m3In9m9RE5xG9X/g
-# OxCv2g7b98AULrkEZGVik3YON6Z0Zf0nty5R/8On2Pt6bc7wo9lJ9TElM1O1bqlF
-# PHXTZuwYFVBnRP+TEAp3cxu6RX7t0r1lFpn4sJJtk3h/lp7O2dlN199nNQbVeEtx
-# 3/iips9phTEors2US6ZFFY4dMaCDBivVZ0M/a0ZzSeQMFRj0hQcX81JbaSjT6leI
-# 4NY4T9A0EMumdIAs2eG9riXy5vVJ++ka35Q9eGXRh2A7ZmFZkNAW+vN2p2fJykWN
-# Ya6X+6SxNk4cYYM7RGUiFcH32PNxc/2nmeUZHtrt+WCkZBfhkYL8DNpRL02E3A9L
-# rfPVeP2Z2Q69rkpXUbgoFEDnts+7S60qWAjilJLIb/eOLQZLQyl2zdf6PqyZNuw/
-# zvoicovFS3YJpolkzWFDGFWIw44xN5ZlzuvVpvMOq31ZIC/rRPDScgDfUClCrKtv
-# XlzatD8dqFsTPDFh4qYfz73HDqCkXxkgUllsn+d+mw5LOZm0EPYTIQEHXyglsjj7
-# 5zvLJ4rgxEQDLxlsysEwMGdVbXfJjrPy6HSEGvhLx1eC8Q9hGkxyGx5HwAoy1g==
+# KoZIhvcNAQkFMQ8XDTI2MDcyMDEyMjQ1MVowPwYJKoZIhvcNAQkEMTIEMMRrFlSl
+# IxMqAdsCp/b0M4Kcc+3En022opGrBgd1uJYq50u/KxYlGCml8H72UkL0+jANBgkq
+# hkiG9w0BAQEFAASCAgBR1Cbr234NRQGYL3s6aDy835OnToYnDj64AxxCwPUz810R
+# XdKEKCQP9EuKCECn3dysduUfxkcOarYv99F4Y4PWhY1NcYukZD/21EWDwBvD9uUf
+# 0B7H4ZTohTe/kDTTlu8UrOhaXFfmJkQxE15z2Z7PyDGA4YtTEVXvwHHkUUBkiAHm
+# QOtVHXZePTmtvwp62ZyRr/oNdEMjooxH2zGcapS8i/ZqGcb3bGzsIlIZ8QbKbW8E
+# rwHzczqvvc2tWss+OVmSP2JzEy3JewXgVTillKRNtGLNyaU0RnzE/CjPFrkVJLS0
+# GZGTQtjNcAUGhByDklTR4+KuUwH7X1xtnDdoIooWo/9ErVfzdw1sEtvqJOsBrMjl
+# QiIHAvRyP4woAOd3qtnJr7Dg7xNmX5vxBK8FaymFlYoCDQiQ7hvD83sqt0H23YxG
+# ExiwZ5krIWzMsnilhSvJh/6HfiGPPzOyjnNqF+26hbaikun2TJxziSHmNdIbC3/Y
+# UUAinpJTlRg3aIwuYOO8fcHiWGQp7eRHXj2omEnWbrzfBNnexM9ljNCxziTTnNxO
+# e2+RUo+sEjtH++UEalvXM4idldbsoKP2IPZ5t2wZVIyhZ3qTjgNPf87lTMMzducN
+# hKFN8ieLeVym/wWJFPYL5h+ou0h75+B+rmaMEp34QYoSDiNjtga8cFTJ1pu2ZA==
 # SIG # End signature block
