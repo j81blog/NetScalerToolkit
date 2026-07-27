@@ -370,6 +370,20 @@ function Get-NSDocsCommandSynopsis {
         'Update-NetScalerToolkit' = 'Update the local NetScalerToolkit module from GitHub.'
     }
 
+    # Comment-based help wins so index pages and command pages stay in sync.
+    try {
+        $help = Get-Help -Name $CommandName -ErrorAction Stop
+        $synopsis = ($help.Synopsis -split '\r?\n' |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -and $_ -notmatch '^\{\{.*\}\}$' } |
+            Select-Object -First 1)
+        if ($synopsis) {
+            return $synopsis
+        }
+    } catch {
+        Write-Verbose "No comment-based help synopsis for $CommandName."
+    }
+
     if (Test-Path -LiteralPath $Path) {
         $content = Get-Content -LiteralPath $Path -Raw
         $match = [regex]::Match($content, '(?ms)^## SYNOPSIS\s*(?<Synopsis>.*?)(?=^## )')
@@ -450,6 +464,30 @@ function New-NSDocsFallbackHelp {
         $_.Key -notin @('Verbose', 'Debug', 'ErrorAction', 'WarningAction', 'InformationAction', 'ProgressAction', 'ErrorVariable', 'WarningVariable', 'InformationVariable', 'OutVariable', 'OutBuffer', 'PipelineVariable')
     })
 
+    # Comment-based help is the source for prose; command metadata stays the source for
+    # types, parameter sets and aliases.
+    $help = $null
+    try { $help = Get-Help -Name $Command.Name -Full -ErrorAction Stop } catch { $help = $null }
+
+    $helpText = {
+        param($Value)
+
+        if ($null -eq $Value) { return '' }
+        $text = if ($Value -is [string]) { $Value } else { ($Value | ForEach-Object { $_.Text }) -join "`n" }
+        if ([string]::IsNullOrWhiteSpace($text)) { return '' }
+        # Comment-based help wraps at authoring width; unwrap so Markdown reflows it.
+        $paragraphs = $text -split '\r?\n\s*\r?\n'
+        (($paragraphs | ForEach-Object {
+            (($_ -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -join ' ')
+        } | Where-Object { $_ }) -join "`n`n").Trim()
+    }
+
+    $synopsis = & $helpText $help.Synopsis
+    if (-not $synopsis -or $synopsis -match '^\s*$') {
+        $synopsis = 'Generated command reference. Review the command syntax and parameter metadata before use.'
+    }
+    $description = & $helpText $help.Description
+
     $content = [System.Collections.Generic.List[string]]::new()
     $content.Add(('# {0}' -f $Command.Name))
     $content.Add('')
@@ -457,8 +495,14 @@ function New-NSDocsFallbackHelp {
     $content.Add('')
     $content.Add('## Synopsis')
     $content.Add('')
-    $content.Add('Generated command reference. Review the command syntax and parameter metadata before use.')
+    $content.Add($synopsis)
     $content.Add('')
+    if ($description) {
+        $content.Add('## Description')
+        $content.Add('')
+        $content.Add($description)
+        $content.Add('')
+    }
     $content.Add('## Syntax')
     $content.Add('')
     foreach ($line in $syntax) {
@@ -473,6 +517,15 @@ function New-NSDocsFallbackHelp {
         $metadata = $parameter.Value
         $content.Add(('### -{0}' -f $parameter.Key))
         $content.Add('')
+
+        $parameterHelp = & $helpText (
+            $help.parameters.parameter | Where-Object { $_.name -eq $parameter.Key } | Select-Object -First 1
+        ).description
+        if ($parameterHelp) {
+            $content.Add($parameterHelp)
+            $content.Add('')
+        }
+
         $content.Add(('- Type: `{0}`' -f $metadata.ParameterType.FullName))
         $mandatory = @($metadata.Attributes | Where-Object { $_.Mandatory }).Count -gt 0
         $content.Add(('- Required: `{0}`' -f $mandatory))
@@ -480,11 +533,50 @@ function New-NSDocsFallbackHelp {
         if ($metadata.Aliases.Count -gt 0) {
             $content.Add(('- Aliases: `{0}`' -f ($metadata.Aliases -join '`, `')))
         }
+        $validValues = @($metadata.Attributes | Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] } | ForEach-Object { $_.ValidValues })
+        if ($validValues.Count -gt 0) {
+            $content.Add(('- Accepted values: `{0}`' -f ($validValues -join '`, `')))
+        }
         $content.Add('')
     }
+
+    $examples = @($help.Examples.Example)
+    if ($examples.Count -gt 0) {
+        $content.Add('## Examples')
+        $content.Add('')
+        $exampleNumber = 0
+        foreach ($example in $examples) {
+            $exampleNumber++
+            $content.Add(('### Example {0}' -f $exampleNumber))
+            $content.Add('')
+            $code = ($example.code -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) -join "`n"
+            if ($code) {
+                $content.Add('```powershell')
+                $content.Add($code)
+                $content.Add('```')
+                $content.Add('')
+            }
+            $remark = & $helpText $example.remarks
+            if ($remark) {
+                $content.Add($remark)
+                $content.Add('')
+            }
+        }
+    }
+
+    $links = @($help.relatedLinks.navigationLink | ForEach-Object { $_.uri } | Where-Object { $_ })
+    if ($links.Count -gt 0) {
+        $content.Add('## Related links')
+        $content.Add('')
+        foreach ($link in $links) {
+            $content.Add(('- <{0}>' -f $link))
+        }
+        $content.Add('')
+    }
+
     $content.Add('## Notes')
     $content.Add('')
-    $content.Add('This page was generated from exported PowerShell command metadata.')
+    $content.Add('This page was generated from exported PowerShell command metadata and comment-based help.')
 
     Set-Content -LiteralPath $Path -Value $content -Encoding UTF8
 }

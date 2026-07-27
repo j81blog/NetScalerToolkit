@@ -1,6 +1,23 @@
 $modulePath = Join-Path -Path $PSScriptRoot -ChildPath '..\NetScalerToolkit\NetScalerToolkit.psd1'
 Import-Module $modulePath -Force
 
+# Exception types whose Data dictionary is unusable, mirroring third-party exceptions
+# that break the inner-exception walk in Write-NSACMECertificateErrorDetail.
+class NullDataTestException : System.Exception {
+    NullDataTestException([string]$message) : base($message) {}
+    [System.Collections.IDictionary] get_Data() { return $null }
+}
+
+class NullKeysTestException : System.Exception {
+    NullKeysTestException([string]$message) : base($message) {}
+    [System.Collections.IDictionary] get_Data() { return [NullKeysTestDictionary]::new() }
+}
+
+# Dictionary whose Keys collection is null.
+class NullKeysTestDictionary : System.Collections.Hashtable {
+    [System.Collections.ICollection] get_Keys() { return $null }
+}
+
 Describe 'ACME helper functions' {
     InModuleScope NetScalerToolkit {
         BeforeAll {
@@ -953,6 +970,218 @@ Describe 'ACME helper functions' {
                 }
             }
 
+        }
+
+        Context 'ACME account resolution' {
+            BeforeEach {
+                $script:NewAccountCalls = @()
+                $script:AccountListFilters = @()
+                $script:AccountStore = @()
+
+                # Plain stubs so mocks bind without Posh-ACME's private ValidateScript helpers.
+                function Get-PAAccount { param($ID, [switch]$List, $Status, $Contact, $KeyLength, [switch]$Refresh) }
+                function New-PAAccount { param($Contact, $KeyLength, [switch]$AcceptTOS, [switch]$Force, $ExtAcctKID, $ExtAcctHMACKey, $ExtAcctAlgorithm) }
+                function Set-PAAccount { param($ID, [switch]$Force) }
+
+                Mock Get-PAAccount {
+                    $script:AccountListFilters += [pscustomobject]@{ Contact = $Contact; KeyLength = $KeyLength; Status = $Status }
+                    @($script:AccountStore | Where-Object {
+                        $_.contact -contains "mailto:$Contact" -and $_.KeyLength -eq $KeyLength -and $_.status -eq 'valid'
+                    })
+                }
+                Mock New-PAAccount {
+                    $created = [pscustomobject]@{
+                        ID        = "acct-$($script:NewAccountCalls.Count + 1)"
+                        contact   = @("mailto:$Contact")
+                        KeyLength = $KeyLength
+                        status    = 'valid'
+                    }
+                    $script:NewAccountCalls += [pscustomobject]@{ Contact = $Contact; KeyLength = $KeyLength; Force = $Force }
+                    $script:AccountStore += $created
+                    $created
+                }
+                Mock Set-PAAccount {}
+
+                # Mirrors the account resolution block in Request-NSACMECertificate so the reuse
+                # contract is covered without standing up a full certificate request.
+                function Resolve-TestAcmeAccount {
+                    param([object[]]$Requests)
+
+                    $resolvedAcmeAccounts = @{}
+                    foreach ($request in $Requests) {
+                        $accountKeyLength = [string]$request.KeyLength
+                        if ($accountKeyLength -notmatch '^(ec-(256|384|521)|\d+)$') { $accountKeyLength = '2048' }
+                        $accountCacheKey = "$($request.EmailAddress)|$accountKeyLength"
+                        $account = $resolvedAcmeAccounts[$accountCacheKey]
+                        if (-not $account) {
+                            $existingAccounts = @()
+                            try {
+                                $existingAccounts = @(Get-PAAccount -List -Refresh -Contact $request.EmailAddress -KeyLength $accountKeyLength -Status 'valid' -ErrorAction Stop)
+                            } catch {
+                                $existingAccounts = @()
+                            }
+                            if ($existingAccounts.Count -gt 0) {
+                                $account = $existingAccounts[0]
+                            } else {
+                                $account = New-PAAccount -Contact $request.EmailAddress -KeyLength $accountKeyLength -AcceptTOS -ErrorAction Stop
+                            }
+                            $resolvedAcmeAccounts[$accountCacheKey] = $account
+                        }
+                        Set-PAAccount -ID $account.ID -Force | Out-Null
+                    }
+                }
+            }
+
+            It 'creates one account for many requests sharing a contact' {
+                $requests = 1..18 | ForEach-Object {
+                    [pscustomobject]@{ CN = "host$_.example.com"; EmailAddress = 'hostmaster@example.com'; KeyLength = '2048' }
+                }
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                Should -Invoke New-PAAccount -Times 1 -Exactly
+                $script:AccountListFilters.Count | Should -Be 1
+            }
+
+            It 'reuses an account that already exists on disk without creating one' {
+                $script:AccountStore = @(
+                    [pscustomobject]@{ ID = 'acct-existing'; contact = @('mailto:hostmaster@example.com'); KeyLength = '2048'; status = 'valid' }
+                )
+                $requests = 1..3 | ForEach-Object {
+                    [pscustomobject]@{ CN = "host$_.example.com"; EmailAddress = 'hostmaster@example.com'; KeyLength = '2048' }
+                }
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                Should -Invoke New-PAAccount -Times 0
+                Should -Invoke Set-PAAccount -Times 3
+            }
+
+            It 'creates separate accounts for distinct contacts' {
+                $requests = @(
+                    [pscustomobject]@{ CN = 'a.example.com'; EmailAddress = 'first@example.com'; KeyLength = '2048' }
+                    [pscustomobject]@{ CN = 'b.example.com'; EmailAddress = 'second@example.com'; KeyLength = '2048' }
+                    [pscustomobject]@{ CN = 'c.example.com'; EmailAddress = 'first@example.com'; KeyLength = '2048' }
+                )
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                Should -Invoke New-PAAccount -Times 2 -Exactly
+                $script:NewAccountCalls.Contact | Should -Be @('first@example.com', 'second@example.com')
+            }
+
+            It 'does not pass Force to New-PAAccount' {
+                $requests = @([pscustomobject]@{ CN = 'a.example.com'; EmailAddress = 'hostmaster@example.com'; KeyLength = '2048' })
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                $script:NewAccountCalls[0].Force | Should -Not -BeTrue
+            }
+
+            It 'keeps RSA key lengths as strings when filtering accounts' {
+                $requests = @([pscustomobject]@{ CN = 'a.example.com'; EmailAddress = 'hostmaster@example.com'; KeyLength = '4096' })
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                $script:AccountListFilters[0].KeyLength | Should -Be '4096'
+                $script:AccountListFilters[0].KeyLength | Should -BeOfType [string]
+                $script:NewAccountCalls[0].KeyLength | Should -Be '4096'
+            }
+
+            It 'preserves EC key lengths instead of falling back to RSA 2048' {
+                $requests = @([pscustomobject]@{ CN = 'a.example.com'; EmailAddress = 'hostmaster@example.com'; KeyLength = 'ec-384' })
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                $script:NewAccountCalls[0].KeyLength | Should -Be 'ec-384'
+            }
+
+            It 'falls back to RSA 2048 for missing or invalid key lengths' {
+                $requests = @(
+                    [pscustomobject]@{ CN = 'a.example.com'; EmailAddress = 'a@example.com'; KeyLength = $null }
+                    [pscustomobject]@{ CN = 'b.example.com'; EmailAddress = 'b@example.com'; KeyLength = 'not-a-key' }
+                )
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                $script:NewAccountCalls.KeyLength | Should -Be @('2048', '2048')
+            }
+
+            It 'treats different key lengths for one contact as separate accounts' {
+                $requests = @(
+                    [pscustomobject]@{ CN = 'a.example.com'; EmailAddress = 'hostmaster@example.com'; KeyLength = '2048' }
+                    [pscustomobject]@{ CN = 'b.example.com'; EmailAddress = 'hostmaster@example.com'; KeyLength = '4096' }
+                )
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                Should -Invoke New-PAAccount -Times 2 -Exactly
+                $script:NewAccountCalls.KeyLength | Should -Be @('2048', '4096')
+            }
+
+            It 'creates an account when listing existing accounts fails' {
+                Mock Get-PAAccount { throw 'account refresh failed' }
+                $requests = @([pscustomobject]@{ CN = 'a.example.com'; EmailAddress = 'hostmaster@example.com'; KeyLength = '2048' })
+
+                { Resolve-TestAcmeAccount -Requests $requests } | Should -Not -Throw
+                Should -Invoke New-PAAccount -Times 1 -Exactly
+            }
+        }
+
+        Context 'exception detail logging' {
+            It 'logs exception data entries when the Data dictionary is populated' {
+                Mock Write-NSACMECertificateLog {}
+
+                $exception = [System.Exception]::new('populated')
+                $exception.Data.Add('StatusCode', 400)
+                $exception.Data.Add('Detail', 'account not found')
+                $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'TestId', 'InvalidOperation', $null)
+
+                { Write-NSACMECertificateErrorDetail -ErrorRecord $errorRecord -Component 'Result' } | Should -Not -Throw
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -ParameterFilter {
+                    $Message -eq 'Exception data.' -and $Data.Name -eq 'StatusCode' -and $Data.Value -eq 400
+                }
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -ParameterFilter {
+                    $Message -eq 'Exception data.' -and $Data.Name -eq 'Detail' -and $Data.Value -eq 'account not found'
+                }
+            }
+
+            It 'walks a web exception inner chain without throwing' {
+                Mock Write-NSACMECertificateLog {}
+
+                $inner = [System.Net.WebException]::new('The remote server returned an error: (400) Bad Request.')
+                $exception = [System.Exception]::new('Unable to validate JWS :: Account not found', $inner)
+                $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'TestId', 'OperationStopped', $null)
+
+                { Write-NSACMECertificateErrorDetail -ErrorRecord $errorRecord -Component 'Result' } | Should -Not -Throw
+                Should -Invoke Write-NSACMECertificateLog -Times 0 -ParameterFilter {
+                    $Message -eq 'Exception data unavailable.'
+                }
+            }
+
+            It 'reports the exception shape instead of throwing when Data is null' {
+                Mock Write-NSACMECertificateLog {}
+
+                $exception = [NullDataTestException]::new('no data')
+                $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'TestId', 'InvalidOperation', $null)
+
+                { Write-NSACMECertificateErrorDetail -ErrorRecord $errorRecord -Component 'Result' } | Should -Not -Throw
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -ParameterFilter {
+                    $Message -eq 'Exception data unavailable.' -and $Data.DataIsNull -eq $true -and $Data.KeysIsNull -eq $true
+                }
+            }
+
+            It 'reports the exception shape instead of throwing when Data keys are null' {
+                Mock Write-NSACMECertificateLog {}
+
+                $exception = [NullKeysTestException]::new('unusable data')
+                $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'TestId', 'InvalidOperation', $null)
+
+                { Write-NSACMECertificateErrorDetail -ErrorRecord $errorRecord -Component 'Result' } | Should -Not -Throw
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -ParameterFilter {
+                    $Message -eq 'Exception data unavailable.' -and $Data.DataIsNull -eq $false -and $Data.KeysIsNull -eq $true
+                }
+            }
         }
     }
 }
