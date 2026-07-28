@@ -1,106 +1,270 @@
-﻿# Invoke-NSAddND6
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version:
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Invoke-NSAddND6
 
-## Synopsis
+## SYNOPSIS
+Creates a NetScaler nd6 resource.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Invoke-NSAddND6 [-Ifnum <String>] -Mac <String> -Neighbor <String> [-TrafficDomain <Int32>] [-Vlan <Int32>] [-Vtep <String>] [-Vxlan <Int32>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>] [-PassThru <SwitchParameter>]
+```
+Invoke-NSAddND6 [-Ifnum <String>] -Mac <String> [-Neighbor] <String> [-TrafficDomain <Int32>] [-Vlan <Int32>]
+ [-Vtep <String>] [-Vxlan <Int32>] [-Session <PSObject>] [-IgnoreNotFound] [-ReturnNullOnNotFound]
+ [-ThrowOnWarning] [-PassThru] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Configuration for nd6 resource.
 
-### -Confirm
+## EXAMPLES
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `cf`
+### EXAMPLE 1
+```
+Invoke-NSAddND6 -Neighbor 'example' -Mac 'example' -PassThru
+```
+
+### EXAMPLE 2
+```
+Invoke-NSAddND6 -Neighbor 'example' -Mac 'example' -WhatIf
+```
+
+## PARAMETERS
 
 ### -Ifnum
+Interface through which the adjacent network device is available, specified in slot/port notation (for example, 1/3).
+Use spaces to separate multiple entries.
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -IgnoreNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Mac
+MAC address of the adjacent network device.
 
-- Type: `System.String`
-- Required: `True`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: True
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Neighbor
+Link-local IPv6 address of the adjacent network device to add to the ND6 table.
 
-- Type: `System.String`
-- Required: `True`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -PassThru
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ReturnNullOnNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Session
-
-- Type: `System.Management.Automation.PSObject`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ThrowOnWarning
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: True
+Position: 1
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -TrafficDomain
+Integer value that uniquely identifies the traffic domain in which you want to configure the entity.
+If you do not specify an ID, the entity becomes part of the default traffic domain, which has an ID of 0.
+Minimum value = 0 Maximum value = 4094
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Vlan
+Integer value that uniquely identifies the VLAN on which the adjacent network device exists.
+Minimum value = 1 Maximum value = 4094
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Vtep
+IP address of the VXLAN tunnel endpoint (VTEP) through which the IPv6 address of this ND6 entry is reachable.
+Minimum length = 1
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Vxlan
+ID of the VXLAN on which the IPv6 address of this ND6 entry is reachable.
+Minimum value = 1 Maximum value = 16777215
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Session
+The NetScaler session.
+If omitted, the current default session is used.
+
+```yaml
+Type: PSObject
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: (Get-NSSession)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -IgnoreNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ReturnNullOnNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ThrowOnWarning
+Treats NITRO warning responses as terminating errors.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -PassThru
+Returns the updated resource after the operation completes.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -WhatIf
+Shows what would happen if the cmdlet runs.
+The cmdlet is not run.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `wi`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: wi
 
-## Notes
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Confirm
+Prompts you for confirmation before running the cmdlet.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: cf
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+### System.Management.Automation.PSCustomObject
+## NOTES
+Generated from NetScaler NITRO API metadata.
+Generated: 2026-06-01 21:28
+Supported metadata versions: 13.1, 14.1.
+
+## RELATED LINKS
 

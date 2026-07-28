@@ -1,160 +1,427 @@
-﻿# Invoke-NSUnsetCMPParameter
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version:
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Invoke-NSUnsetCMPParameter
 
-## Synopsis
+## SYNOPSIS
+Clears one or more NetScaler cmpparameter resource properties.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Invoke-NSUnsetCMPParameter [-AddvaryHeader <SwitchParameter>] [-CMPBypassPct <SwitchParameter>] [-CMPLevel <SwitchParameter>] [-CMPOnpush <SwitchParameter>] [-Externalcache <SwitchParameter>] [-Heurexpiry <SwitchParameter>] [-Heurexpiryhistwt <SwitchParameter>] [-Heurexpirythres <SwitchParameter>] [-MinRessize <SwitchParameter>] [-PolicyType <SwitchParameter>] [-Quantumsize <SwitchParameter>] [-RandomgzipFileName <SwitchParameter>] [-RandomgzipFileNameMaxLength <SwitchParameter>] [-RandomgzipFileNameMinLength <SwitchParameter>] [-ServerCMP <SwitchParameter>] [-VaryHeaderValue <SwitchParameter>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>] [-PassThru <SwitchParameter>]
+```
+Invoke-NSUnsetCMPParameter [-AddvaryHeader] [-CMPBypassPct] [-CMPLevel] [-CMPOnpush] [-Externalcache]
+ [-Heurexpiry] [-Heurexpiryhistwt] [-Heurexpirythres] [-MinRessize] [-PolicyType] [-Quantumsize]
+ [-RandomgzipFileName] [-RandomgzipFileNameMaxLength] [-RandomgzipFileNameMinLength] [-ServerCMP]
+ [-VaryHeaderValue] [[-Session] <PSObject>] [-IgnoreNotFound] [-ReturnNullOnNotFound] [-ThrowOnWarning]
+ [-PassThru] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Configuration for CMP parameter resource.
+
+## EXAMPLES
+
+### EXAMPLE 1
+```
+Invoke-NSUnsetCMPParameter -AddvaryHeader ENABLED -PassThru
+```
+
+### EXAMPLE 2
+```
+Invoke-NSUnsetCMPParameter -AddvaryHeader ENABLED -WhatIf
+```
+
+## PARAMETERS
 
 ### -AddvaryHeader
+Control insertion of the Vary header in HTTP responses compressed by Citrix ADC.
+Intermediate caches store different versions of the response for different values of the headers present in the Vary response header.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -CMPBypassPct
+Citrix ADC CPU threshold after which compression is not performed.
+Range: 0 - 100.
+Default value: 100 Minimum value = 0 Maximum value = 100
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -CMPLevel
+Specify a compression level.
+Available settings function as follows: * Optimal - Corresponds to a gzip GZIP level of 5-7.
+* Best speed - Corresponds to a gzip level of 1.
+* Best compression - Corresponds to a gzip level of 9.
+Default value: optimal Possible values = optimal, bestspeed, bestcompression
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -CMPOnpush
+Citrix ADC does not wait for the quantum to be filled before starting to compress data.
+Upon receipt of a packet with a PUSH flag, the appliance immediately begins compression of the accumulated packets.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
 
-### -Confirm
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `cf`
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Externalcache
+Enable insertion of Cache-Control: private response directive to indicate response message is intended for a single user and must not be cached by a shared or proxy cache.
+Default value: NO Possible values = YES, NO
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Heurexpiry
+Heuristic basefile expiry.
+Default value: OFF Possible values = ON, OFF
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Heurexpiryhistwt
+For heuristic basefile expiry, weightage to be given to historical delta compression ratio, specified as percentage.
+For example, to give 25% weightage to historical ratio (and therefore 75% weightage to the ratio for current delta compression transaction), specify 25.
+Default value: 50 Minimum value = 1 Maximum value = 100
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Heurexpirythres
+Threshold compression ratio for heuristic basefile expiry, multiplied by 100.
+For example, to set the threshold ratio to 1.25, specify 125.
+Default value: 100 Minimum value = 1 Maximum value = 1000
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
 
-### -IgnoreNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -MinRessize
+Smallest response size, in bytes, to be compressed.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
 
-### -PassThru
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -PolicyType
+Type of the policy.
+The only possible value is ADVANCED.
+Default value: ADVANCED Possible values = ADVANCED
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Quantumsize
+Minimum quantum of data to be filled before compression begins.
+Default value: 57344 Minimum value = 8 Maximum value = 63488
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -RandomgzipFileName
+Control the addition of a random filename of random length in the GZIP header to apply the Heal-the-BREACH mitigation for the BREACH attack.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -RandomgzipFileNameMaxLength
+Maximum length of the random filename to be added in the GZIP header to apply the Heal-the-BREACH mitigation for the BREACH attack.
+Default value: 63 Minimum value = 8 Maximum value = 63
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -RandomgzipFileNameMinLength
+Minimum length of the random filename to be added in the GZIP header to apply the Heal-the-BREACH mitigation for the BREACH attack.
+Default value: 8 Minimum value = 8 Maximum value = 63
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
 
-### -ReturnNullOnNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -ServerCMP
+Allow the server to send compressed data to the Citrix ADC.
+With the default setting, the Citrix ADC appliance handles all compression.
+Default value: ON Possible values = ON, OFF
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
 
-### -Session
-
-- Type: `System.Management.Automation.PSObject`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ThrowOnWarning
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -VaryHeaderValue
+The value of the HTTP Vary header for compressed responses.
+If this argument is not specified, a default value of "Accept-Encoding" will be used.
+Minimum length = 1
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Session
+The NetScaler session.
+If omitted, the current default session is used.
+
+```yaml
+Type: PSObject
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 1
+Default value: (Get-NSSession)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -IgnoreNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ReturnNullOnNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ThrowOnWarning
+Treats NITRO warning responses as terminating errors.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -PassThru
+Returns the updated resource after the operation completes.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -WhatIf
+Shows what would happen if the cmdlet runs.
+The cmdlet is not run.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `wi`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: wi
 
-## Notes
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Confirm
+Prompts you for confirmation before running the cmdlet.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: cf
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+### System.Management.Automation.PSCustomObject
+## NOTES
+Generated from NetScaler NITRO API metadata.
+Generated: 2026-06-01 21:28
+Supported metadata versions: 13.1, 14.1.
+
+## RELATED LINKS
 

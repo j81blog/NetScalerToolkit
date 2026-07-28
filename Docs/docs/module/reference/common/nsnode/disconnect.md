@@ -1,40 +1,108 @@
-﻿# Disconnect-NSNode
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version: https://netscalertoolkit.j81.nl/module/reference/common/nsnode/disconnect/
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Disconnect-NSNode
 
-## Synopsis
+## SYNOPSIS
+Disconnects from a NetScaler node.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Disconnect-NSNode [-Session <PSObject>]
+```
+Disconnect-NSNode [[-Session] <PSObject>] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Logs out the NetScaler session and clears it from the module.
+Sessions that use
+NITRO header authentication have no server-side session to end, so for those the
+local session is simply discarded.
 
-### -Confirm
+When the session was created with -HA, the primary and secondary node sessions
+are logged out as well.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `cf`
+## EXAMPLES
+
+### EXAMPLE 1
+```
+Disconnect-NSNode
+```
+
+Logs out the active session.
+
+### EXAMPLE 2
+```
+Disconnect-NSNode -Session $labSession
+```
+
+Logs out a specific session while leaving the active session untouched.
+
+## PARAMETERS
 
 ### -Session
+Session to disconnect.
+Defaults to the active session from Get-NSSession.
 
-- Type: `System.Management.Automation.PSObject`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: PSObject
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 1
+Default value: (Get-NSSession)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -WhatIf
+Shows what would happen if the cmdlet runs.
+The cmdlet is not run.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `wi`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: wi
 
-## Notes
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Confirm
+Prompts you for confirmation before running the cmdlet.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: cf
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+## NOTES
+
+## RELATED LINKS
+
+[https://netscalertoolkit.j81.nl/module/reference/common/nsnode/disconnect/](https://netscalertoolkit.j81.nl/module/reference/common/nsnode/disconnect/)
+
+[https://netscalertoolkit.j81.nl/](https://netscalertoolkit.j81.nl/)
+
 

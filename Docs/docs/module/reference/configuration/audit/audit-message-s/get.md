@@ -1,78 +1,205 @@
-﻿# Invoke-NSGetAuditMessageS
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version:
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Invoke-NSGetAuditMessageS
 
-## Synopsis
+## SYNOPSIS
+Gets NetScaler auditmessages configuration.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Invoke-NSGetAuditMessageS [-Filter <Hashtable>] [-ViewSummary <SwitchParameter>] [-Loglevel <String[]>] [-Numofmesgs <Int32>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>]
+### All (Default)
+```
+Invoke-NSGetAuditMessageS [-Filter <Hashtable>] [-ViewSummary] [-Loglevel <String[]>] [-Numofmesgs <Int32>]
+ [-Session <PSObject>] [-IgnoreNotFound] [-ReturnNullOnNotFound] [-ThrowOnWarning] [<CommonParameters>]
 ```
 
-```powershell
-Invoke-NSGetAuditMessageS [-Count <SwitchParameter>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>]
+### Count
+```
+Invoke-NSGetAuditMessageS [-Count] [-Session <PSObject>] [-IgnoreNotFound] [-ReturnNullOnNotFound]
+ [-ThrowOnWarning] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Configuration for audit message resource.
 
-### -Count
+## EXAMPLES
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+### EXAMPLE 1
+```
+Invoke-NSGetAuditMessageS
+```
+
+### EXAMPLE 2
+```
+Invoke-NSGetAuditMessageS -Filter @{ servicetype = 'HTTP' }
+```
+
+## PARAMETERS
 
 ### -Filter
+{{ Fill Filter Description }}
 
-- Type: `System.Collections.Hashtable`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Hashtable
+Parameter Sets: All
+Aliases:
 
-### -IgnoreNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Loglevel
-
-- Type: `System.String[]`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Numofmesgs
-
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ReturnNullOnNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Session
-
-- Type: `System.Management.Automation.PSObject`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ThrowOnWarning
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -ViewSummary
+Requests the NITRO summary view.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: All
+Aliases:
 
-## Notes
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Loglevel
+Audit log level filter, which specifies the types of events to display.
+The following loglevels are valid: * ALL - All events.
+* EMERGENCY - Events that indicate an immediate crisis on the server.
+* ALERT - Events that might require action.
+* CRITICAL - Events that indicate an imminent server crisis.
+* ERROR - Events that indicate some type of error.
+* WARNING - Events that require action in the near future.
+* NOTICE - Events that the administrator should know about.
+* INFORMATIONAL - All but low-level events.
+* DEBUG - All events, in extreme detail.
+Possible values = ALL, EMERGENCY, ALERT, CRITICAL, ERROR, WARNING, NOTICE, INFORMATIONAL, DEBUG
+
+```yaml
+Type: String[]
+Parameter Sets: All
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Numofmesgs
+Number of log messages to be displayed.
+Default value: 20 Minimum value = 1 Maximum value = 256
+
+```yaml
+Type: Int32
+Parameter Sets: All
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Count
+Returns only the number of matching resources.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: Count
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Session
+The NetScaler session.
+If omitted, the current default session is used.
+
+```yaml
+Type: PSObject
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: (Get-NSSession)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -IgnoreNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ReturnNullOnNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ThrowOnWarning
+Treats NITRO warning responses as terminating errors.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+### System.Management.Automation.PSCustomObject
+## NOTES
+Generated from NetScaler NITRO API metadata.
+Generated: 2026-06-01 21:28
+Supported metadata versions: 13.1, 14.1.
+
+## RELATED LINKS
 

@@ -1,118 +1,305 @@
-﻿# Invoke-NSUpdateAAATacacsparams
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version:
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Invoke-NSUpdateAAATacacsparams
 
-## Synopsis
+## SYNOPSIS
+Updates a NetScaler aaatacacsparams resource.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Invoke-NSUpdateAAATacacsparams [-AccountIng <String>] [-AuditFailedcmds <String>] [-Authorization <String>] [-AuthTimeout <Int32>] [-DefaultAuthenticationGroup <String>] [-GroupAttrName <String>] [-ServerIp <String>] [-ServerPort <Int32>] [-Tacacssecret <String>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>] [-PassThru <SwitchParameter>]
+```
+Invoke-NSUpdateAAATacacsparams [[-AccountIng] <String>] [[-AuditFailedcmds] <String>]
+ [[-Authorization] <String>] [[-AuthTimeout] <Int32>] [[-DefaultAuthenticationGroup] <String>]
+ [[-GroupAttrName] <String>] [[-ServerIp] <String>] [[-ServerPort] <Int32>] [[-Tacacssecret] <String>]
+ [[-Session] <PSObject>] [-IgnoreNotFound] [-ReturnNullOnNotFound] [-ThrowOnWarning] [-PassThru] [-WhatIf]
+ [-Confirm] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Configuration for tacacs parameters resource.
+
+## EXAMPLES
+
+### EXAMPLE 1
+```
+Invoke-NSUpdateAAATacacsparams  -PassThru
+```
+
+### EXAMPLE 2
+```
+Invoke-NSUpdateAAATacacsparams  -WhatIf
+```
+
+## PARAMETERS
 
 ### -AccountIng
+Send accounting messages to the TACACS+ server.
+Possible values = ON, OFF
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 1
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -AuditFailedcmds
+The option for sending accounting messages to the TACACS+ server.
+Possible values = ON, OFF
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 2
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Authorization
+Use streaming authorization on the TACACS+ server.
+Possible values = ON, OFF
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 3
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -AuthTimeout
+Maximum number of seconds that the Citrix ADC waits for a response from the TACACS+ server.
+Default value: 3 Minimum value = 1
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
 
-### -Confirm
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `cf`
+Required: False
+Position: 4
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -DefaultAuthenticationGroup
+This is the default group that is chosen when the authentication succeeds in addition to extracted groups.
+Maximum length = 64
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 5
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -GroupAttrName
+TACACS+ group attribute name.Used for group extraction on the TACACS+ server.
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -IgnoreNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -PassThru
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ReturnNullOnNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: 6
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -ServerIp
+IP address of your TACACS+ server.
+Minimum length = 1
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 7
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -ServerPort
+Port number on which the TACACS+ server listens for connections.
+Default value: 49 Minimum value = 1
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
 
-### -Session
-
-- Type: `System.Management.Automation.PSObject`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: 8
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Tacacssecret
+Key shared between the TACACS+ server and clients.
+Required for allowing the Citrix ADC to communicate with the TACACS+ server.
+Minimum length = 1
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 9
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Session
+The NetScaler session.
+If omitted, the current default session is used.
+
+```yaml
+Type: PSObject
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 10
+Default value: (Get-NSSession)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -IgnoreNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ReturnNullOnNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -ThrowOnWarning
+Treats NITRO warning responses as terminating errors.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -PassThru
+Returns the updated resource after the operation completes.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -WhatIf
+Shows what would happen if the cmdlet runs.
+The cmdlet is not run.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `wi`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: wi
 
-## Notes
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Confirm
+Prompts you for confirmation before running the cmdlet.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: cf
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+### System.Management.Automation.PSCustomObject
+## NOTES
+Generated from NetScaler NITRO API metadata.
+Generated: 2026-06-01 21:28
+Supported metadata versions: 13.1, 14.1.
+
+## RELATED LINKS
 

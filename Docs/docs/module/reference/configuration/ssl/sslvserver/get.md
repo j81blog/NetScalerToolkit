@@ -1,76 +1,191 @@
-﻿# Invoke-NSGetSSLVServer
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version:
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Invoke-NSGetSSLVServer
 
-## Synopsis
+## SYNOPSIS
+Gets NetScaler sslvserver configuration.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Invoke-NSGetSSLVServer [-Filter <Hashtable>] [-ViewSummary <SwitchParameter>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>]
+### All (Default)
+```
+Invoke-NSGetSSLVServer [-Filter <Hashtable>] [-ViewSummary] [-Session <PSObject>] [-IgnoreNotFound]
+ [-ReturnNullOnNotFound] [-ThrowOnWarning] [<CommonParameters>]
 ```
 
-```powershell
-Invoke-NSGetSSLVServer -VServerName <String> [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>]
+### ByName
+```
+Invoke-NSGetSSLVServer [-VServerName] <String> [-Session <PSObject>] [-IgnoreNotFound] [-ReturnNullOnNotFound]
+ [-ThrowOnWarning] [<CommonParameters>]
 ```
 
-```powershell
-Invoke-NSGetSSLVServer [-Count <SwitchParameter>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>]
+### Count
+```
+Invoke-NSGetSSLVServer [-Count] [-Session <PSObject>] [-IgnoreNotFound] [-ReturnNullOnNotFound]
+ [-ThrowOnWarning] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Configuration for SSL virtual server resource.
 
-### -Count
+## EXAMPLES
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+### EXAMPLE 1
+```
+Invoke-NSGetSSLVServer
+```
 
-### -Filter
+### EXAMPLE 2
+```
+Invoke-NSGetSSLVServer -VServerName 'sslvserver_example'
+```
 
-- Type: `System.Collections.Hashtable`
-- Required: `False`
-- Pipeline input: `False`
+### EXAMPLE 3
+```
+Invoke-NSGetSSLVServer -Filter @{ servicetype = 'HTTP' }
+```
 
-### -IgnoreNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ReturnNullOnNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Session
-
-- Type: `System.Management.Automation.PSObject`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ThrowOnWarning
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ViewSummary
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+## PARAMETERS
 
 ### -VServerName
+Name of the SSL virtual server for which to set advanced configuration.
+Minimum length = 1
 
-- Type: `System.String`
-- Required: `True`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: ByName
+Aliases:
 
-## Notes
+Required: True
+Position: 1
+Default value: None
+Accept pipeline input: True (ByPropertyName)
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Filter
+NITRO filter values as a hashtable.
+
+```yaml
+Type: Hashtable
+Parameter Sets: All
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ViewSummary
+Requests the NITRO summary view.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: All
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Count
+Returns only the number of matching resources.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: Count
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Session
+The NetScaler session.
+If omitted, the current default session is used.
+
+```yaml
+Type: PSObject
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: (Get-NSSession)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -IgnoreNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ReturnNullOnNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ThrowOnWarning
+Treats NITRO warning responses as terminating errors.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+### System.Management.Automation.PSCustomObject
+## NOTES
+Generated from NetScaler NITRO API metadata.
+Generated: 2026-06-01 21:28
+Supported metadata versions: 13.1, 14.1.
+
+## RELATED LINKS
 

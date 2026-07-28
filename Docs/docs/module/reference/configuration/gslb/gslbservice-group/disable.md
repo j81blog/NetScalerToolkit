@@ -1,94 +1,239 @@
-﻿# Invoke-NSDisableGSLBServiceGroup
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version:
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Invoke-NSDisableGSLBServiceGroup
 
-## Synopsis
+## SYNOPSIS
+Disables a NetScaler gslbservicegroup resource.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Invoke-NSDisableGSLBServiceGroup -ServiceGroupName <String> [-Delay <Int32>] [-Graceful <String>] [-Port <Int32>] [-ServerName <String>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>] [-PassThru <SwitchParameter>]
+```
+Invoke-NSDisableGSLBServiceGroup [-ServiceGroupName] <String> [-Delay <Int32>] [-Graceful <String>]
+ [-Port <Int32>] [-ServerName <String>] [-Session <PSObject>] [-IgnoreNotFound] [-ReturnNullOnNotFound]
+ [-ThrowOnWarning] [-PassThru] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Configuration for GSLB service group resource.
 
-### -Confirm
+## EXAMPLES
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `cf`
+### EXAMPLE 1
+```
+Invoke-NSDisableGSLBServiceGroup -ServiceGroupName 'gslbservicegroup_example' -PassThru
+```
 
-### -Delay
-
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Graceful
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -IgnoreNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -PassThru
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Port
-
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ReturnNullOnNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ServerName
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+## PARAMETERS
 
 ### -ServiceGroupName
+Name of the GSLB service group.
+Must begin with an ASCII alphabetic or underscore (_) character, and must contain only ASCII alphanumeric, underscore, hash (#), period (.), space, colon (:), at (@), equals (=), and hyphen (-) characters.
+Can be changed after the name is created.
+Minimum length = 1
 
-- Type: `System.String`
-- Required: `True`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: True
+Position: 1
+Default value: None
+Accept pipeline input: True (ByPropertyName)
+Accept wildcard characters: False
+```
+
+### -Delay
+The time allowed (in seconds) for a graceful shutdown.
+During this period, new connections or requests will continue to be sent to this service for clients who already have a persistent session on the system.
+Connections or requests from fresh or new clients who do not yet have a persistence sessions on the system will not be sent to the service.
+Instead, they will be load balanced among other available services.
+After the delay time expires, no new requests or connections will be sent to the service.
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Graceful
+Wait for all existing connections to the service to terminate before shutting down the service.
+Default value: NO Possible values = YES, NO
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Port
+Server port number.
+Range 1 - 65535 * in CLI is represented as 65535 in NITRO API
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ServerName
+Name of the server to which to bind the service group.
+Minimum length = 1
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Session
+The NetScaler session.
+If omitted, the current default session is used.
 
-- Type: `System.Management.Automation.PSObject`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: PSObject
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: (Get-NSSession)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -IgnoreNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ReturnNullOnNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -ThrowOnWarning
+Treats NITRO warning responses as terminating errors.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -PassThru
+Returns the updated resource after the operation completes.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -WhatIf
+Shows what would happen if the cmdlet runs.
+The cmdlet is not run.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `wi`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: wi
 
-## Notes
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Confirm
+Prompts you for confirmation before running the cmdlet.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: cf
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+### System.Management.Automation.PSCustomObject
+## NOTES
+Generated from NetScaler NITRO API metadata.
+Generated: 2026-06-01 21:28
+Supported metadata versions: 13.1, 14.1.
+
+## RELATED LINKS
 

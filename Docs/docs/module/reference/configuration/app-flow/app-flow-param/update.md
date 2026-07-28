@@ -1,370 +1,1001 @@
-﻿# Invoke-NSUpdateAppFlowParam
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version:
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Invoke-NSUpdateAppFlowParam
 
-## Synopsis
+## SYNOPSIS
+Updates a NetScaler appflowparam resource.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Invoke-NSUpdateAppFlowParam [-AAAUserName <String>] [-AnalyticsAuthtoken <String>] [-AppNameRefresh <Int32>] [-AuditLogs <String>] [-Cacheinsight <String>] [-ClientTrafficonly <String>] [-ConnectionChaining <String>] [-CqarePortIng <String>] [-Distributedtracing <String>] [-Disttracingsamplingrate <Int32>] [-EmailAddress <String>] [-Events <String>] [-FlowRecordInterval <Int32>] [-GxsessionrePortIng <String>] [-HTTPAuthorization <String>] [-HTTPContentType <String>] [-HTTPCookie <String>] [-HTTPDomain <String>] [-HTTPHost <String>] [-HTTPLocation <String>] [-HTTPMethod <String>] [-HTTPQuerywithURL <String>] [-HTTPReferer <String>] [-HTTPSEtCookie <String>] [-HTTPSEtCookie2 <String>] [-HTTPURL <String>] [-HTTPUserAgent <String>] [-HTTPVia <String>] [-HTTPXforwardedfor <String>] [-IdentifierName <String>] [-IdentifiersessionName <String>] [-LogstreamovernSIP <String>] [-Lsnlogging <String>] [-Metrics <String>] [-Observationdomainid <Int32>] [-ObservationdomainName <String>] [-Observationpointid <Int32>] [-SecurityinsightRecordInterval <Int32>] [-Securityinsighttraffic <String>] [-SkipcacheRedirectIonHTTPTransAction <String>] [-Subscriberawareness <String>] [-Subscriberidobfuscation <String>] [-Subscriberidobfuscationalgo <String>] [-TCPAttackcounterInterval <Int32>] [-Templaterefresh <Int32>] [-TimeseriesovernSIP <String>] [-UDPPmtu <Int32>] [-URLCategory <String>] [-UsageRecordInterval <Int32>] [-Videoinsight <String>] [-WebSaasappusagerePortIng <String>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>] [-PassThru <SwitchParameter>]
+```
+Invoke-NSUpdateAppFlowParam [[-AAAUserName] <String>] [[-AnalyticsAuthtoken] <String>]
+ [[-AppNameRefresh] <Int32>] [[-AuditLogs] <String>] [[-Cacheinsight] <String>] [[-ClientTrafficonly] <String>]
+ [[-ConnectionChaining] <String>] [[-CqarePortIng] <String>] [[-Distributedtracing] <String>]
+ [[-Disttracingsamplingrate] <Int32>] [[-EmailAddress] <String>] [[-Events] <String>]
+ [[-FlowRecordInterval] <Int32>] [[-GxsessionrePortIng] <String>] [[-HTTPAuthorization] <String>]
+ [[-HTTPContentType] <String>] [[-HTTPCookie] <String>] [[-HTTPDomain] <String>] [[-HTTPHost] <String>]
+ [[-HTTPLocation] <String>] [[-HTTPMethod] <String>] [[-HTTPQuerywithURL] <String>] [[-HTTPReferer] <String>]
+ [[-HTTPSEtCookie] <String>] [[-HTTPSEtCookie2] <String>] [[-HTTPURL] <String>] [[-HTTPUserAgent] <String>]
+ [[-HTTPVia] <String>] [[-HTTPXforwardedfor] <String>] [[-IdentifierName] <String>]
+ [[-IdentifiersessionName] <String>] [[-LogstreamovernSIP] <String>] [[-Lsnlogging] <String>]
+ [[-Metrics] <String>] [[-Observationdomainid] <Int32>] [[-ObservationdomainName] <String>]
+ [[-Observationpointid] <Int32>] [[-SecurityinsightRecordInterval] <Int32>]
+ [[-Securityinsighttraffic] <String>] [[-SkipcacheRedirectIonHTTPTransAction] <String>]
+ [[-Subscriberawareness] <String>] [[-Subscriberidobfuscation] <String>]
+ [[-Subscriberidobfuscationalgo] <String>] [[-TCPAttackcounterInterval] <Int32>] [[-Templaterefresh] <Int32>]
+ [[-TimeseriesovernSIP] <String>] [[-UDPPmtu] <Int32>] [[-URLCategory] <String>]
+ [[-UsageRecordInterval] <Int32>] [[-Videoinsight] <String>] [[-WebSaasappusagerePortIng] <String>]
+ [[-Session] <PSObject>] [-IgnoreNotFound] [-ReturnNullOnNotFound] [-ThrowOnWarning] [-PassThru] [-WhatIf]
+ [-Confirm] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Configuration for AppFlow parameter resource.
+
+## EXAMPLES
+
+### EXAMPLE 1
+```
+Invoke-NSUpdateAppFlowParam  -PassThru
+```
+
+### EXAMPLE 2
+```
+Invoke-NSUpdateAppFlowParam  -WhatIf
+```
+
+## PARAMETERS
 
 ### -AAAUserName
+Enable AppFlow AAA Username logging.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 1
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -AnalyticsAuthtoken
+Authentication token to be set by the agent.
+Maximum length = 256
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 2
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -AppNameRefresh
+Interval, in seconds, at which to send Appnames to the configured collectors.
+Appname refers to the name of an entity (virtual server, service, or service group) in the Citrix ADC.
+Default value: 600 Minimum value = 60 Maximum value = 3600
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 3
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -AuditLogs
+Enable Auditlogs to be sent to the Telemetry Agent.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 4
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Cacheinsight
+Flag to determine whether cache records need to be exported or not.
+If this flag is true and IC is enabled, cache records are exported instead of L7 HTTP records.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 5
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -ClientTrafficonly
+Generate AppFlow records for only the traffic from the client.
+Default value: NO Possible values = YES, NO
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -Confirm
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `cf`
+Required: False
+Position: 6
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -ConnectionChaining
+Enable connection chaining so that the client server flows of a connection are linked.
+Also the connection chain ID is propagated across Citrix ADCs, so that in a multi-hop environment the flows belonging to the same logical connection are linked.
+This id is also logged as part of appflow record.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 7
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -CqarePortIng
+TCP CQA reporting enable/disable knob.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 8
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Distributedtracing
+Enable generation of the distributed tracing templates in the Appflow records.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 9
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Disttracingsamplingrate
+Sampling rate for Distributed Tracing.
+Default value: 0 Minimum value = 0 Maximum value = 100
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 10
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -EmailAddress
+Enable AppFlow user email-id logging.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 11
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Events
+Enable Events to be sent to the Telemetry Agent.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 12
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -FlowRecordInterval
+Interval, in seconds, at which to send flow records to the configured collectors.
+Default value: 60 Minimum value = 60 Maximum value = 3600
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 13
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -GxsessionrePortIng
+Enable this option for Gx session reporting.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 14
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -HTTPAuthorization
+Include the HTTP Authorization header information.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 15
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -HTTPContentType
+Include the HTTP Content-Type header sent from the server to the client to determine the type of the content sent.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 16
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -HTTPCookie
+Include the cookie that was in the HTTP request the appliance received from the client.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 17
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -HTTPDomain
+Include the http domain request to be exported.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 18
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -HTTPHost
+Include the host identified in the HTTP request that the appliance received from the client.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 19
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -HTTPLocation
+Include the HTTP location headers returned from the HTTP responses.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 20
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -HTTPMethod
+Include the method that was specified in the HTTP request that the appliance received from the client.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 21
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -HTTPQuerywithURL
+Include the HTTP query segment along with the URL that the Citrix ADC received from the client.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 22
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -HTTPReferer
+Include the web page that was last visited by the client.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 23
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -HTTPSEtCookie
+Include the Set-cookie header sent from the server to the client in response to a HTTP request.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 24
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -HTTPSEtCookie2
+Include the Set-cookie header sent from the server to the client in response to a HTTP request.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 25
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -HTTPURL
+Include the http URL that the Citrix ADC received from the client.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 26
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -HTTPUserAgent
+Include the client application through which the HTTP request was received by the Citrix ADC.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 27
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -HTTPVia
+Include the httpVia header which contains the IP address of proxy server through which the client accessed the server.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 28
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -HTTPXforwardedfor
+Include the httpXForwardedFor header, which contains the original IP Address of the client using a proxy server to access the server.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 29
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -IdentifierName
+Include the stream identifier name to be exported.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 30
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -IdentifiersessionName
+Include the stream identifier session name to be exported.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -IgnoreNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: 31
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -LogstreamovernSIP
+To use the Citrix ADC IP to send Logstream records instead of the SNIP.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 32
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Lsnlogging
+On enabling this option, the Citrix ADC will send the Large Scale Nat(LSN) records to the configured collectors.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 33
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Metrics
+Enable Citrix ADC Stats to be sent to the Telemetry Agent.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 34
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Observationdomainid
+An observation domain groups a set of Citrix ADCs based on deployment: cluster, HA etc.
+A unique Observation Domain ID is required to be assigned to each such group.
+Default value: 0 Minimum value = 1000
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 35
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -ObservationdomainName
+Name of the Observation Domain defined by the observation domain ID.
+Maximum length = 127
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 36
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Observationpointid
+An observation point ID is identifier for the NetScaler from which appflow records are being exported.
+By default, the NetScaler IP is the observation point ID.
+Minimum value = 1
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
 
-### -PassThru
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ReturnNullOnNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: 37
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -SecurityinsightRecordInterval
+Interval, in seconds, at which to send security insight flow records to the configured collectors.
+Default value: 600 Minimum value = 60 Maximum value = 3600
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 38
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Securityinsighttraffic
+Enable/disable the feature individually on appflow action.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -Session
-
-- Type: `System.Management.Automation.PSObject`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: 39
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -SkipcacheRedirectIonHTTPTransAction
+Skip Cache http transaction.
+This HTTP transaction is specific to Cache Redirection module.
+In Case of Cache Miss there will be another HTTP transaction initiated by the cache server.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 40
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Subscriberawareness
+Enable this option for logging end user MSISDN in L4/L7 appflow records.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 41
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Subscriberidobfuscation
+Enable this option for obfuscating MSISDN in L4/L7 appflow records.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 42
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Subscriberidobfuscationalgo
+Algorithm(MD5 or SHA256) to be used for obfuscating MSISDN.
+Default value: MD5 Possible values = MD5, SHA256
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 43
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -TCPAttackcounterInterval
+Interval, in seconds, at which to send tcp attack counters to the configured collectors.
+If 0 is configured, the record is not sent.
+Default value: 0 Minimum value = 0 Maximum value = 3600
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 44
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Templaterefresh
+Refresh interval, in seconds, at which to export the template data.
+Because data transmission is in UDP, the templates must be resent at regular intervals.
+Default value: 600 Minimum value = 60 Maximum value = 3600
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
 
-### -ThrowOnWarning
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: 45
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -TimeseriesovernSIP
+To use the Citrix ADC IP to send Time series data such as metrics and events, instead of the SNIP.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 46
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -UDPPmtu
+MTU, in bytes, for IPFIX UDP packets.
+Default value: 1472 Minimum value = 128 Maximum value = 1472
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 47
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -URLCategory
+Include the URL category record.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 48
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -UsageRecordInterval
+On enabling this option, the NGS will send bandwidth usage record to configured collectors.
+Default value: 0 Minimum value = 0 Maximum value = 7200
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 49
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Videoinsight
+Enable/disable the feature individually on appflow action.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 50
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -WebSaasappusagerePortIng
+On enabling this option, NGS will send data used by Web/saas app at the end of every HTTP transaction to configured collectors.
+Default value: DISABLED Possible values = ENABLED, DISABLED
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 51
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Session
+The NetScaler session.
+If omitted, the current default session is used.
+
+```yaml
+Type: PSObject
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 52
+Default value: (Get-NSSession)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -IgnoreNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ReturnNullOnNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ThrowOnWarning
+Treats NITRO warning responses as terminating errors.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -PassThru
+Returns the updated resource after the operation completes.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -WhatIf
+Shows what would happen if the cmdlet runs.
+The cmdlet is not run.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `wi`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: wi
 
-## Notes
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Confirm
+Prompts you for confirmation before running the cmdlet.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: cf
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+### System.Management.Automation.PSCustomObject
+## NOTES
+Generated from NetScaler NITRO API metadata.
+Generated: 2026-06-01 21:28
+Supported metadata versions: 13.1, 14.1.
+
+## RELATED LINKS
 

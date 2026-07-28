@@ -1,100 +1,294 @@
-﻿# Invoke-NSUpdateEncryptionKey
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version:
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Invoke-NSUpdateEncryptionKey
 
-## Synopsis
+## SYNOPSIS
+Updates a NetScaler nsencryptionkey resource.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Invoke-NSUpdateEncryptionKey [-Comment <String>] [-InitializationVector <String>] [-KeyValue <String>] [-Method <String>] -Name <String> [-Padding <String>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>] [-PassThru <SwitchParameter>]
+```
+Invoke-NSUpdateEncryptionKey [-Comment <String>] [-InitializationVector <String>] [-KeyValue <String>]
+ [-Method <String>] [-Name] <String> [-Padding <String>] [-Session <PSObject>] [-IgnoreNotFound]
+ [-ReturnNullOnNotFound] [-ThrowOnWarning] [-PassThru] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Configuration for encryption key resource.
+
+## EXAMPLES
+
+### EXAMPLE 1
+```
+Invoke-NSUpdateEncryptionKey -Name 'example' -Comment 'Updated by automation' -PassThru
+```
+
+### EXAMPLE 2
+```
+Invoke-NSUpdateEncryptionKey -Name 'example' -Comment 'Updated by automation' -WhatIf
+```
+
+## PARAMETERS
 
 ### -Comment
+Comments associated with this encryption key.
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -Confirm
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `cf`
-
-### -IgnoreNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -InitializationVector
+The initalization voector (IV) for a block cipher, one block of data used to initialize the encryption.
+The best practice is to not specify an IV, in which case a new random IV will be generated for each encryption.
+The format must be iv_data or keyid_iv_data to include the generated IV in the encrypted data.
+The IV should only be specified if it cannot be included in the encrypted data.
+The IV length is the cipher block size: RC4 - not used (error if IV is specified) DES - 8 bytes (all modes) DES3 - 8 bytes (all modes) AES128 - 16 bytes (all modes) AES192 - 16 bytes (all modes) AES256 - 16 bytes (all modes).
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -KeyValue
+The hex-encoded key value.
+The length is determined by the cipher method: RC4 - 16 bytes DES - 8 bytes (all modes) DES3 - 24 bytes (all modes) AES128 - 16 bytes (all modes) AES192 - 24 bytes (all modes) AES256 - 32 bytes (all modes) Note that the keyValue will be encrypted when it it is saved.
+There is a special key value AUTO which generates a new random key for the specified method.
+This kind of key is intended for use cases where the NetScaler both encrypts and decrypts the same data, such an HTTP header.
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Method
+Cipher method to be used to encrypt and decrypt content.
+NONE - no encryption or decryption is performed The output of ENCRYPT() and DECRYPT() is the same as the input.
+RC4 - the RC4 stream cipher with a 128 bit (16 byte) key; RC4 is now considered insecure and should only be used if required by existing applciations.
+DES\[-\<mode\>\] - the Data Encryption Standard (DES) block cipher with a 64-bit (8 byte) key, with 56 data bits and 8 parity bits.
+DES is considered less secure than DES3 or AES so it should only be used if required by an existing applicastion.
+The optional mode is described below; DES without a mode is equivalent to DES-CBC.
+DES3\[-\<mode\>\] - the Triple Data Encryption Standard (DES) block cipher with a 192-bit (24 byte) key.
+The optional mode is described below; DES3 without a mode is equivalent to DES3-CBC.
+AES\<keysize\>\[-\<mode\>\] - the Advanced Encryption Standard block cipher, available with 128 bit (16 byte), 192 bit (24 byte), and 256 bit (32 byte) keys.
+The optional mode is described below; AES\<keysize\> without a mode is equivalent to AES\<keysize\>-CBC.
+For a block cipher, the \<mode\> specifies how multiple blocks of plaintext are encrypted and how the Initialization Vector (IV) is used.
+Choices are CBC (Cipher Block Chaining) - Each block of plaintext is XORed with the previous ciphertext block, or IV for the first block, before being encrypted.
+Padding is required if the plaintext is not a multiple of the cipher block size.
+CFB (Cipher Feedback) - The previous ciphertext block, or the IV for the first block, is encrypted and the output is XORed with the current plaintext block to create the current ciphertext block.
+The 128-bit version of CFB is provided.
+Padding is not required.
+OFB (Output Feedback) - A keystream is generated by applying the cipher successfully to the IV and XORing the keystream blocks with the plaintext.
+Padding is not required.
+ECB (Electronic Codebook) - Each block of plaintext is independently encrypted.
+An IV is not used.
+Padding is required.
+This mode is considered less secure than the other modes because the same plaintext always produces the same encrypted text and should only be used if required by an existing application.
+Possible values = NONE, RC4, DES3, AES128, AES192, AES256, DES, DES-CBC, DES-CFB, DES-OFB, DES-ECB, DES3-CBC, DES3-CFB, DES3-OFB, DES3-ECB, AES128-CBC, AES128-CFB, AES128-OFB, AES128-ECB, AES192-CBC, AES192-CFB, AES192-OFB, AES192-ECB, AES256-CBC, AES256-CFB, AES256-OFB, AES256-ECB
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Name
+Key name.
+This follows the same syntax rules as other expression entity names: It must begin with an alpha character (A-Z or a-z) or an underscore (_).
+The rest of the characters must be alpha, numeric (0-9) or underscores.
+It cannot be re or xp (reserved for regular and XPath expressions).
+It cannot be an expression reserved word (e.g.
+SYS or HTTP).
+It cannot be used for an existing expression object (HTTP callout, patset, dataset, stringmap, or named expression).
+Minimum length = 1
 
-- Type: `System.String`
-- Required: `True`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: True
+Position: 1
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Padding
+Enables or disables the padding of plaintext to meet the block size requirements of block ciphers: ON - For encryption, PKCS5/7 padding is used, which appends n bytes of value n on the end of the plaintext to bring it to the cipher block lnegth.
+If the plaintext length is alraady a multiple of the block length, an additional block with bytes of value block_length will be added.
+For decryption, ISO 10126 padding is accepted, which expects the last byte of the block to be the number of added pad bytes.
+Note that this accepts PKCS5/7 padding, as well as ANSI_X923 padding.
+Padding ON is the default for the ECB and CBD modes.
+OFF - No padding.
+An Undef error will occur with the ECB or CBC modes if the plaintext length is not a multitple of the cipher block size.
+This can be used with the CFB and OFB modes, and with the ECB and CBC modes if the plaintext will always be an integral number of blocks, or if custom padding is implemented using a policy extension function.
+Padding OFf is the default for CFB and OFB modes.
+Default value: DEFAULT Possible values = OFF, ON
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -PassThru
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ReturnNullOnNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Session
+The NetScaler session.
+If omitted, the current default session is used.
 
-- Type: `System.Management.Automation.PSObject`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: PSObject
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: (Get-NSSession)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -IgnoreNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ReturnNullOnNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -ThrowOnWarning
+Treats NITRO warning responses as terminating errors.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -PassThru
+Returns the updated resource after the operation completes.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -WhatIf
+Shows what would happen if the cmdlet runs.
+The cmdlet is not run.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `wi`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: wi
 
-## Notes
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Confirm
+Prompts you for confirmation before running the cmdlet.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: cf
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+### System.Management.Automation.PSCustomObject
+## NOTES
+Generated from NetScaler NITRO API metadata.
+Generated: 2026-06-01 21:28
+Supported metadata versions: 13.1, 14.1.
+
+## RELATED LINKS
 

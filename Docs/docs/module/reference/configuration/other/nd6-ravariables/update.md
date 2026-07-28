@@ -1,148 +1,386 @@
-﻿# Invoke-NSUpdateND6RAVariables
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version:
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Invoke-NSUpdateND6RAVariables
 
-## Synopsis
+## SYNOPSIS
+Updates a NetScaler nd6ravariables resource.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Invoke-NSUpdateND6RAVariables [-Ceaserouteradv <String>] [-Currhoplimit <Int32>] [-Defaultlifetime <Int32>] [-Linkmtu <Int32>] [-Managedaddrconfig <String>] [-MaxRtadvInterval <Int32>] [-MinRtadvInterval <Int32>] [-OnlyunicastrtadvResponse <String>] [-Otheraddrconfig <String>] [-Reachabletime <Int32>] [-Retranstime <Int32>] [-Sendrouteradv <String>] [-SrCLINklayeraddroption <String>] -Vlan <Int32> [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>] [-PassThru <SwitchParameter>]
+```
+Invoke-NSUpdateND6RAVariables [-Ceaserouteradv <String>] [-Currhoplimit <Int32>] [-Defaultlifetime <Int32>]
+ [-Linkmtu <Int32>] [-Managedaddrconfig <String>] [-MaxRtadvInterval <Int32>] [-MinRtadvInterval <Int32>]
+ [-OnlyunicastrtadvResponse <String>] [-Otheraddrconfig <String>] [-Reachabletime <Int32>]
+ [-Retranstime <Int32>] [-Sendrouteradv <String>] [-SrCLINklayeraddroption <String>] [-Vlan] <Int32>
+ [-Session <PSObject>] [-IgnoreNotFound] [-ReturnNullOnNotFound] [-ThrowOnWarning] [-PassThru] [-WhatIf]
+ [-Confirm] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Configuration for nd6 Router Advertisment configuration variables resource.
+
+## EXAMPLES
+
+### EXAMPLE 1
+```
+Invoke-NSUpdateND6RAVariables -Vlan 1 -PassThru
+```
+
+### EXAMPLE 2
+```
+Invoke-NSUpdateND6RAVariables -Vlan 1 -WhatIf
+```
+
+## PARAMETERS
 
 ### -Ceaserouteradv
+Cease router advertisements on this vlan.
+Default value: NO Possible values = YES, NO
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -Confirm
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `cf`
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Currhoplimit
+Current Hop limit.
+Default value: 64 Minimum value = 0 Maximum value = 255
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Defaultlifetime
+Default life time, in seconds.
+Default value: 1800 Minimum value = 0 Maximum value = 9000
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
 
-### -IgnoreNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Linkmtu
+The Link MTU.
+Default value: 0 Minimum value = 0 Maximum value = 1500
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Managedaddrconfig
+Value to be placed in the Managed address configuration flag field.
+Default value: NO Possible values = YES, NO
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -MaxRtadvInterval
+Maximum time allowed between unsolicited multicast RAs, in seconds.
+Default value: 600 Minimum value = 4 Maximum value = 1800
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -MinRtadvInterval
+Minimum time interval between RA messages, in seconds.
+Default value: 198 Minimum value = 3 Maximum value = 1350
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -OnlyunicastrtadvResponse
+Send only Unicast Router Advertisements in respond to Router Solicitations.
+Default value: NO Possible values = YES, NO
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Otheraddrconfig
+Value to be placed in the Other configuration flag field.
+Default value: NO Possible values = YES, NO
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -PassThru
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Reachabletime
+Reachable time, in milliseconds.
+Default value: 0 Minimum value = 0 Maximum value = 3600000
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Retranstime
+Retransmission time, in milliseconds.
+Default value: 0
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
 
-### -ReturnNullOnNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Sendrouteradv
+whether the router sends periodic RAs and responds to Router Solicitations.
+Default value: NO Possible values = YES, NO
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -Session
-
-- Type: `System.Management.Automation.PSObject`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -SrCLINklayeraddroption
+Include source link layer address option in RA messages.
+Default value: YES Possible values = YES, NO
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -ThrowOnWarning
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Vlan
+The VLAN number.
+Minimum value = 1 Maximum value = 4094
 
-- Type: `System.Int32`
-- Required: `True`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: True
+Position: 1
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Session
+The NetScaler session.
+If omitted, the current default session is used.
+
+```yaml
+Type: PSObject
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: (Get-NSSession)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -IgnoreNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ReturnNullOnNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ThrowOnWarning
+Treats NITRO warning responses as terminating errors.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -PassThru
+Returns the updated resource after the operation completes.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -WhatIf
+Shows what would happen if the cmdlet runs.
+The cmdlet is not run.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `wi`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: wi
 
-## Notes
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Confirm
+Prompts you for confirmation before running the cmdlet.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: cf
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+### System.Management.Automation.PSCustomObject
+## NOTES
+Generated from NetScaler NITRO API metadata.
+Generated: 2026-06-01 21:28
+Supported metadata versions: 13.1, 14.1.
+
+## RELATED LINKS
 

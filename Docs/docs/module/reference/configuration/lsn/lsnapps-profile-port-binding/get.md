@@ -1,76 +1,194 @@
-﻿# Invoke-NSGetLSNAppsProfilePortBinding
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version:
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Invoke-NSGetLSNAppsProfilePortBinding
 
-## Synopsis
+## SYNOPSIS
+Gets NetScaler lsnappsprofile_port_binding configuration.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Invoke-NSGetLSNAppsProfilePortBinding [-Filter <Hashtable>] [-ViewSummary <SwitchParameter>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>]
+### All (Default)
+```
+Invoke-NSGetLSNAppsProfilePortBinding [-Filter <Hashtable>] [-ViewSummary] [-Session <PSObject>]
+ [-IgnoreNotFound] [-ReturnNullOnNotFound] [-ThrowOnWarning] [<CommonParameters>]
 ```
 
-```powershell
-Invoke-NSGetLSNAppsProfilePortBinding -AppsProfileName <String> [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>]
+### ByName
+```
+Invoke-NSGetLSNAppsProfilePortBinding [-AppsProfileName] <String> [-Session <PSObject>] [-IgnoreNotFound]
+ [-ReturnNullOnNotFound] [-ThrowOnWarning] [<CommonParameters>]
 ```
 
-```powershell
-Invoke-NSGetLSNAppsProfilePortBinding [-Count <SwitchParameter>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>]
+### Count
+```
+Invoke-NSGetLSNAppsProfilePortBinding [-Count] [-Session <PSObject>] [-IgnoreNotFound] [-ReturnNullOnNotFound]
+ [-ThrowOnWarning] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Binding object showing the port that can be bound to lsnappsprofile.
+
+## EXAMPLES
+
+### EXAMPLE 1
+```
+Invoke-NSGetLSNAppsProfilePortBinding
+```
+
+### EXAMPLE 2
+```
+Invoke-NSGetLSNAppsProfilePortBinding -AppsProfileName 'lsnappsprofile_port_binding_example'
+```
+
+### EXAMPLE 3
+```
+Invoke-NSGetLSNAppsProfilePortBinding -Filter @{ servicetype = 'HTTP' }
+```
+
+## PARAMETERS
 
 ### -AppsProfileName
+Name for the LSN application profile.
+Must begin with an ASCII alphanumeric or underscore (_) character, and must contain only ASCII alphanumeric, underscore, hash (#), period (.), space, colon (:), at (@), equals (=), and hyphen (-) characters.
+Cannot be changed after the LSN application profile is created.
+The following requirement applies only to the Citrix ADC CLI: If the name includes one or more spaces, enclose the name in double or single quotation marks (for example, "lsn application profile1" or 'lsn application profile1').
+Minimum length = 1 Maximum length = 127
 
-- Type: `System.String`
-- Required: `True`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: ByName
+Aliases:
 
-### -Count
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: True
+Position: 1
+Default value: None
+Accept pipeline input: True (ByPropertyName)
+Accept wildcard characters: False
+```
 
 ### -Filter
+NITRO filter values as a hashtable.
 
-- Type: `System.Collections.Hashtable`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Hashtable
+Parameter Sets: All
+Aliases:
 
-### -IgnoreNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ReturnNullOnNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Session
-
-- Type: `System.Management.Automation.PSObject`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ThrowOnWarning
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -ViewSummary
+Requests the NITRO summary view.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: All
+Aliases:
 
-## Notes
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Count
+Returns only the number of matching resources.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: Count
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Session
+The NetScaler session.
+If omitted, the current default session is used.
+
+```yaml
+Type: PSObject
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: (Get-NSSession)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -IgnoreNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ReturnNullOnNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ThrowOnWarning
+Treats NITRO warning responses as terminating errors.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+### System.Management.Automation.PSCustomObject
+## NOTES
+Generated from NetScaler NITRO API metadata.
+Generated: 2026-06-01 21:28
+Supported metadata versions: 13.1, 14.1.
+
+## RELATED LINKS
 

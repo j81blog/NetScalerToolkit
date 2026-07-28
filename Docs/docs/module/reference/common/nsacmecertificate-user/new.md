@@ -1,186 +1,465 @@
-﻿# New-NSACMECertificateUser
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version: https://netscalertoolkit.j81.nl/module/reference/common/nsacmecertificate-user/new/
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# New-NSACMECertificateUser
 
-## Synopsis
+## SYNOPSIS
+Creates or updates a NetScaler user for certificate automation.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-New-NSACMECertificateUser -ManagementURL <String> -Credential <PSCredential> [-PolicyName <String>] [-ApiUsername <String>] [-ApiPassword <Object>] [-CsVipName <String[]>] [-UseLbVip <SwitchParameter>] [-LbName <String>] [-SvcName <String>] [-RspName <String>] [-RsaName <String>] [-CspName <String>] [-CsaName <String>] [-EnableVipBefore <SwitchParameter>] [-DisableVipAfter <SwitchParameter>] [-UseNetScalerDNS <SwitchParameter>] [-UpdateGlobalVPNCertBinding <SwitchParameter>] [-Partitions <String[]>] [-PruneExistingPolicyBindings <SwitchParameter>] [-SaveADCConfig <SwitchParameter>] [-SkipCertificateCheck <SwitchParameter>] [-PassThru <SwitchParameter>]
+### Connect (Default)
+```
+New-NSACMECertificateUser -ManagementURL <String> -Credential <PSCredential> [-PolicyName <String>]
+ [-ApiUsername <String>] [-ApiPassword <Object>] [-CsVipName <String[]>] [-UseLbVip] [-LbName <String>]
+ [-SvcName <String>] [-RspName <String>] [-RsaName <String>] [-CspName <String>] [-CsaName <String>]
+ [-EnableVipBefore] [-DisableVipAfter] [-UseNetScalerDNS] [-UpdateGlobalVPNCertBinding]
+ [-Partitions <String[]>] [-PruneExistingPolicyBindings] [-SaveADCConfig] [-SkipCertificateCheck] [-PassThru]
+ [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
-```powershell
-New-NSACMECertificateUser -Session <Object> [-PolicyName <String>] [-ApiUsername <String>] [-ApiPassword <Object>] [-CsVipName <String[]>] [-UseLbVip <SwitchParameter>] [-LbName <String>] [-SvcName <String>] [-RspName <String>] [-RsaName <String>] [-CspName <String>] [-CsaName <String>] [-EnableVipBefore <SwitchParameter>] [-DisableVipAfter <SwitchParameter>] [-UseNetScalerDNS <SwitchParameter>] [-UpdateGlobalVPNCertBinding <SwitchParameter>] [-Partitions <String[]>] [-PruneExistingPolicyBindings <SwitchParameter>] [-SaveADCConfig <SwitchParameter>] [-PassThru <SwitchParameter>]
+### Session
+```
+New-NSACMECertificateUser -Session <Object> [-PolicyName <String>] [-ApiUsername <String>]
+ [-ApiPassword <Object>] [-CsVipName <String[]>] [-UseLbVip] [-LbName <String>] [-SvcName <String>]
+ [-RspName <String>] [-RsaName <String>] [-CspName <String>] [-CsaName <String>] [-EnableVipBefore]
+ [-DisableVipAfter] [-UseNetScalerDNS] [-UpdateGlobalVPNCertBinding] [-Partitions <String[]>]
+ [-PruneExistingPolicyBindings] [-SaveADCConfig] [-PassThru] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Creates the limited command policies used by Request-NSACMECertificate and,
+optionally, creates or updates a NetScaler system user and binds those
+policies to the user.
+This is the module replacement for the legacy
+GenLeCertForNS -CreateUserPermissions and -CreateApiUser bootstrap path.
 
-### -ApiPassword
+The function is idempotent.
+Existing command policies are updated with the
+current command specification, existing users are updated when ApiPassword is
+provided, and missing policy bindings are added.
 
-- Type: `System.Object`
-- Required: `False`
-- Pipeline input: `False`
+## EXAMPLES
 
-### -ApiUsername
+### EXAMPLE 1
+```
+New-NSACMECertificateUser -ManagementURL https://adc.example.com -Credential (Get-Credential) -PolicyName script-GenLeCertForNS -CsVipName cs_example_http -ApiUsername leuser -ApiPassword 'L34s3r!' -SaveADCConfig
+```
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+Creates or updates the certificate automation policies, creates/updates
+leuser, binds the policies, and saves the ADC configuration.
 
-### -Confirm
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `cf`
-
-### -Credential
-
-- Type: `System.Management.Automation.PSCredential`
-- Required: `True`
-- Pipeline input: `False`
-- Aliases: `NSCredential`, `ADCCredential`
-
-### -CsaName
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -CspName
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `NSCspName`
-
-### -CsVipName
-
-- Type: `System.String[]`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `NSCsVipName`
-
-### -DisableVipAfter
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -EnableVipBefore
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -LbName
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `NSLbName`
-
-### -ManagementURL
-
-- Type: `System.String`
-- Required: `True`
-- Pipeline input: `False`
-- Aliases: `URL`, `NSManagementURL`
-
-### -Partitions
-
-- Type: `System.String[]`
-- Required: `False`
-- Pipeline input: `False`
-
-### -PassThru
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -PolicyName
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `NSCPName`
-
-### -PruneExistingPolicyBindings
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -RsaName
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `NSRsaName`
-
-### -RspName
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `NSRspName`
-
-### -SaveADCConfig
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `SaveNSConfig`
+## PARAMETERS
 
 ### -Session
+Existing NetScaler session returned by Connect-NSNode.
 
-- Type: `System.Object`
-- Required: `True`
-- Pipeline input: `False`
+```yaml
+Type: Object
+Parameter Sets: Session
+Aliases:
 
-### -SkipCertificateCheck
+Required: True
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+### -ManagementURL
+NetScaler management URL.
+Used when Session is not supplied.
 
-### -SvcName
+```yaml
+Type: String
+Parameter Sets: Connect
+Aliases: URL, NSManagementURL
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `NSSvcName`
+Required: True
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-### -UpdateGlobalVPNCertBinding
+### -Credential
+Credential used to connect when Session is not supplied.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: PSCredential
+Parameter Sets: Connect
+Aliases: NSCredential, ADCCredential
+
+Required: True
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -PolicyName
+Base name for the three command policies.
+The effective base is truncated to
+24 characters when needed so the suffixed policy names stay within NetScaler
+limits.
+Alias: NSCPName.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases: NSCPName
+
+Required: False
+Position: Named
+Default value: Script-GenLeCertForNS
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ApiUsername
+Optional NetScaler system user to create or update.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ApiPassword
+Password for ApiUsername.
+Accepts plain text, SecureString, PSCredential, or
+legacy GenLeCertForNS secret objects.
+
+```yaml
+Type: Object
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -CsVipName
+Content switching vServers that the generated command policy should permit.
+Required unless UseLbVip is used.
+
+```yaml
+Type: String[]
+Parameter Sets: (All)
+Aliases: NSCsVipName
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -UseLbVip
+Indicates that HTTP validation uses an existing load balancing vServer instead
+of content switching vServers.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -LbName
+Load balancing vServer name used by HTTP validation.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases: NSLbName
+
+Required: False
+Position: Named
+Default value: Lb_letsencrypt_cert
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -SvcName
+Service name used by HTTP validation.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases: NSSvcName
+
+Required: False
+Position: Named
+Default value: Svc_letsencrypt_cert_dummy
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -RspName
+Responder policy name prefix.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases: NSRspName
+
+Required: False
+Position: Named
+Default value: Rsp_letsencrypt
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -RsaName
+Responder action name prefix.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases: NSRsaName
+
+Required: False
+Position: Named
+Default value: Rsa_letsencrypt
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -CspName
+Content switching policy name.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases: NSCspName
+
+Required: False
+Position: Named
+Default value: Csp_letsencrypt
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -CsaName
+Content switching action name.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: Csa_letsencrypt
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -EnableVipBefore
+Adds enable permission for configured CS vServers.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -DisableVipAfter
+Adds disable permission for configured CS vServers.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -UseNetScalerDNS
+Adds DNS TXT record permissions for NetScaler-hosted DNS validation.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -UpdateGlobalVPNCertBinding
+Adds VPN global binding permissions.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Partitions
+Optional NetScaler partitions to bind to the created user.
+Partition command
+policy permissions are included when non-default partitions are specified.
+
+```yaml
+Type: String[]
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: @('default')
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -PruneExistingPolicyBindings
+Removes command policy bindings from ApiUsername that do not match the three
+generated policies or have the wrong priority.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -SaveADCConfig
+Saves the NetScaler configuration after changes.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: SaveNSConfig
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -SkipCertificateCheck
+Skips TLS certificate validation when connecting to the NetScaler.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: Connect
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -PassThru
+Returns a result object.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -WhatIf
+Shows what would happen if the cmdlet runs.
+The cmdlet is not run.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `wi`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: wi
 
-## Notes
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Confirm
+Prompts you for confirmation before running the cmdlet.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: cf
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+## NOTES
+Function  : New-NSACMECertificateUser
+Author    : John Billekens
+Copyright : Copyright (c) John Billekens Consultancy
+Version   : 2026.0526.0001
+
+## RELATED LINKS
+
+[https://netscalertoolkit.j81.nl/module/reference/common/nsacmecertificate-user/new/](https://netscalertoolkit.j81.nl/module/reference/common/nsacmecertificate-user/new/)
+
+[https://netscalertoolkit.j81.nl/](https://netscalertoolkit.j81.nl/)
+
 
