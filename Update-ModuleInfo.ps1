@@ -83,7 +83,7 @@ foreach ($manifestPath in $manifestPaths) {
 
 if (Get-Module J81FunctionLibrary) {
     Write-Host "Signing all module files with a valid code signing certificate..." -ForegroundColor Cyan
-    Get-ChildItem -Path "$PSScriptRoot\$ModuleName\*" -Recurse -Include *.ps1, *.psd1, *.psm1 | Set-Signature -ValidatePS -UseAzureSigning
+    Get-ChildItem -Path "$PSScriptRoot\$ModuleName\*" -Recurse -Include *.ps1, *.psd1, *.psm1 | Set-Signature -ValidatePS -UseAzureSigning -ArtifactProfile JOBICO
     Write-Host "Module manifest and scripts have been updated and signed. You can now commit the changes to GitHub." -ForegroundColor Green
 }
 Write-Host "`r`nUpdated $ModuleName module manifests to version $NewVersion.`r`n" -ForegroundColor Green
