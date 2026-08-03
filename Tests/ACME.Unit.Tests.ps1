@@ -1183,5 +1183,46 @@ Describe 'ACME helper functions' {
                 }
             }
         }
+
+        Context 'HTTP-01 challenge binding cleanup' {
+            It 'does nothing when there are no challenge bindings to clean up' {
+                Mock Invoke-NSDeleteLBVServerResponderPolicyBinding {}
+                Mock Invoke-NSDeleteResponderPolicy {}
+                Mock Invoke-NSDeleteResponderAction {}
+                Mock Write-NSACMECertificateLog {}
+
+                $settings = [pscustomobject]@{ LbName = 'lb_letsencrypt_cert' }
+
+                # $ChallengeBindings is $null when Publish-NSACMECertificateHttpChallenge published
+                # no new challenges, e.g. because the ACME authorization was already valid.
+                { Remove-NSACMECertificateHttpChallengeBinding -Session ([pscustomobject]@{}) -ChallengeBindings $null -Settings $settings } | Should -Not -Throw
+
+                Should -Invoke Invoke-NSDeleteLBVServerResponderPolicyBinding -Times 0
+                Should -Invoke Invoke-NSDeleteResponderPolicy -Times 0
+                Should -Invoke Invoke-NSDeleteResponderAction -Times 0
+                Should -Invoke Write-NSACMECertificateLog -Times 0 -ParameterFilter { $Level -eq 'Warning' }
+            }
+
+            It 'removes bindings, policies, and actions for each published challenge' {
+                $script:UnboundPolicies = @()
+                $script:RemovedPolicies = @()
+                $script:RemovedActions = @()
+                Mock Invoke-NSDeleteLBVServerResponderPolicyBinding { $script:UnboundPolicies += $Policyname }
+                Mock Invoke-NSDeleteResponderPolicy { $script:RemovedPolicies += $Name }
+                Mock Invoke-NSDeleteResponderAction { $script:RemovedActions += $Name }
+                Mock Write-NSACMECertificateLog {}
+
+                $settings = [pscustomobject]@{ LbName = 'lb_letsencrypt_cert' }
+                $bindings = @(
+                    [pscustomobject]@{ PolicyName = 'rsp_le_101'; ActionName = 'rsa_le_101'; Priority = 101 }
+                )
+
+                Remove-NSACMECertificateHttpChallengeBinding -Session ([pscustomobject]@{}) -ChallengeBindings $bindings -Settings $settings
+
+                $script:UnboundPolicies | Should -Be @('rsp_le_101')
+                $script:RemovedPolicies | Should -Be @('rsp_le_101')
+                $script:RemovedActions | Should -Be @('rsa_le_101')
+            }
+        }
     }
 }

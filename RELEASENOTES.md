@@ -1,5 +1,13 @@
 ﻿# Release Notes
 
+## v2026.803.1615
+
+### Fixed
+- FIX: Certificate renewals no longer log harmless "Could not unbind/remove responder policy or action" warnings during cleanup when a domain's ACME authorization was already valid and no new HTTP validation challenge needed to be published
+
+### Known Issues
+- None at the moment
+
 ## v2026.727.1845
 
 ### Fixed
