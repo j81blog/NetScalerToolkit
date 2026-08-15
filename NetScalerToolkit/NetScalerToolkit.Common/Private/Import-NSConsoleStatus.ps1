@@ -1,49 +1,124 @@
-﻿function Wait-NSACMECertificateOrderFinal {
-<#
+﻿if (-not $script:NSConsoleStatusTestedVersion) { $script:NSConsoleStatusTestedVersion = [version]'2026.812.2330' }
+# Requires Get-ConsoleStatusState, idempotent item close/tick, Set-ConsoleStepNote -Append, Format-SingleLine -KeepSpaces.
+if (-not $script:NSConsoleStatusMinimumVersion) { $script:NSConsoleStatusMinimumVersion = [version]'2026.812.2330' }
+if (-not $script:NSConsoleStatusMaximumVersion) { $script:NSConsoleStatusMaximumVersion = [version]'2026.9999.9999' }
+
+# ASCII glyphs only; survives transcripts and consoles without UTF-8.
+if (-not $script:NSConsoleStatusStyle) {
+    $script:NSConsoleStatusStyle = @{
+        Mode        = 'Column'
+        Indent      = 2
+        LabelWidth  = 26
+        ValueWidth  = 24
+        StatusWidth = 8
+        MaxWidth    = 120
+        Unicode     = $false
+    }
+}
+
+$script:NSConsoleStatusEnabled = $false
+$script:NSConsoleStatusWarned = $false
+
+function Import-NSConsoleStatus {
+    <#
     .SYNOPSIS
-        Waits for a finalized ACME order to become valid.
+        Loads ConsoleStatus and applies the module wide output style.
 
     .DESCRIPTION
-        Polls Posh-ACME order state after Submit-OrderFinalize until the order is
-        valid, invalid, or the timeout expires.
+        Imports a compatible ConsoleStatus version, installing the tested version when nothing
+        usable is present, then applies the module wide style and wires LogAction so every
+        completed item is also written to the request-certificate support log.
 
-    .PARAMETER MainDomain
-        Main domain of the Posh-ACME order.
+        ConsoleStatus only produces console decoration, so a failure here is never fatal. When the
+        module cannot be loaded a single warning is written, the NSStatus wrappers turn into no-ops
+        and the calling command keeps its previous output.
 
-    .PARAMETER TimeoutSeconds
-        Maximum number of seconds to wait.
+    .PARAMETER SkipInstall
+        Does not install ConsoleStatus when no compatible version is present.
+
+    .PARAMETER LogAction
+        Scriptblock invoked with one record per completed item. Supplied by commands that have a
+        support log to write the records into.
+
+    .OUTPUTS
+        System.Boolean. True when ConsoleStatus output is active.
 
     .NOTES
-        Function  : Wait-NSACMECertificateOrderFinal
+        Function  : Import-NSConsoleStatus
         Author    : John Billekens
         Copyright : Copyright (c) John Billekens Consultancy
-        Version   : 2026.0525.2137
-#>
+        Version   : 2026.811.1452
+    #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$MainDomain,
-        [int]$TimeoutSeconds = 180
+        [Switch]$SkipInstall,
+
+        [scriptblock]$LogAction
     )
 
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    do {
-        Start-Sleep -Seconds 3
-        # One tick per poll.
-        Write-NSStatusTick
-        $order = Posh-ACME\Get-PAOrder -MainDomain $MainDomain -Refresh
-        if ($order.status -eq 'valid') { return $order }
-        if ($order.status -eq 'invalid') { throw "ACME order for $MainDomain became invalid." }
-        Write-NSACMECertificateLog Info 'ACME' "Waiting for finalized order: $($order.status)."
-    } while ((Get-Date) -lt $deadline)
+    $script:NSConsoleStatusEnabled = $false
+    $script:NSStatusItemHadWarning = $false
 
-    throw "Timed out waiting for ACME order finalization for $MainDomain."
+    try {
+        $loadedModule = Get-Module -Name ConsoleStatus -ErrorAction SilentlyContinue |
+            Where-Object { $_.Version -ge $script:NSConsoleStatusMinimumVersion -and $_.Version -le $script:NSConsoleStatusMaximumVersion } |
+            Select-Object -First 1
+
+        if (-not $loadedModule) {
+            $availableModules = @(Get-Module -ListAvailable -Name ConsoleStatus -ErrorAction SilentlyContinue | Sort-Object Version -Descending)
+            $compatibleModules = @($availableModules | Where-Object {
+                    $_.Version -ge $script:NSConsoleStatusMinimumVersion -and
+                    $_.Version -le $script:NSConsoleStatusMaximumVersion
+                })
+
+            if (-not $compatibleModules) {
+                if ($SkipInstall -or $script:NSConsoleStatusInstallAttempted) {
+                    throw "ConsoleStatus $script:NSConsoleStatusMinimumVersion or newer is required for status output. Install it with: Install-Module -Name ConsoleStatus -RequiredVersion $script:NSConsoleStatusTestedVersion -Scope CurrentUser"
+                }
+
+                # Once per session; no gallery access must not cost an install timeout per command.
+                $script:NSConsoleStatusInstallAttempted = $true
+
+                try {
+                    Install-Module -Name ConsoleStatus -RequiredVersion $script:NSConsoleStatusTestedVersion -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+                } catch {
+                    Write-Verbose "Installing ConsoleStatus with -AllowClobber failed: $($_.Exception.Message). Retrying without -AllowClobber."
+                    Install-Module -Name ConsoleStatus -RequiredVersion $script:NSConsoleStatusTestedVersion -Scope CurrentUser -Force -ErrorAction Stop
+                }
+
+                Import-Module -Name ConsoleStatus -RequiredVersion $script:NSConsoleStatusTestedVersion -ErrorAction Stop
+            } else {
+                Import-Module -Name ConsoleStatus -RequiredVersion @($compatibleModules)[0].Version -ErrorAction Stop
+            }
+        }
+
+        # Manifest version can lag its content, so check the command surface too.
+        if (-not (Get-Command -Name 'Get-ConsoleStatusState' -Module 'ConsoleStatus' -ErrorAction SilentlyContinue)) {
+            throw "The loaded ConsoleStatus build does not provide Get-ConsoleStatusState. Update to $script:NSConsoleStatusTestedVersion or newer with: Install-Module -Name ConsoleStatus -RequiredVersion $script:NSConsoleStatusTestedVersion -Scope CurrentUser -Force"
+        }
+
+        $styleParams = $script:NSConsoleStatusStyle.Clone()
+        if ($LogAction) { $styleParams.LogAction = $LogAction }
+
+        ConsoleStatus\Set-ConsoleStatusStyle @styleParams
+        ConsoleStatus\Reset-ConsoleStatusLog
+
+        $script:NSConsoleStatusEnabled = $true
+    } catch {
+        if (-not $script:NSConsoleStatusWarned) {
+            $script:NSConsoleStatusWarned = $true
+            Write-Warning "ConsoleStatus could not be loaded, falling back to plain output. $($_.Exception.Message)"
+        }
+    }
+
+    return $script:NSConsoleStatusEnabled
 }
 
 # SIG # Begin signature block
 # MII6AgYJKoZIhvcNAQcCoII58zCCOe8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCBw+UM3MmEgtoF
-# EXg3F3jQr5ppEbZlB5ZdIXyUEdd2zqCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDJbtbvHJ5lQbpC
+# DS8hFhTY+lS3yiaBoSYKxxWQwu90NKCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
 # lUgTecgRwIeZMA0GCSqGSIb3DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
 # ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVu
 # dGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAy
@@ -229,24 +304,24 @@
 # CzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzAp
 # BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBFT0MgQ0EgMDMCEzMABDIU
 # 8BhK6DGi41cAAAAEMhQwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
-# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgN38W
-# 7LzVijWc3Z+qogVbYJDpSc/J+ojcbI1yD1LZLYQwDQYJKoZIhvcNAQEBBQAEggGA
-# bTbLIuXSzdgXL2HRNTRmYNqmUFAhCXVunXQvL7bjUt2RJNUYrs5bq8YOsWCNTcjl
-# g7mrxWyJc1gWQ2txfJVs3aq4f+Nc/0eK+Z96Uad3ip7zsfvOl0hGr4+gbbFP9De/
-# nixbgIaVIEwQi4G75i6h4mceTRT+A/ua1kAmWomQKKZ7cIBrgZaK1wpiavFsWkvn
-# uU5v5+ruZJb7NOnmhycQ+9hclc3gjo5TZbcZ1vo9RWulMWW7ms3fJpJrRuNDZMXg
-# 5l/Hek0cJCmt4C61Wt1uGhy64SADS885jrUk8FWIffE/NH0f3a08ccKlXnVw3USD
-# MQ7q7VJPPVTikVwvGHoKCD5QAlQoBxTSf2tdYNuAIZBznJmUGTKVn1clf8zK75xO
-# m3vbJHS6UOX+q6Ll945zv/VRyVkITu5yCZ30PbjHmT8hml138Tl6HXP6qOj63PsJ
-# 7GaVzsWsd2FW0xryD1vli3JonJONv49dy3X6uIqkKwbzF40hJnhfrTQCIzhLI3IP
+# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgfn7V
+# HawIxK1FUJ+3cJr3Lio8LGl6MHvpIVQyWOHwo70wDQYJKoZIhvcNAQEBBQAEggGA
+# URG2kBYk5YR8LPt94ObS5GBXe9/toSxt7UVkxQbo8iPtW5eXnbOrD983T0GYLFZR
+# BxVDrDz86+TuVyJN4hQJ3aNeQEjMOPAAQ2pE9bzKNG1aiwX6TxtBpM0U0Gl94Jc2
+# pjYQ+jzFdJkLCKxJexYL4zK3fsmpzqs/x4Hle+wjndEyK1jjCfMGtuk74X3F5xP2
+# 3Xqfg7Yxb1W2EQKMg51YmQ8pdt57vsG2cZXz3qo5NUWCTdfcyWgaNE5f6Ekjdzk5
+# rKHfN40LXFSBnjK0WzJ5/HBheMHFTpP76E2IuGwd4N+1HZfrHCokpNO297ns+CaO
+# ue39ASgXCHTMInT1nWZrn9u6llqAK6C/G+77/zIm6B/QtTULgD8CoYLTswzDGWN+
+# BsA6D7zbW6YuIFCO+pGOLg1lT98nA5yB/AuOvsBGr3dof0+j1cWia+HZ3v0PyJ86
+# B/upVDi2NwN4o+M3lZLni5hpb/eFSjaAmQ4QuiLFfZno9HvmSsX2vjN87Nxvq+jV
 # oYIUsjCCFK4GCisGAQQBgjcDAwExghSeMIIUmgYJKoZIhvcNAQcCoIIUizCCFIcC
 # AQMxDzANBglghkgBZQMEAgEFADCCAWoGCyqGSIb3DQEJEAEEoIIBWQSCAVUwggFR
-# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIPOTk4bK1duW4xu/mkE6
-# LNOpRkwv3EP65eYOpSB2kgaLAgZqdgnZW5oYEzIwMjYwODEzMDUzOTE2LjQxM1ow
+# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIN/HVS++9wHlmsTrAMin
+# jrWAAiTeLdXPpLXTI5gjPGNZAgZqNTB6FM4YEzIwMjYwODEzMDUzOTAxLjY3OVow
 # BIACAfSggemkgeYwgeMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xLTArBgNVBAsTJE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRl
-# ZDEnMCUGA1UECxMeblNoaWVsZCBUU1MgRVNOOjdCMUEtMDVFMC1EOTQ3MTUwMwYD
+# ZDEnMCUGA1UECxMeblNoaWVsZCBUU1MgRVNOOjQ5MUEtMDVFMC1EOTQ3MTUwMwYD
 # VQQDEyxNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lIFN0YW1waW5nIEF1dGhvcml0
 # eaCCDykwggeCMIIFaqADAgECAhMzAAAABeXPD/9mLsmHAAAAAAAFMA0GCSqGSIb3
 # DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9y
@@ -288,28 +363,28 @@
 # k4MhF/KgaXn0GxdH8elEa2Imq45gaa8D+mTm8LWVydt4ytxYP/bqjN49D9NZ81co
 # E6aQWm88TwIf4R4YZbOpMKN0CyejaPNN41LGXHeCUMYmBx3PkP8ADHD1J2Cr/6tj
 # uOOCztfp+o9Nc+ZoIAkpUcA/X2gSMkgHAPUvIdtoSAHEUKiBhI6JQivRepyvWcl+
-# JYbYbBh7pmgAXVswggefMIIFh6ADAgECAhMzAAAAWXzacemNXvXAAAAAAABZMA0G
+# JYbYbBh7pmgAXVswggefMIIFh6ADAgECAhMzAAAAWvYNZ4yF7d0IAAAAAABaMA0G
 # CSqGSIb3DQEBDAUAMGExCzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQg
 # Q29ycG9yYXRpb24xMjAwBgNVBAMTKU1pY3Jvc29mdCBQdWJsaWMgUlNBIFRpbWVz
-# dGFtcGluZyBDQSAyMDIwMB4XDTI2MDEwODE4NTkwMVoXDTI3MDEwNzE4NTkwMVow
+# dGFtcGluZyBDQSAyMDIwMB4XDTI2MDEwODE4NTkwM1oXDTI3MDEwNzE4NTkwM1ow
 # geMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdS
 # ZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xLTArBgNVBAsT
 # JE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRlZDEnMCUGA1UECxMe
-# blNoaWVsZCBUU1MgRVNOOjdCMUEtMDVFMC1EOTQ3MTUwMwYDVQQDEyxNaWNyb3Nv
+# blNoaWVsZCBUU1MgRVNOOjQ5MUEtMDVFMC1EOTQ3MTUwMwYDVQQDEyxNaWNyb3Nv
 # ZnQgUHVibGljIFJTQSBUaW1lIFN0YW1waW5nIEF1dGhvcml0eTCCAiIwDQYJKoZI
-# hvcNAQEBBQADggIPADCCAgoCggIBAKYu5/40eEX+hT+5jFa146bid3dA4LnXYntv
-# kP3CGw4LGARFhnvLMSJ/VtsubzDaeFnm7yb2KSM70WmHQprdCVqpvUH7l0uB4jNw
-# 7urLoAR9kKHLE0VlMlDStDSxUBI3qwsdrjvdmvV0k+9/njuDEiSlzJTf7Dowd1K3
-# bO4beRyaFhR+Y8tymECOqlOAffYrG2wZdVM51+QSBSe+PEykr8C6OnnqSipuF8fZ
-# vCb6/huk0Zm6ZwsaixSHIAT2IEGvS7c63Im8jV3a8R0K6i2yiw0NNlnTSpwy/Zfv
-# 7iwsLBwhfbjBTn+XOl6mPzDXQQ3V+SRP9xXbGKOsBTxzGid7aKAHw3o4Ahl9UGWL
-# H9kNP3VUokE6JYkjlfpuUGZ6gQyqDewfxD4VoYIlopt4HZ0xQvqajuJx+cr8LR/I
-# Z56gLLmwyMzde5+vtjBoilry/gSZwVGwgkvkIgpKPBQHGsSB0y3szr7Y7wEb6v0y
-# Zal1XUvWnnz3inTaSWsCFrLPVwVmXy3ncY5/d25VpOkht+m697GWNbvsNOhAOHRa
-# ftE9j/hhkoM6RsyJfBLnhqMcA/wcavf5oj5NeyRQdGZeLKcls9csKS3sBUzPidxx
-# 2iiNH9CPaDq/bLJEOXasYohXMnRinu+fUk81s8VO7DQSF6ffn5oqSHoV8lf1Ax6u
-# +kdShb8BAgMBAAGjggHLMIIBxzAdBgNVHQ4EFgQUj5bnC18D0vlnSRhCOiODGGuX
-# NnYwHwYDVR0jBBgwFoAUa2koOjUvSGNAz3vYr0npPtk92yEwbAYDVR0fBGUwYzBh
+# hvcNAQEBBQADggIPADCCAgoCggIBAO/0O0eWjgUb9rnHcQLRdfWPN4H+91a3Ynla
+# P46E1m4uD+JKx6csWMStX79fxLJUAqHJqQWE19UlNMhS9jEB32dAJ4yuWsHyUuM+
+# dphjDz4E5jl4gYGZEmaOrKvNt+KqlFayyg/oTg3BlLRu4aBq8668A5qlHcfsuh6D
+# dSqFID1ixJFZzHrZFG1iGBG7U1Bn2ONLDo7jbwX5rMcPduTAUw/c7M3WhSxQBuZp
+# Qiz8RQGKIqCKfIxgQkKdzpCpU0SWQOE/DgTXbz3c15KMRCdkGlL2zb+lnuSV4sse
+# Qm3qflZiZckLyn2xJI8ZXDkq+Ig+b/rsPPIfI8di228WvK1j67JXpyeVCaSUO9Er
+# zlLnTrnjQkeXVQIp73xuVBVrmvoTf/v4a7MnrmuKSyIXc5vJUHEGB345+O8omFt1
+# w8b+Xg9D9PKIRqDPEv7HRk0C+Yvxu8FvHJvSocSIZK+v/FmKFOipYnpP76yAmJNn
+# yheucShOgk8QiU53USn/+AyMb7xW905gZnyNqb29HeVdQ175pDHJGEz8Cx5wiHeV
+# liGz5hABucFDylR9z3LSTmB6+3ZuIxeG9BZS46P6ANPkuVuD5m8wgc7GLLzg73Cs
+# DF09ukt8Uf8dTcMBX3ro+7/k9M6Xt8WPG7IL9v/4DvyMY03tkb9Y9Ri6HWavXRPY
+# RCUePspPAgMBAAGjggHLMIIBxzAdBgNVHQ4EFgQUjmOyQ6twMcP1ZbRytJxI4fnX
+# mcIwHwYDVR0jBBgwFoAUa2koOjUvSGNAz3vYr0npPtk92yEwbAYDVR0fBGUwYzBh
 # oF+gXYZbaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9jcmwvTWljcm9z
 # b2Z0JTIwUHVibGljJTIwUlNBJTIwVGltZXN0YW1waW5nJTIwQ0ElMjAyMDIwLmNy
 # bDB5BggrBgEFBQcBAQRtMGswaQYIKwYBBQUHMAKGXWh0dHA6Ly93d3cubWljcm9z
@@ -318,36 +393,36 @@
 # JQEB/wQMMAoGCCsGAQUFBwMIMA4GA1UdDwEB/wQEAwIHgDBmBgNVHSAEXzBdMFEG
 # DCsGAQQBgjdMg30BATBBMD8GCCsGAQUFBwIBFjNodHRwOi8vd3d3Lm1pY3Jvc29m
 # dC5jb20vcGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wCAYGZ4EMAQQCMA0GCSqG
-# SIb3DQEBDAUAA4ICAQBEMhzC/ZcjpG/zURE7z2Yp5vrUxUjsE5Xa3t/2RGvESwvb
-# msk3bLHhSFAajgo2XQ8xoGDP3sUhKCLPeICSbkVv6V8sSp8fJ8Jos6yrawf2YVis
-# 8tcV+OO7U9S6JGPQzpmPncfzQc4ne1fqZ4+HiKabIDEoFdddQT2Egkk9fzxCY/EZ
-# 52avJ27dSfrI/IDmyn9V10O3iQpg2F+C9vNTrk7nVgoDoHa9+Q3pYr0IHGnSmt5i
-# rgGT436zo5WnXP8FxMhswH1aiyiSZiVzhor10C9C52cP3C8/PEoMKUXstLjoPO0T
-# MkeW/1Fr186KXD45QRgBo0xImgtWTdzWFnlD+p7+iDBIuSrNcRXDRYuq/aYZaDhW
-# SI0SYdPIWVh5XvXuWA31a8oQ0SO+oPa3Nk80k0864wiiyJ1KsbSnaaefg9vspegh
-# rpY8ljCwxfCUtx5HQRNgAJOI8IKACK4d014Mk0hlRO0lQVRHegqIg29K6Xqkc360
-# W2ZJGUcstlKokkVj6KAHjGyrLRPzepYfiZUJq4gXyxbpvKb1XJ2FN2682aUoNXo9
-# RyRK1ch0f66k6+yj88kzvuC7+vJWtNDs/UpIM6Hhm0kU64JUJ7MMEQcAc7kpft7G
-# m7YeRK+oKgqUgYXCfmzbX8nJXJZnPa8ADWVsIqsuNAxCI0CZXkULofqo5Be6zzGC
+# SIb3DQEBDAUAA4ICAQCAlM8r+t3hIb2h1lDTAx+iYkQlxFuU7QONeyIFIBZ29xvG
+# l8pehKxErDzIniOpIX/eluUAwQKoaI0zwuKAdR0mrSHXCniMoLNko5W+5r7sXNam
+# KX7QMV3BfGOX3gi9qVfxyUe7AHXbqQ8KBQHNYCnNFtQQHgARrlYhtyAKol5ctM0C
+# Ac/y3oY7bTMsVJvnA5u7DVWPeXoST2KEMDeLBvJYq0IJZ6yMpDOWLZ4UP82bksyS
+# hIB/XdawirIGLdseudryRxVMk313mAcjGRb59+Ittt6otVvYQWqH+PGrTUzEcez8
+# aQuO3umoNZjKuFoX5VsPP/gSZse+orhG3zfZk9IDyE3DfUFrhvkv6H0tijK1D0uI
+# GhwMBWSm9ktQ6oeU+aurZFx3MI+LODnHsbRFZAy11uMvwKq+ZNC1Se4tIM1u9piW
+# AhnTPoh6mULKikHOVhHaO953tkzDCtjsse5GUKOx9yg9nqHKWMgnODp62/uPPzC/
+# yDEISrXCcU7UB7tATr3zWNEdtM4d009iXWI6dV/SdcIIX44rpoLyCLw+nXjxp+fY
+# /dygLO7UdSQaVaUFVj3K2nVyuujPspt5Lunc5FvuYPqmi/z8kASmmwbiF+W0P0UT
+# WFaC84MWfU2h6MDg5s0oxmdNFK76jXr3wZfdSoV7FCKfq5GdeGoy5UwDQwMC0DGC
 # A9QwggPQAgEBMHgwYTELMAkGA1UEBhMCVVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBD
 # b3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGltZXN0
-# YW1waW5nIENBIDIwMjACEzMAAABZfNpx6Y1e9cAAAAAAAFkwDQYJYIZIAWUDBAIB
+# YW1waW5nIENBIDIwMjACEzMAAABa9g1njIXt3QgAAAAAAFowDQYJYIZIAWUDBAIB
 # BQCgggEtMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQx
-# IgQgMf4kTcdDs/3K76Eb9Zf3yayEJGz6y9WM7yKfmg49u+swgd0GCyqGSIb3DQEJ
-# EAIvMYHNMIHKMIHHMIGgBCDLRbqx24bpscXEJ+Hjj9xrcUVw7R8OyyMfSB2YGK3+
-# vDB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
+# IgQgBGKIvJ5VAtmigSmc4CMEGhUmMJ1L/etp5L7ijbIytkMwgd0GCyqGSIb3DQEJ
+# EAIvMYHNMIHKMIHHMIGgBCBiuWRAi+p96PRsBt3TwW3jNozgPQS+Qco1CVm/NaU0
+# QzB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
 # cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3RhbXBp
-# bmcgQ0EgMjAyMAITMwAAAFl82nHpjV71wAAAAAAAWTAiBCCuFIbFkRYftoOe8fCe
-# i9iFNPs5IXQTScPFBsco+TMPkDANBgkqhkiG9w0BAQsFAASCAgB32ybn1ICEor/c
-# n+gnJmnFT2oATmS2NseI1p5Vw4DQHQQwejccWi/VQbb6rb3dlVc5iFdNPPdI9b2w
-# hPP3QGLW8vjfShYRO4czelPzmLrYRpIhRADe0n+r4b3m1I1gImqDrN+9uGb70sNh
-# ejBnxcG/6HgVl4nP8ew1aAoqqreoSDr62sUqSyn4mvvh7Vz/s7HoJCt/ic4aEb+z
-# 4hIjj16VCxGLUXGDUyMREBsLBn/MUpF/jOtIlVARm75q68Aw05U+CqPyHVAUQGqU
-# iK9g3cwkmr+9w4dPOLFZIBhVcXqI9egN5We8xutu63uNdDfK1WdbJMkknHbLWT9u
-# EgBbYg3eRRuJPyQ1fsSAG6hDGvTFvcYoaXUE+kfoyh69nHPwIh88OScmSka1FR9O
-# gDPISJMZ3EUgYGxsUCDl8+v1rpMVJ3LuBBJU64g6IgM3u/HjAZdd8ig1ywi3e2N4
-# M9AVYzSdBzY4vbqIsyeojOCPUfRIPj/PT3Nt/3AkWtdQZXNZW58AAq3r95xNAU56
-# 3s7okfE+asjarePGXdTguesWwv5rCmHmzj2oDAfCyIYljqiogZQfzWLWOrjESLKE
-# Zf4+ekqXPmu3tci9m/0JJnZJ4j1AZfsrfGOIlchMTr+prkrDHvotijMTaQejhhsQ
-# 9gnDy7n7blQQSfB/2XBqJ17wkatB0A==
+# bmcgQ0EgMjAyMAITMwAAAFr2DWeMhe3dCAAAAAAAWjAiBCD6E8rCIqVKMdY61HJq
+# NxoFI6Cbjzy2IIyc5mKrpSg8ZTANBgkqhkiG9w0BAQsFAASCAgC8oVsXzESfkVDt
+# 0lisiBoGCz4rZqu0R8R04jUQqj9I6ezYr2a0wXgUOXNsAfNE6gDT+FawsnnkI+H+
+# jDLIkNgjYF28R8xqLMX87Yx19Y38M8yzeLHC+Vpn2AXOtBO/wxtXtKCOQOTQuYNA
+# PumkahBsH2WNKdqODqzScQgO3dJU2pCbNYbIrVVxQdu82mXY1B0RwRB2wq7s7q2F
+# bqks8IjFFrqfZwVSW8MODbhpazAPGyzWW9o131glcOGr5D43BH1FzAO7moWq1+fT
+# 21cRfX4vwv2qOSM/gkUvDytv2P6ON7Lg8ia7/nI80POTHlNJqeMC8GobIhOK5F/e
+# ueZ+kV/emhfi36g8/nY5i7DK+ZQvo7WsOqpnuMB09GAPiI58QDmddmKzcWE/AHAQ
+# 9IY9qDnRAfSg+xBQ4OhdqEmS4FwNfddVRhcIngHXWiEVl2BSVVZK1KKIBUbhLw7u
+# meo7qxaJJRvamy6gRUxmfMcSFeMvwao/10tcWym5C5PCWtDPSERqsOjOSB097ftl
+# T9yR6mksEdPUR8mzL2ADqJuwq9xgLEBCYgYqQ0pPcmN6iHN+dP+pFwYWdfKaf5za
+# lOt+v2z6E63dkwQJ5awqTZHJRvTjQKtN/vahCYUHMyXOrz5gc1vNn2a/0qKkYEb4
+# 1hNX/Clg8Pq4raCoODu4kIp2ThJ00w==
 # SIG # End signature block

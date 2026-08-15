@@ -104,9 +104,12 @@ Describe 'CertKey cleanup' {
             $result.PSObject.Properties.Name | Should -Not -Contain 'Summary'
         }
 
-        It 'writes a host summary and returns the cleanup result with Summary' {
+        It 'writes a status summary and returns the cleanup result with Summary' {
             $script:SystemFiles = @([pscustomobject] @{ filename = 'orphan.pem'; filelocation = '/nsconfig/ssl/'; filemode = 'FILE' })
-            Mock Write-Host { }
+            # Mocking the wrapper rather than the rendered output keeps the assertion independent of
+            # whether ConsoleStatus is installed on the machine running the tests.
+            Mock Write-NSStatusItem { }
+            Mock Write-NSStatusSummary { }
 
             $result = Invoke-NSCleanCertKeyFiles -Session (New-TestNSSession) -NoSaveConfig -Confirm:$false -Summary
 
@@ -115,7 +118,20 @@ Describe 'CertKey cleanup' {
             $result.PSObject.Properties.Name | Should -Contain 'RemovedFiles'
             $result.PSObject.Properties.Name | Should -Not -Contain 'Summary'
             $result.RemovedFiles.FileName | Should -Be 'orphan.pem'
-            Should -Invoke Write-Host -Times 5
+
+            Should -Invoke Write-NSStatusItem -Times 1 -ParameterFilter { $Label -eq 'CertKeys' }
+            Should -Invoke Write-NSStatusItem -Times 1 -ParameterFilter { $Label -eq 'Files' }
+            Should -Invoke Write-NSStatusItem -Times 1 -ParameterFilter { $Label -eq 'Configuration' }
+            Should -Invoke Write-NSStatusSummary -Times 1
+        }
+
+        It 'writes no results section without Summary' {
+            $script:SystemFiles = @([pscustomobject] @{ filename = 'orphan.pem'; filelocation = '/nsconfig/ssl/'; filemode = 'FILE' })
+            Mock Write-NSStatusItem { }
+
+            $null = Invoke-NSCleanCertKeyFiles -Session (New-TestNSSession) -NoSaveConfig -Confirm:$false -PassThru
+
+            Should -Invoke Write-NSStatusItem -Times 0 -ParameterFilter { $Label -eq 'CertKeys' }
         }
 
         It 'does not remove a SAML referenced certkey' {
@@ -223,6 +239,25 @@ bind vpn vserver vpn_gateway -certkeyName gateway_cert
             { Invoke-NSCleanCertKeyFiles -Session (New-TestNSSession) -NoSaveConfig -Confirm:$false -WarningAction SilentlyContinue } | Should -Not -Throw
 
             $script:DeletedFiles | Should -Contain '/nsconfig/ssl/orphan-two.pem'
+        }
+
+        It 'reports an expired certkey once instead of also counting it as expiring' {
+            $script:CertKeys = @(
+                [pscustomobject] @{ certkey = 'expired-cert'; status = 'Expired'; daystoexpiration = 0; cert = '/nsconfig/ssl/expired.pem'; key = '/nsconfig/ssl/expired.key' },
+                [pscustomobject] @{ certkey = 'expiring-cert'; status = 'Valid'; daystoexpiration = 5; cert = '/nsconfig/ssl/expiring.pem'; key = '/nsconfig/ssl/expiring.key' }
+            )
+            # Referenced so the cleanup keeps them and the final plan still reports on them.
+            $script:RunningConfig = "bind ssl vserver vs -certkeyName expired-cert`nbind ssl vserver vs -certkeyName expiring-cert"
+            # The expiry notices only reach the warning stream when ConsoleStatus is the
+            # unavailable fallback, so pin that regardless of what the test host can load.
+            Mock Import-NSConsoleStatus { $script:NSConsoleStatusEnabled = $false; return $false }
+
+            Invoke-NSCleanCertKeyFiles -Session (New-TestNSSession) -NoSaveConfig -Confirm:$false -ExpirationDays 30 -WarningVariable cleanupWarnings -WarningAction SilentlyContinue | Out-Null
+
+            $warningText = @($cleanupWarnings) -join "`n"
+            @($cleanupWarnings | Where-Object { $_ -match 'expired-cert' }).Count | Should -Be 1
+            $warningText | Should -Match 'expired-cert is expired and remains configured'
+            $warningText | Should -Match 'expiring-cert expires in 5 day\(s\)'
         }
 
         It 'skips file cleanup when listing certificate files fails' {

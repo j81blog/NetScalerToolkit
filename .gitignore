@@ -2,5 +2,6 @@
 .codex/
 AI/
 AGENTS.md
+CLAUDE.md
 temp/
 Request-NSACMECertificate.log

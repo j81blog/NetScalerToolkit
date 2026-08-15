@@ -1,49 +1,38 @@
-﻿function Wait-NSACMECertificateOrderFinal {
-<#
+﻿function Write-NSStatusTick {
+    <#
     .SYNOPSIS
-        Waits for a finalized ACME order to become valid.
+        Advances the ConsoleStatus progress bar of the current item.
 
     .DESCRIPTION
-        Polls Posh-ACME order state after Submit-OrderFinalize until the order is
-        valid, invalid, or the timeout expires.
+        Thin wrapper around Write-ConsoleTick that does nothing when ConsoleStatus output is not
+        active.
 
-    .PARAMETER MainDomain
-        Main domain of the Posh-ACME order.
-
-    .PARAMETER TimeoutSeconds
-        Maximum number of seconds to wait.
+    .PARAMETER Count
+        Number of ticks to write.
 
     .NOTES
-        Function  : Wait-NSACMECertificateOrderFinal
+        Function  : Write-NSStatusTick
         Author    : John Billekens
         Copyright : Copyright (c) John Billekens Consultancy
-        Version   : 2026.0525.2137
-#>
+        Version   : 2026.811.1452
+    #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$MainDomain,
-        [int]$TimeoutSeconds = 180
+        [ValidateRange(1, 500)]
+        [int]$Count = 1
     )
 
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    do {
-        Start-Sleep -Seconds 3
-        # One tick per poll.
-        Write-NSStatusTick
-        $order = Posh-ACME\Get-PAOrder -MainDomain $MainDomain -Refresh
-        if ($order.status -eq 'valid') { return $order }
-        if ($order.status -eq 'invalid') { throw "ACME order for $MainDomain became invalid." }
-        Write-NSACMECertificateLog Info 'ACME' "Waiting for finalized order: $($order.status)."
-    } while ((Get-Date) -lt $deadline)
+    if (-not $script:NSConsoleStatusEnabled) { return }
 
-    throw "Timed out waiting for ACME order finalization for $MainDomain."
+    # No-op in ConsoleStatus when no item is open.
+    ConsoleStatus\Write-ConsoleTick -Count $Count
 }
 
 # SIG # Begin signature block
 # MII6AgYJKoZIhvcNAQcCoII58zCCOe8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCBw+UM3MmEgtoF
-# EXg3F3jQr5ppEbZlB5ZdIXyUEdd2zqCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAx3fVP/HX5vAv6
+# 2CvbgkWqMg0n2d6dD76M0mAgKrKwR6CCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
 # lUgTecgRwIeZMA0GCSqGSIb3DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
 # ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVu
 # dGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAy
@@ -229,20 +218,20 @@
 # CzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzAp
 # BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBFT0MgQ0EgMDMCEzMABDIU
 # 8BhK6DGi41cAAAAEMhQwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
-# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgN38W
-# 7LzVijWc3Z+qogVbYJDpSc/J+ojcbI1yD1LZLYQwDQYJKoZIhvcNAQEBBQAEggGA
-# bTbLIuXSzdgXL2HRNTRmYNqmUFAhCXVunXQvL7bjUt2RJNUYrs5bq8YOsWCNTcjl
-# g7mrxWyJc1gWQ2txfJVs3aq4f+Nc/0eK+Z96Uad3ip7zsfvOl0hGr4+gbbFP9De/
-# nixbgIaVIEwQi4G75i6h4mceTRT+A/ua1kAmWomQKKZ7cIBrgZaK1wpiavFsWkvn
-# uU5v5+ruZJb7NOnmhycQ+9hclc3gjo5TZbcZ1vo9RWulMWW7ms3fJpJrRuNDZMXg
-# 5l/Hek0cJCmt4C61Wt1uGhy64SADS885jrUk8FWIffE/NH0f3a08ccKlXnVw3USD
-# MQ7q7VJPPVTikVwvGHoKCD5QAlQoBxTSf2tdYNuAIZBznJmUGTKVn1clf8zK75xO
-# m3vbJHS6UOX+q6Ll945zv/VRyVkITu5yCZ30PbjHmT8hml138Tl6HXP6qOj63PsJ
-# 7GaVzsWsd2FW0xryD1vli3JonJONv49dy3X6uIqkKwbzF40hJnhfrTQCIzhLI3IP
+# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgkDiS
+# agVy5Fg/JlJq0ZZApqfEEHNsLIR4tnGjrTrI4hswDQYJKoZIhvcNAQEBBQAEggGA
+# cYgUjRTsoobsEwP3Zthm2Nj1sMx5lc74DvTMQLydTugVJSaHaTPN0xI5el2Gx5Zb
+# wpF/yttgQQA6yMzt3KqkIMWFlXi0Au5BzVUmLfpYwmcXcoNr9GQqAUVtWMDs7N/s
+# uqvtXXzULCtgmgG6QQdixqfINziF49C3qvXq8Ik3Xwcox+kRB5GvMg/oxcZOucP+
+# zzO7yYbt/qu3Ox4ys5AvvVY0MBOunIXDOhYa2dvXJleoMfq+azowaD2Xa9Y3uZ4T
+# hyuw83gWr6ovV20vUMghDwiQQZFSwGnYvhy6PUBz9mUDTxt6g3HUucxWPQ8Yhhsa
+# +lmYUuS4wYNwBiQwFduL3akqtbLx/X+aSyquMFxrfe1Gii5KWuesGm6t+IldwQwo
+# b58tIa4R61JuKI30QsgM9pPgC2ZkJAClCntUHbUPN9CRidtl+PAOHekOHUGQJbTn
+# rNlXdtD67KEZbweGSzYn8KVt6yXhPRLjeCZVAnX3XAacHzZ+Prczs+YctAAEOyVG
 # oYIUsjCCFK4GCisGAQQBgjcDAwExghSeMIIUmgYJKoZIhvcNAQcCoIIUizCCFIcC
 # AQMxDzANBglghkgBZQMEAgEFADCCAWoGCyqGSIb3DQEJEAEEoIIBWQSCAVUwggFR
-# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIPOTk4bK1duW4xu/mkE6
-# LNOpRkwv3EP65eYOpSB2kgaLAgZqdgnZW5oYEzIwMjYwODEzMDUzOTE2LjQxM1ow
+# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEINzjUXfVROYRsZ6xIJh2
+# 6nd9MPGp4jP1j/kUdi3/KtsQAgZqdgnZW38YEzIwMjYwODEzMDUzOTA3LjA1M1ow
 # BIACAfSggemkgeYwgeMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xLTArBgNVBAsTJE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRl
@@ -333,21 +322,21 @@
 # b3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGltZXN0
 # YW1waW5nIENBIDIwMjACEzMAAABZfNpx6Y1e9cAAAAAAAFkwDQYJYIZIAWUDBAIB
 # BQCgggEtMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQx
-# IgQgMf4kTcdDs/3K76Eb9Zf3yayEJGz6y9WM7yKfmg49u+swgd0GCyqGSIb3DQEJ
+# IgQggIyx4j70iY8c5r/2D5YaOnJnbu1LHDJc8eqC7JmWRQwwgd0GCyqGSIb3DQEJ
 # EAIvMYHNMIHKMIHHMIGgBCDLRbqx24bpscXEJ+Hjj9xrcUVw7R8OyyMfSB2YGK3+
 # vDB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
 # cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3RhbXBp
 # bmcgQ0EgMjAyMAITMwAAAFl82nHpjV71wAAAAAAAWTAiBCCuFIbFkRYftoOe8fCe
-# i9iFNPs5IXQTScPFBsco+TMPkDANBgkqhkiG9w0BAQsFAASCAgB32ybn1ICEor/c
-# n+gnJmnFT2oATmS2NseI1p5Vw4DQHQQwejccWi/VQbb6rb3dlVc5iFdNPPdI9b2w
-# hPP3QGLW8vjfShYRO4czelPzmLrYRpIhRADe0n+r4b3m1I1gImqDrN+9uGb70sNh
-# ejBnxcG/6HgVl4nP8ew1aAoqqreoSDr62sUqSyn4mvvh7Vz/s7HoJCt/ic4aEb+z
-# 4hIjj16VCxGLUXGDUyMREBsLBn/MUpF/jOtIlVARm75q68Aw05U+CqPyHVAUQGqU
-# iK9g3cwkmr+9w4dPOLFZIBhVcXqI9egN5We8xutu63uNdDfK1WdbJMkknHbLWT9u
-# EgBbYg3eRRuJPyQ1fsSAG6hDGvTFvcYoaXUE+kfoyh69nHPwIh88OScmSka1FR9O
-# gDPISJMZ3EUgYGxsUCDl8+v1rpMVJ3LuBBJU64g6IgM3u/HjAZdd8ig1ywi3e2N4
-# M9AVYzSdBzY4vbqIsyeojOCPUfRIPj/PT3Nt/3AkWtdQZXNZW58AAq3r95xNAU56
-# 3s7okfE+asjarePGXdTguesWwv5rCmHmzj2oDAfCyIYljqiogZQfzWLWOrjESLKE
-# Zf4+ekqXPmu3tci9m/0JJnZJ4j1AZfsrfGOIlchMTr+prkrDHvotijMTaQejhhsQ
-# 9gnDy7n7blQQSfB/2XBqJ17wkatB0A==
+# i9iFNPs5IXQTScPFBsco+TMPkDANBgkqhkiG9w0BAQsFAASCAgAbIIRP2NrLAYsS
+# G8qjicrNspyRhtTDaMRvsnWjb74nEi8yQZm2HJcRnHhvTi16ljEHIjhW4cINDxz0
+# E+Dhxlg2C3Wo4YqeLJNwAHHSIqKFeTr50uCiZP+NpcEU7XFV72/k9eqD45Q+3bYC
+# aoQHC2HpPLgJBrPZmpfCPClOLuoF8Su7Fv7cvzo1sR/uQwjvS9FuGwg5J/hEbFE+
+# E4CbMi+uRcoDpX1MSjmzZT/VduwSqy63HJJHCMMuuN4PffJe/B5lQ+IZer64bdi8
+# xYFqRHTdO7WcVgsrk+Rt3KSL0OpeXJoiBh3zDDC++hEXR20coZh/Qaut614hG5Qu
+# r8WlfQ84TiOpUmayeeV2cY9UK0/MCEh0UrYufVfOCYZra0yMZ1ocCK7abV1AlYAM
+# BLMaGClS7C9h4ndFuG6Lqdc58NjgZMa3MCdkYLnTJPFgo1Y3RmxRUlbcBrjze63p
+# fIM2FKC+w93XUG5npKQMY5sOiEMLE5AgU9r4vCOFztxy7ZIGE88q7sDoLqRCzr/T
+# dwBVlmCLTv6oNWDiqXTAB8yx2uswp6is2Uz4RKcp/T3pFHY3d3X0huKkbyyIl2rN
+# ZuiV/1ZkXka/m9TwrNbpGSY5JI0ux/6oJA81OHKFX3gVSCED1pWEwHi890KBkvwm
+# sSHF1hmrfcpQ1kqw/mWCRiuIeRa/cQ==
 # SIG # End signature block
