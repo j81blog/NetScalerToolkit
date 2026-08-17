@@ -24,7 +24,7 @@ Request-NSACMECertificate @requestParams
 
 ## Renewal Behavior
 
-NetScalerToolkit stores provider and renewal metadata when available. It prefers refreshed Posh-ACME order metadata, including provider renewal windows when supported, and falls back to calculating the renewal window from the actual certificate lifetime.
+NetScalerToolkit stores provider and renewal metadata when available. It calculates the renewal window from the actual lifetime of the certificate installed on the NetScaler, and uses refreshed Posh-ACME order metadata, including provider renewal windows such as ARI, to move renewal earlier when that order describes the installed certificate.
 
 This avoids assuming a fixed certificate lifetime. See [Renewal Behavior](renewal-behavior.md).
 

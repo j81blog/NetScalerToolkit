@@ -1,100 +1,58 @@
-﻿function Write-NSACMECertificateResultSummary {
+﻿function Get-NSACMECertificateModuleVersion {
 <#
     .SYNOPSIS
-        Writes a readable ACME certificate result summary.
+        Resolves a module version for diagnostic output.
+
+    .DESCRIPTION
+        Returns the version of the loaded module. When the module is not loaded, returns the
+        highest installed version and marks it as not loaded, so a header written before an
+        import does not present an installed version as the one in use.
+
+    .PARAMETER Name
+        Module name to resolve.
+
+    .EXAMPLE
+        Get-NSACMECertificateModuleVersion -Name 'Posh-ACME'
+
+    .NOTES
+        Function  : Get-NSACMECertificateModuleVersion
+        Author    : John Billekens
+        Copyright : Copyright (c) John Billekens Consultancy
+        Version   : 2026.0817.1700
 #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [object[]]$Results
+        [string]$Name
     )
 
-    if (@($Results).Count -gt 0) { Write-NSStatusSection -Title 'Results' }
+    $module = try { Get-Module -Name $Name -ErrorAction SilentlyContinue | Sort-Object Version -Descending | Select-Object -First 1 } catch { $null }
+    $loaded = [bool]$module
+    if (-not $module) {
+        $module = try { Get-Module -Name $Name -ListAvailable -ErrorAction SilentlyContinue | Sort-Object Version -Descending | Select-Object -First 1 } catch { $null }
+    }
 
-    foreach ($result in @($Results)) {
-        # Already counted in their own sections.
-        switch ($result.Status) {
-            'Success' {
-                Write-NSStatusItem -Label $result.CN -Value $result.CertKeyName
-                Write-NSStatusResult -Status OK -Detail $(if ($result.NotAfter) { "expires $($result.NotAfter)" } else { '' }) -NoRecord
-                Write-NSACMECertificateLog Info 'Result' 'Certificate request completed successfully.'
+    $display = if (-not $module) {
+        'not installed'
+    } elseif ($loaded) {
+        [string]$module.Version
+    } else {
+        '{0} (installed, not loaded yet)' -f $module.Version
+    }
 
-                $now = Get-Date
-                $details = [ordered]@{}
-                $details['Domains'] = @($result.Domains) -join ', '
-                $details['Certificate usage'] = if ($result.Production) { 'production' } else { 'test (staging)' }
-                if ($result.NotAfter) { $details['Expires'] = '{0} ({1} days)' -f $result.NotAfter.ToString('yyyy-MM-dd HH:mm:ss'), [int][math]::Floor(($result.NotAfter - $now).TotalDays) }
-                if ($result.RenewAfter) { $details['Renew after'] = '{0} ({1} days)' -f $result.RenewAfter.ToString('yyyy-MM-dd HH:mm:ss'), [int][math]::Floor(($result.RenewAfter - $now).TotalDays) }
-                if ($result.PublicKeySize) { $details['Public key size'] = [string]$result.PublicKeySize }
-                $details['Certkey name'] = $result.CertKeyName
-                if ($result.IntermediateName) {
-                    $details['Intermediate'] = if ($result.IntermediateNotAfter) {
-                        '{0} [{1}]' -f $result.IntermediateName, $result.IntermediateNotAfter.ToString('yyyy-MM-dd')
-                    } else {
-                        $result.IntermediateName
-                    }
-                }
-                if (@($result.IntermediateCertKeyName).Count -gt 0) { $details['Intermediate certkey'] = @($result.IntermediateCertKeyName) -join ', ' }
-                if ($result.Thumbprint) { $details['Thumbprint'] = $result.Thumbprint }
-                if ($result.CertDir) { $details['Cert dir'] = $result.CertDir }
-                if ($result.CertFile) { $details['CRT file'] = Split-Path -Leaf $result.CertFile }
-                if ($result.KeyFile) { $details['KEY file'] = Split-Path -Leaf $result.KeyFile }
-                # PfxPath is whichever file was uploaded, normally the full chain, so the plain PFX
-                # comes from the artifact path instead.
-                $pfxFilePath = if ($result.PfxFilePath) { $result.PfxFilePath } else { $result.PfxPath }
-                if ($pfxFilePath) { $details['PFX file'] = Split-Path -Leaf $pfxFilePath }
-                if ($result.PfxFullChainPath) { $details['PFX with chain'] = Split-Path -Leaf $result.PfxFullChainPath }
-                if ($result.LogFile) { $details['Log'] = $result.LogFile }
-
-                foreach ($key in $details.Keys) {
-                    if ([string]::IsNullOrWhiteSpace([string]$details[$key])) { continue }
-                    # NoRecord: data lines, not outcomes, so they stay out of the summary counts.
-                    Write-NSStatusItem -Label $key
-                    Write-NSStatusResult -Status OK -Detail $details[$key] -NoRecord
-                    Write-NSACMECertificateLog Info 'Result' ('{0,-22} {1}' -f $key, $details[$key])
-                }
-            }
-            'Skipped' {
-                Write-NSStatusItem -Label $result.CN -Value $result.CertKeyName
-                Write-NSStatusResult -Status SKIP -Detail $result.Reason -NoRecord
-                Write-NSACMECertificateLog Info 'Result' 'Certificate request skipped.'
-                Write-NSACMECertificateLog Info 'Result' ('{0,-16} {1}' -f 'Common name', $result.CN)
-                Write-NSACMECertificateLog Info 'Result' ('{0,-16} {1}' -f 'Reason', $result.Reason)
-                if ($result.LogFile) { Write-NSACMECertificateLog Info 'Result' ('{0,-16} {1}' -f 'Log', $result.LogFile) }
-            }
-            'WhatIf' {
-                Write-NSStatusItem -Label $result.CN -Value $result.CertKeyName
-                Write-NSStatusResult -Status SKIP -Detail 'would be renewed, not performed' -NoRecord
-                Write-NSACMECertificateLog Info 'Result' 'Certificate request not performed (WhatIf).'
-                Write-NSACMECertificateLog Info 'Result' ('{0,-16} {1}' -f 'Common name', $result.CN)
-                Write-NSACMECertificateLog Info 'Result' ('{0,-16} {1}' -f 'Decided by', $result.RenewalSource)
-                Write-NSACMECertificateLog Info 'Result' ('{0,-16} {1}' -f 'Reason', $result.Reason)
-                if ($result.LogFile) { Write-NSACMECertificateLog Info 'Result' ('{0,-16} {1}' -f 'Log', $result.LogFile) }
-            }
-            'Failed' {
-                Write-NSStatusItem -Label $result.CN -Value $result.CertKeyName
-                Write-NSStatusResult -Status FAIL -Detail $result.Reason -NoRecord
-                # Info, not Warning: the failure is already logged at Error by the request loop, and
-                # a Warning here has no open item to attach to so it would print on its own line.
-                Write-NSACMECertificateLog Info 'Result' 'Certificate request failed.'
-                Write-NSACMECertificateLog Info 'Result' ('{0,-16} {1}' -f 'Common name', $result.CN)
-                Write-NSACMECertificateLog Info 'Result' ('{0,-16} {1}' -f 'Reason', $result.Reason)
-                if ($result.LogFile) { Write-NSACMECertificateLog Info 'Result' ('{0,-16} {1}' -f 'Log', $result.LogFile) }
-            }
-            default {
-                Write-NSStatusItem -Label $result.CN -Value $result.CertKeyName
-                Write-NSStatusResult -Status WARN -Detail $result.Status -NoRecord
-                Write-NSACMECertificateLog Info 'Result' "$($result.CN): $($result.Status)"
-            }
-        }
+    [PSCustomObject]@{
+        Name    = $Name
+        Version = if ($module) { $module.Version } else { $null }
+        Loaded  = $loaded
+        Display = $display
     }
 }
 
 # SIG # Begin signature block
 # MII6AgYJKoZIhvcNAQcCoII58zCCOe8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDCvuCfDXvBLAH/
-# rK5vXaH0LjGuKTJAeO4PanMqb1fd9KCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAFE129aU7ifGf/
+# /twg2vH4oSwrNg70oUBOtko0odczFqCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
 # lUgTecgRwIeZMA0GCSqGSIb3DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
 # ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVu
 # dGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAy
@@ -280,24 +238,24 @@
 # CzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzAp
 # BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDQCEzMABN8y
 # 4OrNXrSlClUAAAAE3zIwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
-# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgJmoY
-# 8dgT9LtFp3QvpwOysTT+Je2KhvMCRnygl5e9pCkwDQYJKoZIhvcNAQEBBQAEggGA
-# Yp2cfrRe2+JgAhVDfxBmqYgifAQqtV/uTl07nWDB3yfNlf+eLNLzy9g6E+XBhrWt
-# KPmZlbLpUZs7fjoz2xhUSIkfxdRXJGKxJnWHjrZ3y0IdaRYNweWaCY6UKRxi5PST
-# IJkmmcL+umIGw6YRgILoWycaleg/eLPlG6TUW0PCLTzrNlVTZ51oEjaIMRoEVIHh
-# qlM1nhGLQRqqgYfyOGTlqtsbxl9Ur0cPK/g0qFb5W+Zki0se6fgQHqV6ZPazu3cU
-# ViHO81GY5nnPKrtax8TeYRt0yrQ+dK8cX826N5bhlMN33Wam1XC/MZBd3oEMtfSH
-# UR+Oz9BxRAO7gekVlDVZlN5Q6RJwOJNuJblEMxzlA6eo+gcmXJZzO6Idz5lS5Ike
-# QAB6iI8LLxaQMn1xEij/UEYGPRUDHlAaDB2IKwaKiHt62U+/6G8tkVQDEn5mCwyg
-# IoOBdTAl6uAXCfvKNtbGoaSXjKAWUjQzKLNJBYPtEDmiVX8IDLUExdWdHnSbviWx
+# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgeRpU
+# mQ8Mv6FryB7V8rO9+OgJ2b8C/Pyrvf6pDGDRayAwDQYJKoZIhvcNAQEBBQAEggGA
+# XbeUfoppKbMTEEGfY0AHzaa9hbTAl58zd1qS9SxT4FLGZb0I6xpVHI01uyP65tVZ
+# uvWO1wdtzj6+OWJV0QC7rQWRqwQne63UbSA+nOAphjSQbLNePWwfBBpf1E4TQAwI
+# 9g5T9+J6rXulQ0lKOp2W2D2r4UpW4cadcXkLMJ8K616a4rAFVwZZ0nx/qwf9BeRT
+# iZwSP6dSD+9CmuY87CQgPahfJnbxM69KqMmIHa9W4w/XH+WMNrh9qfEuhbyfpA3u
+# gt4cwOKoOdj+2ETZO3goFgMemwmniH4EIyWcHxoVGje0qCxjWo9DIA4mAwaTRk2l
+# ajs5KCo+TxR74WsSdf8mOwwsWzDd1kS59EObxWKLC8dDCZcCsNi2Mnx7ts08FjYA
+# Qzehv6qMDrmXOFK8DUe7XDbkbFjk7Dr5AKhfG2RTb7dkobIaOAsSCHieqT9irfle
+# atTNGE8Yz9Yps0zS0DmWTJqdyEgvJrZlpbqcha9X9kyOhtU+7q8oRYoQe6tD8lo0
 # oYIUsjCCFK4GCisGAQQBgjcDAwExghSeMIIUmgYJKoZIhvcNAQcCoIIUizCCFIcC
 # AQMxDzANBglghkgBZQMEAgEFADCCAWoGCyqGSIb3DQEJEAEEoIIBWQSCAVUwggFR
-# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIOluf2op0SgQA/hGlpd3
-# yXzVT2lh/os1/imaLP6bGJv5AgZqNTCD/1AYEzIwMjYwODE3MTg0MTE5Ljk3NFow
+# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEII+vc2CEozgYP9t7ga+r
+# 1wQWbeihoknb5fKYev1Q4SgeAgZqddI0V9gYEzIwMjYwODE3MTQzMjIwLjY3NVow
 # BIACAfSggemkgeYwgeMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xLTArBgNVBAsTJE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRl
-# ZDEnMCUGA1UECxMeblNoaWVsZCBUU1MgRVNOOjQ5MUEtMDVFMC1EOTQ3MTUwMwYD
+# ZDEnMCUGA1UECxMeblNoaWVsZCBUU1MgRVNOOjdBMUEtMDVFMC1EOTQ3MTUwMwYD
 # VQQDEyxNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lIFN0YW1waW5nIEF1dGhvcml0
 # eaCCDykwggeCMIIFaqADAgECAhMzAAAABeXPD/9mLsmHAAAAAAAFMA0GCSqGSIb3
 # DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9y
@@ -339,28 +297,28 @@
 # k4MhF/KgaXn0GxdH8elEa2Imq45gaa8D+mTm8LWVydt4ytxYP/bqjN49D9NZ81co
 # E6aQWm88TwIf4R4YZbOpMKN0CyejaPNN41LGXHeCUMYmBx3PkP8ADHD1J2Cr/6tj
 # uOOCztfp+o9Nc+ZoIAkpUcA/X2gSMkgHAPUvIdtoSAHEUKiBhI6JQivRepyvWcl+
-# JYbYbBh7pmgAXVswggefMIIFh6ADAgECAhMzAAAAWvYNZ4yF7d0IAAAAAABaMA0G
+# JYbYbBh7pmgAXVswggefMIIFh6ADAgECAhMzAAAAW0q1jUEybdx0AAAAAABbMA0G
 # CSqGSIb3DQEBDAUAMGExCzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQg
 # Q29ycG9yYXRpb24xMjAwBgNVBAMTKU1pY3Jvc29mdCBQdWJsaWMgUlNBIFRpbWVz
-# dGFtcGluZyBDQSAyMDIwMB4XDTI2MDEwODE4NTkwM1oXDTI3MDEwNzE4NTkwM1ow
+# dGFtcGluZyBDQSAyMDIwMB4XDTI2MDEwODE4NTkwNVoXDTI3MDEwNzE4NTkwNVow
 # geMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdS
 # ZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xLTArBgNVBAsT
 # JE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRlZDEnMCUGA1UECxMe
-# blNoaWVsZCBUU1MgRVNOOjQ5MUEtMDVFMC1EOTQ3MTUwMwYDVQQDEyxNaWNyb3Nv
+# blNoaWVsZCBUU1MgRVNOOjdBMUEtMDVFMC1EOTQ3MTUwMwYDVQQDEyxNaWNyb3Nv
 # ZnQgUHVibGljIFJTQSBUaW1lIFN0YW1waW5nIEF1dGhvcml0eTCCAiIwDQYJKoZI
-# hvcNAQEBBQADggIPADCCAgoCggIBAO/0O0eWjgUb9rnHcQLRdfWPN4H+91a3Ynla
-# P46E1m4uD+JKx6csWMStX79fxLJUAqHJqQWE19UlNMhS9jEB32dAJ4yuWsHyUuM+
-# dphjDz4E5jl4gYGZEmaOrKvNt+KqlFayyg/oTg3BlLRu4aBq8668A5qlHcfsuh6D
-# dSqFID1ixJFZzHrZFG1iGBG7U1Bn2ONLDo7jbwX5rMcPduTAUw/c7M3WhSxQBuZp
-# Qiz8RQGKIqCKfIxgQkKdzpCpU0SWQOE/DgTXbz3c15KMRCdkGlL2zb+lnuSV4sse
-# Qm3qflZiZckLyn2xJI8ZXDkq+Ig+b/rsPPIfI8di228WvK1j67JXpyeVCaSUO9Er
-# zlLnTrnjQkeXVQIp73xuVBVrmvoTf/v4a7MnrmuKSyIXc5vJUHEGB345+O8omFt1
-# w8b+Xg9D9PKIRqDPEv7HRk0C+Yvxu8FvHJvSocSIZK+v/FmKFOipYnpP76yAmJNn
-# yheucShOgk8QiU53USn/+AyMb7xW905gZnyNqb29HeVdQ175pDHJGEz8Cx5wiHeV
-# liGz5hABucFDylR9z3LSTmB6+3ZuIxeG9BZS46P6ANPkuVuD5m8wgc7GLLzg73Cs
-# DF09ukt8Uf8dTcMBX3ro+7/k9M6Xt8WPG7IL9v/4DvyMY03tkb9Y9Ri6HWavXRPY
-# RCUePspPAgMBAAGjggHLMIIBxzAdBgNVHQ4EFgQUjmOyQ6twMcP1ZbRytJxI4fnX
-# mcIwHwYDVR0jBBgwFoAUa2koOjUvSGNAz3vYr0npPtk92yEwbAYDVR0fBGUwYzBh
+# hvcNAQEBBQADggIPADCCAgoCggIBAJBUzBbbnlDXee0B0KD5G4/475thFyfctCyu
+# ESTWQXvlLi4Wx/td2qUdeq4ideeg6VWhiOHfu3wJV4TUGSRtqh9Ccr1BmiBKv9iu
+# FpgHyIBu5Qx38ZsxwlFeXVS+ZqJJKnXRbDNQdcYSoC/6c0hQJ/PH50DBRDQkPXVw
+# yFizLrRH9AlrJeUg7BKeT23zftS8/KOJLvEEbHOF6pSOY3ZVprZUWbWjWwRTmoHa
+# Q/E8vrWtLNyEJ+b089VW1Ikra3t4GTB5Wby3CL1K2zYnAxBIvafsKMFyj9OuXHcT
+# PKMDoFSMeamG9MKOMb6uoG1PjdnDgsLP6EOMRSzrLL7jED1mbB9RSd9fhty+HQr6
+# vZgsBn6oUy+YTpNVLskwdtUM82WYAkPztlOt3AiL0qyV7/U3j/uq3vHMjPM0w034
+# 0M57Nei0g4BCcMt0dbqoc91VgCb3/36sHQANontn1HOF2oLk8190QRS43isHVra8
+# H8sf5+GlqIYsYiCKX04HZiOzZW826nVI6d++8lyTeWmpj90Ua9uPbJhVjwE3oh6t
+# O510ySqmSMSLEN07p3Ibe3E6BAb2w93rWzb26+dpSthbKF4kApofqBsWPX4MEtHK
+# SOftPmVTCQ47tghrVuHia9jY+Hsj01m4KW4WtkmVm3L6hMZECMa4sjMxAXz+bX/A
+# JhWTe6TZAgMBAAGjggHLMIIBxzAdBgNVHQ4EFgQU7/LqUlWWYhXJdXwgYKx4b8Gv
+# 0rYwHwYDVR0jBBgwFoAUa2koOjUvSGNAz3vYr0npPtk92yEwbAYDVR0fBGUwYzBh
 # oF+gXYZbaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9jcmwvTWljcm9z
 # b2Z0JTIwUHVibGljJTIwUlNBJTIwVGltZXN0YW1waW5nJTIwQ0ElMjAyMDIwLmNy
 # bDB5BggrBgEFBQcBAQRtMGswaQYIKwYBBQUHMAKGXWh0dHA6Ly93d3cubWljcm9z
@@ -369,36 +327,36 @@
 # JQEB/wQMMAoGCCsGAQUFBwMIMA4GA1UdDwEB/wQEAwIHgDBmBgNVHSAEXzBdMFEG
 # DCsGAQQBgjdMg30BATBBMD8GCCsGAQUFBwIBFjNodHRwOi8vd3d3Lm1pY3Jvc29m
 # dC5jb20vcGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wCAYGZ4EMAQQCMA0GCSqG
-# SIb3DQEBDAUAA4ICAQCAlM8r+t3hIb2h1lDTAx+iYkQlxFuU7QONeyIFIBZ29xvG
-# l8pehKxErDzIniOpIX/eluUAwQKoaI0zwuKAdR0mrSHXCniMoLNko5W+5r7sXNam
-# KX7QMV3BfGOX3gi9qVfxyUe7AHXbqQ8KBQHNYCnNFtQQHgARrlYhtyAKol5ctM0C
-# Ac/y3oY7bTMsVJvnA5u7DVWPeXoST2KEMDeLBvJYq0IJZ6yMpDOWLZ4UP82bksyS
-# hIB/XdawirIGLdseudryRxVMk313mAcjGRb59+Ittt6otVvYQWqH+PGrTUzEcez8
-# aQuO3umoNZjKuFoX5VsPP/gSZse+orhG3zfZk9IDyE3DfUFrhvkv6H0tijK1D0uI
-# GhwMBWSm9ktQ6oeU+aurZFx3MI+LODnHsbRFZAy11uMvwKq+ZNC1Se4tIM1u9piW
-# AhnTPoh6mULKikHOVhHaO953tkzDCtjsse5GUKOx9yg9nqHKWMgnODp62/uPPzC/
-# yDEISrXCcU7UB7tATr3zWNEdtM4d009iXWI6dV/SdcIIX44rpoLyCLw+nXjxp+fY
-# /dygLO7UdSQaVaUFVj3K2nVyuujPspt5Lunc5FvuYPqmi/z8kASmmwbiF+W0P0UT
-# WFaC84MWfU2h6MDg5s0oxmdNFK76jXr3wZfdSoV7FCKfq5GdeGoy5UwDQwMC0DGC
+# SIb3DQEBDAUAA4ICAQAAH+zd+XKh4OxXYMWFmtgilXAQGctOjCUB1w/uBiC/OXcH
+# 3Ia4/XbdUhKzFbaiTbIE6vYZKd1p4u7nKOLkawymAMVyuO7LSl6rLKttZIyLhWjT
+# K0zXOz0u4xLq9+bRtBEKJvA6sD5nJwH1IO6z1YizyuIRoalMCnbrUixfWxQn4TAm
+# N7t9uk+X2FUThEa3ewzRwhtG+xwaAbLMkxRmR24JnfXd1VxKo90+m7Wzuov96Uug
+# x5wZdewiIIm1ZWTj4lCJHup679LcOa7tAxJMipVaSltQH9fm9TOKczlfxtWuBcLU
+# 4duZfqwgsILsH7PMkcX1zwQzQD0yAtPhnYz9KNG125bX+iilOe1S8RHqv2bbBpMp
+# ao4kcUvQI6dMgKRvFmm1eLbhSNOQplDMTGD1tNVdNGkI96jUu+troUjWMMi46TQf
+# BAHxtDTpRhIu/87vAVQ8Z6RHhFxesz4Ed5JThaIQRAy6GcO/Jk+QzDzoZ0arRIkI
+# sGJ7rZgOVAjx9ctfw8lH9RfjcwB3wdGBYNMNVJqQpUai2Taddf5pXzTZEHIqLEF5
+# 3SrBjIeInoQrP7U5VlXiMQsxewLdINrAE2l2TR3KBikb+RQRygbTp8jj2yiC0NCU
+# wG+K+ndglN5RMbXjFW6aKa59Xq+b8XzK/DK+AJtgOpHgJv8Qrk62A+twOVLOpjGC
 # A9QwggPQAgEBMHgwYTELMAkGA1UEBhMCVVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBD
 # b3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGltZXN0
-# YW1waW5nIENBIDIwMjACEzMAAABa9g1njIXt3QgAAAAAAFowDQYJYIZIAWUDBAIB
+# YW1waW5nIENBIDIwMjACEzMAAABbSrWNQTJt3HQAAAAAAFswDQYJYIZIAWUDBAIB
 # BQCgggEtMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQx
-# IgQgjPaGu+mY0jpP7Pek6AtrtqBLrYkUYXm/nzYDWA1SIuIwgd0GCyqGSIb3DQEJ
-# EAIvMYHNMIHKMIHHMIGgBCBiuWRAi+p96PRsBt3TwW3jNozgPQS+Qco1CVm/NaU0
-# QzB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
+# IgQgg+ZG/rAekL6EfDIDLMTR1F3spYefOVfmFjNUrHuj1zAwgd0GCyqGSIb3DQEJ
+# EAIvMYHNMIHKMIHHMIGgBCAvMQNVXZ0b0xxlGw8X/3IEybObuT6a5W1d61CW+cGD
+# 7zB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
 # cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3RhbXBp
-# bmcgQ0EgMjAyMAITMwAAAFr2DWeMhe3dCAAAAAAAWjAiBCAgqtjeG80BojCocMwl
-# 1STFmFHvyPwfAlK5TQwYKigjgjANBgkqhkiG9w0BAQsFAASCAgAYckvHcOrsjxeE
-# sBR39ghe9zncscV9ZEctRvMBXwI0Wp9pHRTEV3sbO1vLlqlS/Ym++ILNHUeloqiW
-# lQ72k/Li1BvrTo5zPT4nxxK5WT5eSA42BKeCZe+3Wv0GBX3eg12UkvZiNoVG3CR6
-# zDifYGxg4bBfi3nG5QiwQZU5zmKgACoicNyOv59vDi6njPDgqefMTsv8Cvw2MoIY
-# g3f0YcgFa+A4iDOOPTQyNInPUHcg7O7sAVOjBJYOdVFfP0zQ3PJLQDFfG+itnRSS
-# IlhUCklcVoHA3oB/gldR9HdIzZLFwTnJ4Jhvk7Sr5PRZkkq0QPm2ATXuFYEgCPhO
-# CzqmuBzLT2dRekeg8dP3acSeUnNKyyz1i6Oo4Q8E6k1v0nv/CkIj6oc5I0nBAN8a
-# wXvNRCBmTEC/WvzVkp+ueyYUVqtjXld5ZtMDr8XAgfwepnKbcpUKlirOhsegHRq2
-# 71CKtLjH7Oe6vYolvijSroMwTGuBacEjFX0cYFUl77oboxX23LE8R514S0CXbJpT
-# sKw5hEOv9ruF78Cnh3fcbj7XoMMm+hydLW3VuWDr+du3jDoHNY+/jkxiUWJvaob2
-# DGAtRa2P7OMNKveA67+w3zmEYhGbouXhbnxPOr0OXH8fiR+Qa3fZVEQJ7G7eONm4
-# H+mwU2tCFIz+kGVDmHN0GnjLiwaQqQ==
+# bmcgQ0EgMjAyMAITMwAAAFtKtY1BMm3cdAAAAAAAWzAiBCDhhYzxTJUKX0s5TbHv
+# LNZBfxKrUMw8+2pzArQV9hUi7DANBgkqhkiG9w0BAQsFAASCAgAOdTFS/xdmK4Zq
+# 8NWHRauCxwkcGe3d+jqOoIU+tEiloYiEWEl5wvMb23cacEvoUMzr8T1+Qswdbhh8
+# Kbxi18gqGugUXz8Aty9V1CDwBNlv2vUOjuabTC0yNm550VATebX4b9ofDco6j+1V
+# mTNdjPN1DzXl66dTmwHobwBJTdevOc1yrxwPwtm20s3ddQ3hRcF0x2uf+VI3gMnx
+# j0BcyEIO4aM/MZ7HMZLycpsD2xX+02Bpn/E2t1zyX1mf1n8QOTKTRGkZnEoIkKOM
+# aYGH/cFNtQ0Z+dG2nh2rCfNw8UbdgAvJP0x5ZUiIpQI+WPXgiq+TBMui1DYqCDKO
+# Bg0AWwjWqwOCThRr8I48a4gJNCHZ1QzKvQ+RrKM+K2Uy9SWTFBw9VVezqdTZAdkm
+# Cvrpjv9me9HUdJT9YR6viMP/FlSORgqFS0lgKEBrSUYG4e1RuWdl3UgHqM6PsrSc
+# 9Bc7utIr0XtYHi4lXM7Hi6od7+1psFD363oBvza/84IB9ipVke31PrZTD+lPBlk1
+# 7XzsIavJsoR4Iyx5zkvY4vtBuAcNpElvt+eGlZz6vZn0oSFEkBPuI/85OOzpo9/b
+# cTxjsVv1SD0u4CD4CYLbLP/7bf5ug3sQmQCYMZD5vi76QOxeP2KQoPccH9VoF8At
+# I/jT/3YKHD8s05lImbN2upyxBnWA0g==
 # SIG # End signature block
