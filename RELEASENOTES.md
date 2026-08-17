@@ -27,6 +27,7 @@
 - IMPROVED: `CurrentCertIsProduction` is retired and removed from a request when it is next saved. `LastIssuedAcmeServer` carries the same information
 - IMPROVED: Test coverage added for the NITRO date format, the deployed certificate decision path, request definition drift, first run after upgrade, UTC round tripping, the config merge and backup, and the ACME account being selected before order metadata is read
 - IMPROVED: Documentation updated for the renewal decision order, the one shot `ForceCertRenew` flag, the `LastIssued*` config fields, and the merging config save
+- IMPROVED: `-UnbindGlobalVPNCertOnUpdate` is documented. It shipped in v2026.817.1230 but appeared in no page, including the generated command reference. Global VPN Binding now covers updating a certkey that is already bound, the NITRO 1541 message, and the alternative of moving the binding to a new certkey name
 
 ### Known Issues
 - None at the moment

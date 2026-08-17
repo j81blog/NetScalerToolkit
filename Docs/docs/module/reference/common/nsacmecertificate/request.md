@@ -21,7 +21,7 @@ Request-NSACMECertificate [-CleanPoshACMEStorage] -ManagementURL <String> [-User
  [-LogFile <String>] [-LogLevel <String>] [-LogType <String>] [-SaveADCConfig] [-SendMail] [-SMTPTo <String[]>]
  [-SMTPFrom <String>] [-SMTPCredential <PSCredential>] [-SMTPServer <String>] [-SMTPPort <Int32>] [-SMTPUseSSL]
  [-LogAsAttachment] [-DisableIPCheck] [-IPv6] [-UpdateIIS] [-UpdateGlobalVPNCertBinding]
- [-GlobalVPNCertBindingIncludeCA] [-GlobalVPNCertBindingCrlCheck <String>]
+ [-UnbindGlobalVPNCertOnUpdate] [-GlobalVPNCertBindingIncludeCA] [-GlobalVPNCertBindingCrlCheck <String>]
  [-GlobalVPNCertBindingOcspCheck <String>] [-IISSiteToUpdate <String>] [-PostPoSHScriptFilename <String>]
  [-PostPoSHScriptExtraParameters <Hashtable>] [-CsVipName <String[]>] [-UseLbVip] [-CspName <String>]
  [-CsaName <String>] [-CsVipBinding <String>] [-SvcName <String>] [-SvcDestination <String>] [-LbName <String>]
@@ -68,7 +68,7 @@ Request-NSACMECertificate [-CleanPoshACMEStorage] -ManagementURL <String> [-User
  [-LogLevel <String>] [-LogType <String>] [-SaveADCConfig] [-SendMail] [-SMTPTo <String[]>]
  [-SMTPFrom <String>] [-SMTPCredential <PSCredential>] [-SMTPServer <String>] [-SMTPPort <Int32>] [-SMTPUseSSL]
  [-LogAsAttachment] [-DisableIPCheck] [-IPv6] [-UpdateIIS] [-UpdateGlobalVPNCertBinding]
- [-GlobalVPNCertBindingIncludeCA] [-GlobalVPNCertBindingCrlCheck <String>]
+ [-UnbindGlobalVPNCertOnUpdate] [-GlobalVPNCertBindingIncludeCA] [-GlobalVPNCertBindingCrlCheck <String>]
  [-GlobalVPNCertBindingOcspCheck <String>] [-IISSiteToUpdate <String>] [-PostPoSHScriptFilename <String>]
  [-PostPoSHScriptExtraParameters <Hashtable>] [-CsVipName <String[]>] [-UseLbVip] [-CspName <String>]
  [-CsaName <String>] [-CsVipBinding <String>] [-SvcName <String>] [-SvcDestination <String>] [-LbName <String>]
@@ -838,6 +838,25 @@ Replaces the certificate bound to the NetScaler VPN global configuration.
 ```yaml
 Type: SwitchParameter
 Parameter Sets: LECertificatesHTTP, LECertificatesDNS, CommandPolicyUser, CommandPolicy
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -UnbindGlobalVPNCertOnUpdate
+Allows the certkey update to unbind the certificate from the VPN global configuration
+and bind it back afterwards.
+NetScaler refuses to update a certkey while it is bound
+there.
+Without this switch such a request fails and reports the binding.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: LECertificatesHTTP, LECertificatesDNS
 Aliases:
 
 Required: False
