@@ -1,49 +1,82 @@
-﻿function Wait-NSACMECertificateOrderFinal {
-<#
+﻿function Write-NSStatusResult {
+    <#
     .SYNOPSIS
-        Waits for a finalized ACME order to become valid.
+        Closes a ConsoleStatus item with a status.
 
     .DESCRIPTION
-        Polls Posh-ACME order state after Submit-OrderFinalize until the order is
-        valid, invalid, or the timeout expires.
+        Thin wrapper around Write-ConsoleResult that does nothing when ConsoleStatus output is not
+        active.
 
-    .PARAMETER MainDomain
-        Main domain of the Posh-ACME order.
+    .PARAMETER Status
+        Item status.
 
-    .PARAMETER TimeoutSeconds
-        Maximum number of seconds to wait.
+    .PARAMETER Detail
+        Text shown next to the status, moved onto its own line when it does not fit.
+
+    .PARAMETER Note
+        Text that always gets its own line under the item. Warnings logged while the item was open
+        are appended to it, and an OK item that collected one is reported as WARN instead.
+
+    .PARAMETER ErrorRecord
+        Error record used for the detail and the record when no explicit detail is given.
+
+    .PARAMETER ShowDuration
+        Prints the elapsed time for this item.
+
+    .PARAMETER NoRecord
+        Draws the line but keeps it out of the records and the summary counts. Used for items that
+        restate an outcome already counted elsewhere.
 
     .NOTES
-        Function  : Wait-NSACMECertificateOrderFinal
+        Function  : Write-NSStatusResult
         Author    : John Billekens
         Copyright : Copyright (c) John Billekens Consultancy
-        Version   : 2026.0525.2137
-#>
+        Version   : 2026.811.1452
+    #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$MainDomain,
-        [int]$TimeoutSeconds = 180
+        [Parameter(Mandatory)]
+        [ValidateSet('OK', 'FAIL', 'WARN', 'SKIP')]
+        [string]$Status,
+
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$Detail,
+
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$Note,
+
+        [AllowNull()]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord,
+
+        [Switch]$ShowDuration,
+
+        [Switch]$NoRecord
     )
 
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    do {
-        Start-Sleep -Seconds 3
-        # One tick per poll.
-        Write-NSStatusTick
-        $order = Posh-ACME\Get-PAOrder -MainDomain $MainDomain -Refresh
-        if ($order.status -eq 'valid') { return $order }
-        if ($order.status -eq 'invalid') { throw "ACME order for $MainDomain became invalid." }
-        Write-NSACMECertificateLog Info 'ACME' "Waiting for finalized order: $($order.status)."
-    } while ((Get-Date) -lt $deadline)
+    if (-not $script:NSConsoleStatusEnabled) { return }
 
-    throw "Timed out waiting for ACME order finalization for $MainDomain."
+    # OK degrades to WARN when a warning was logged during the item.
+    if ($Status -eq 'OK' -and $script:NSStatusItemHadWarning) { $Status = 'WARN' }
+
+    $resultParams = @{ Status = $Status }
+    if ($PSBoundParameters.ContainsKey('Detail')) { $resultParams.Detail = $Detail }
+    if ($PSBoundParameters.ContainsKey('Note') -and $Note) {
+        ConsoleStatus\Set-ConsoleStepNote -Text $Note -Append
+    }
+    if ($ErrorRecord) { $resultParams.ErrorRecord = $ErrorRecord }
+    if ($ShowDuration) { $resultParams.ShowDuration = $true }
+    if ($NoRecord) { $resultParams.NoRecord = $true }
+
+    ConsoleStatus\Write-ConsoleResult @resultParams
 }
 
 # SIG # Begin signature block
 # MII6AgYJKoZIhvcNAQcCoII58zCCOe8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCBw+UM3MmEgtoF
-# EXg3F3jQr5ppEbZlB5ZdIXyUEdd2zqCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCALEORjpU7IA6al
+# S+fIQ6vjCoSDaMuRYL36KDgUHb1UCKCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
 # lUgTecgRwIeZMA0GCSqGSIb3DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
 # ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVu
 # dGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAy
@@ -229,20 +262,20 @@
 # CzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzAp
 # BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBFT0MgQ0EgMDMCEzMABDIU
 # 8BhK6DGi41cAAAAEMhQwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
-# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgN38W
-# 7LzVijWc3Z+qogVbYJDpSc/J+ojcbI1yD1LZLYQwDQYJKoZIhvcNAQEBBQAEggGA
-# bTbLIuXSzdgXL2HRNTRmYNqmUFAhCXVunXQvL7bjUt2RJNUYrs5bq8YOsWCNTcjl
-# g7mrxWyJc1gWQ2txfJVs3aq4f+Nc/0eK+Z96Uad3ip7zsfvOl0hGr4+gbbFP9De/
-# nixbgIaVIEwQi4G75i6h4mceTRT+A/ua1kAmWomQKKZ7cIBrgZaK1wpiavFsWkvn
-# uU5v5+ruZJb7NOnmhycQ+9hclc3gjo5TZbcZ1vo9RWulMWW7ms3fJpJrRuNDZMXg
-# 5l/Hek0cJCmt4C61Wt1uGhy64SADS885jrUk8FWIffE/NH0f3a08ccKlXnVw3USD
-# MQ7q7VJPPVTikVwvGHoKCD5QAlQoBxTSf2tdYNuAIZBznJmUGTKVn1clf8zK75xO
-# m3vbJHS6UOX+q6Ll945zv/VRyVkITu5yCZ30PbjHmT8hml138Tl6HXP6qOj63PsJ
-# 7GaVzsWsd2FW0xryD1vli3JonJONv49dy3X6uIqkKwbzF40hJnhfrTQCIzhLI3IP
+# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgj4Z4
+# Ca/k8L+YFWOHKhkAcTVAddLWtfpaF6LAJkYDwnowDQYJKoZIhvcNAQEBBQAEggGA
+# D6m18oPMn2bjDAZCXoKkuh59Q072f7LWKMMB3HBY46LbNKFd4fzSsEm8fkBEB7Az
+# u3VVrFl2u572MXKlkXUZ7kz5vO+q9X29EGZWg9vSQQ259XdCglcbi3jJC1ReP/C7
+# jYCagVjZmX+d3cb0SkVOEYnbwT7ctv1nMgEf+qjBIinte0SwcELPHFOISgRI+AsP
+# Qg6VnwVOOp2kFn8Ho+RTYdbfcMmvZNwRUeV0+Wf7MftTsPGPfeRuz3YqlhjAvFpI
+# kVrSWDL0WNx81Nmir8W0iKqDME21X0xQflPAq+P4QRG5N6tFy1x8SGFJZVwZAYY9
+# 5M+3MQP+Rd1A+TPPRNMvdrUkZOJjlaqa6EkAu/BtoplDvxK5aCwgeVxbqyiR3j5u
+# qIjYTUNJeIwUP80qLCav8O7zho0c0HEuRHxEOMMCcF1T5moxTwpmkSoIjMCq34bz
+# jkuCWk45SKf+lTm1LsWnysetD2EA4iPAZDdNlQtbN9mQj37Rw2X42GYB8o9m/iup
 # oYIUsjCCFK4GCisGAQQBgjcDAwExghSeMIIUmgYJKoZIhvcNAQcCoIIUizCCFIcC
 # AQMxDzANBglghkgBZQMEAgEFADCCAWoGCyqGSIb3DQEJEAEEoIIBWQSCAVUwggFR
-# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIPOTk4bK1duW4xu/mkE6
-# LNOpRkwv3EP65eYOpSB2kgaLAgZqdgnZW5oYEzIwMjYwODEzMDUzOTE2LjQxM1ow
+# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEILHuwLnnYzqJ1Tw095c2
+# vR9b+BnBYRGIiecLR5gRov3BAgZqdgnZW3cYEzIwMjYwODEzMDUzOTA1LjAyNVow
 # BIACAfSggemkgeYwgeMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xLTArBgNVBAsTJE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRl
@@ -333,21 +366,21 @@
 # b3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGltZXN0
 # YW1waW5nIENBIDIwMjACEzMAAABZfNpx6Y1e9cAAAAAAAFkwDQYJYIZIAWUDBAIB
 # BQCgggEtMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQx
-# IgQgMf4kTcdDs/3K76Eb9Zf3yayEJGz6y9WM7yKfmg49u+swgd0GCyqGSIb3DQEJ
+# IgQgSHTfsMI3Pnxt0dsiA+NIAg2OX23vYYmwbXKwDiLifVMwgd0GCyqGSIb3DQEJ
 # EAIvMYHNMIHKMIHHMIGgBCDLRbqx24bpscXEJ+Hjj9xrcUVw7R8OyyMfSB2YGK3+
 # vDB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
 # cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3RhbXBp
 # bmcgQ0EgMjAyMAITMwAAAFl82nHpjV71wAAAAAAAWTAiBCCuFIbFkRYftoOe8fCe
-# i9iFNPs5IXQTScPFBsco+TMPkDANBgkqhkiG9w0BAQsFAASCAgB32ybn1ICEor/c
-# n+gnJmnFT2oATmS2NseI1p5Vw4DQHQQwejccWi/VQbb6rb3dlVc5iFdNPPdI9b2w
-# hPP3QGLW8vjfShYRO4czelPzmLrYRpIhRADe0n+r4b3m1I1gImqDrN+9uGb70sNh
-# ejBnxcG/6HgVl4nP8ew1aAoqqreoSDr62sUqSyn4mvvh7Vz/s7HoJCt/ic4aEb+z
-# 4hIjj16VCxGLUXGDUyMREBsLBn/MUpF/jOtIlVARm75q68Aw05U+CqPyHVAUQGqU
-# iK9g3cwkmr+9w4dPOLFZIBhVcXqI9egN5We8xutu63uNdDfK1WdbJMkknHbLWT9u
-# EgBbYg3eRRuJPyQ1fsSAG6hDGvTFvcYoaXUE+kfoyh69nHPwIh88OScmSka1FR9O
-# gDPISJMZ3EUgYGxsUCDl8+v1rpMVJ3LuBBJU64g6IgM3u/HjAZdd8ig1ywi3e2N4
-# M9AVYzSdBzY4vbqIsyeojOCPUfRIPj/PT3Nt/3AkWtdQZXNZW58AAq3r95xNAU56
-# 3s7okfE+asjarePGXdTguesWwv5rCmHmzj2oDAfCyIYljqiogZQfzWLWOrjESLKE
-# Zf4+ekqXPmu3tci9m/0JJnZJ4j1AZfsrfGOIlchMTr+prkrDHvotijMTaQejhhsQ
-# 9gnDy7n7blQQSfB/2XBqJ17wkatB0A==
+# i9iFNPs5IXQTScPFBsco+TMPkDANBgkqhkiG9w0BAQsFAASCAgCNSk/ky5Acr5RQ
+# /GiHMqo3o8DhUqjiDv7LJlMmWCGDXjfsZKV1yF1MXInnmfOUohz3OUp7sYLT4X1g
+# sJNGatqZ4iJQubH+tyahp71o2VnvRo4QlQoEAXIGNC3uPrzR6bXF7HnnhF2As44U
+# Io2h46rG7P3xfAk3EQ3gcrT3ErAjSjTwd+GJtMeQJgLGrTYeZonvMf2tKgq/oQ+j
+# Kpw+2my3ZKfbKXwMz6yad0qzDovENRHqYYs7H9Fy1uY5rOlN1bFC1jJNHd+1GKfZ
+# GAvD2mtg9SO/geNiqi3JkNf2noQ6FHDbZZzzOFMY3pgEVN3Z+lFYXuYs+Xxbps2r
+# m1BvmxTIKz0Xs13q0g56O1xkc7wR24MnBezj35HLuAl4xu1WIxY9ttAdk6SMCoDh
+# FH8M8LmiQQNuOZb4mM1Ri0b1Q9upVoxk5zzQlILl/M70AF+SDI7Ut99ErOFvo8Ye
+# eHLEOemOTKNJvObeB0Hoq/nOc4Tp0GNgNXa5QqNtTWz6OBvhzf5t3TfmClDXr/iG
+# currpHRYuOcfJqoc23v9qOKKEMYnM1KB0UZbXCCryFsEkljE16ykJ1gcf6YjnoG0
+# wdkg+hR1w3LMMrD9Oh5j7cGlRLBst0feR+8086VdzKdW4Z9k9Redi1EqxMLPVSEE
+# 2J4BpJJoI+zQJNZROCkPmyRgK+k35g==
 # SIG # End signature block

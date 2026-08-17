@@ -175,11 +175,26 @@
             throw 'CsVipName is required when creating request-certificate user permissions unless UseLbVip is specified.'
         }
 
+        $null = Import-NSConsoleStatus
+        Write-NSStatusTitle -Title 'New-NSACMECertificateUser' -Subtitle @(
+            'Policy base : {0}' -f $PolicyName
+            'API user    : {0}' -f $(if ($ApiUsername) { $ApiUsername } else { 'not requested' })
+        )
+
         if (-not $Session) {
-            $normalizedUrl = ([string]$ManagementURL).TrimEnd('/') + '/'
-            $Session = Connect-NSNode -ManagementURL $normalizedUrl -Credential $Credential -SkipCertificateCheck:$SkipCertificateCheck -HA -PassThru -ErrorAction Stop
-            if ($Session.IsHA -and -not $Session.IsPrimary) {
-                throw "Connected NetScaler HA session is '$($Session.ConnectedNodeState)', expected Primary."
+            Write-NSStatusSection -Title 'Setup'
+            Write-NSStatusItem -Label 'Connect to NetScaler' -Value $ManagementURL
+            try {
+                $normalizedUrl = ([string]$ManagementURL).TrimEnd('/') + '/'
+                $Session = Connect-NSNode -ManagementURL $normalizedUrl -Credential $Credential -SkipCertificateCheck:$SkipCertificateCheck -HA -PassThru -ErrorAction Stop
+                if ($Session.IsHA -and -not $Session.IsPrimary) {
+                    throw "Connected NetScaler HA session is '$($Session.ConnectedNodeState)', expected Primary."
+                }
+                $connectDetail = @($Session.ConnectedNodeState, $(if ($Session.Version) { "v$($Session.Version)" })) | Where-Object { $_ }
+                Write-NSStatusResult -Status OK -Detail ($connectDetail -join ', ')
+            } catch {
+                Write-NSStatusResult -Status FAIL -ErrorRecord $_
+                throw
             }
         }
 
@@ -218,21 +233,31 @@
             $cmdSpec['Basics'] += "|(^(show|switch)\s+ns\s+partition)|(^(show|switch)\s+ns\s+partition\s+.*)"
         }
 
+        Write-NSStatusSection -Title 'Command policies'
+
         $policyResults = @()
         foreach ($item in $cmdSpec.GetEnumerator()) {
             $itemPolicyName = "$effectivePolicyBase-$($item.Name)"
-            $existing = Invoke-NSGetSystemCmdPolicy -Session $Session -PolicyName $itemPolicyName -ReturnNullOnNotFound -ErrorAction Stop
+            Write-NSStatusItem -Label $itemPolicyName -Value "priority $($cmdSpecPriority[$item.Name])"
+            try {
+                $existing = Invoke-NSGetSystemCmdPolicy -Session $Session -PolicyName $itemPolicyName -ReturnNullOnNotFound -ErrorAction Stop
 
-            if ($existing) {
-                if ($PSCmdlet.ShouldProcess($itemPolicyName, 'Update NetScaler system command policy')) {
-                    Invoke-NSUpdateSystemCmdPolicy -Session $Session -PolicyName $itemPolicyName -Action 'ALLOW' -CmdSpec $item.Value | Out-Null
+                if ($existing) {
+                    if ($PSCmdlet.ShouldProcess($itemPolicyName, 'Update NetScaler system command policy')) {
+                        Invoke-NSUpdateSystemCmdPolicy -Session $Session -PolicyName $itemPolicyName -Action 'ALLOW' -CmdSpec $item.Value | Out-Null
+                    }
+                    $policyResults += [PSCustomObject]@{ PolicyName = $itemPolicyName; Priority = $cmdSpecPriority[$item.Name]; Action = 'Updated' }
+                    Write-NSStatusResult -Status OK -Detail 'updated'
+                } else {
+                    if ($PSCmdlet.ShouldProcess($itemPolicyName, 'Create NetScaler system command policy')) {
+                        Invoke-NSAddSystemCmdPolicy -Session $Session -PolicyName $itemPolicyName -Action 'ALLOW' -CmdSpec $item.Value | Out-Null
+                    }
+                    $policyResults += [PSCustomObject]@{ PolicyName = $itemPolicyName; Priority = $cmdSpecPriority[$item.Name]; Action = 'Created' }
+                    Write-NSStatusResult -Status OK -Detail 'created'
                 }
-                $policyResults += [pscustomobject]@{ PolicyName = $itemPolicyName; Priority = $cmdSpecPriority[$item.Name]; Action = 'Updated' }
-            } else {
-                if ($PSCmdlet.ShouldProcess($itemPolicyName, 'Create NetScaler system command policy')) {
-                    Invoke-NSAddSystemCmdPolicy -Session $Session -PolicyName $itemPolicyName -Action 'ALLOW' -CmdSpec $item.Value | Out-Null
-                }
-                $policyResults += [pscustomobject]@{ PolicyName = $itemPolicyName; Priority = $cmdSpecPriority[$item.Name]; Action = 'Created' }
+            } catch {
+                Write-NSStatusResult -Status FAIL -ErrorRecord $_
+                throw
             }
         }
 
@@ -240,29 +265,41 @@
         $bindingResults = @()
         if ($ApiUsername) {
             if (-not $ApiPassword) { throw 'ApiPassword is required when ApiUsername is specified.' }
-            $apiPasswordText = ConvertFrom-NSACMECertificateLegacySecret -Object $ApiPassword -AsClearText
-            $existingUser = Invoke-NSGetSystemUser -Session $Session -Username $ApiUsername -ReturnNullOnNotFound -ErrorAction Stop
 
-            if ($existingUser) {
-                if ($PSCmdlet.ShouldProcess($ApiUsername, 'Update NetScaler system user')) {
-                    try {
-                        Invoke-NSUpdateSystemUser -Session $Session -Username $ApiUsername -Password $apiPasswordText -Externalauth 'DISABLED' -Allowedmanagementinterface @('API') | Out-Null
-                    } catch {
-                        Invoke-NSUpdateSystemUser -Session $Session -Username $ApiUsername -Password $apiPasswordText -Externalauth 'DISABLED' | Out-Null
+            Write-NSStatusSection -Title 'API user'
+            Write-NSStatusItem -Label 'System user' -Value $ApiUsername
+            try {
+                $apiPasswordText = ConvertFrom-NSACMECertificateLegacySecret -Object $ApiPassword -AsClearText
+                $existingUser = Invoke-NSGetSystemUser -Session $Session -Username $ApiUsername -ReturnNullOnNotFound -ErrorAction Stop
+
+                if ($existingUser) {
+                    if ($PSCmdlet.ShouldProcess($ApiUsername, 'Update NetScaler system user')) {
+                        try {
+                            Invoke-NSUpdateSystemUser -Session $Session -Username $ApiUsername -Password $apiPasswordText -Externalauth 'DISABLED' -Allowedmanagementinterface @('API') | Out-Null
+                        } catch {
+                            Invoke-NSUpdateSystemUser -Session $Session -Username $ApiUsername -Password $apiPasswordText -Externalauth 'DISABLED' | Out-Null
+                        }
                     }
-                }
-                $userResult = [pscustomobject]@{ Username = $ApiUsername; Action = 'Updated' }
-            } else {
-                if ($PSCmdlet.ShouldProcess($ApiUsername, 'Create NetScaler system user')) {
-                    Invoke-NSAddSystemUser -Session $Session -Username $ApiUsername -Password $apiPasswordText -Externalauth 'DISABLED' | Out-Null
-                    try {
-                        Invoke-NSUpdateSystemUser -Session $Session -Username $ApiUsername -Externalauth 'DISABLED' -Allowedmanagementinterface @('API') | Out-Null
-                    } catch {
-                        Write-Verbose "Could not restrict allowed management interface to API: $($_.Exception.Message)"
+                    $userResult = [PSCustomObject]@{ Username = $ApiUsername; Action = 'Updated' }
+                    Write-NSStatusResult -Status OK -Detail 'updated'
+                } else {
+                    if ($PSCmdlet.ShouldProcess($ApiUsername, 'Create NetScaler system user')) {
+                        Invoke-NSAddSystemUser -Session $Session -Username $ApiUsername -Password $apiPasswordText -Externalauth 'DISABLED' | Out-Null
+                        try {
+                            Invoke-NSUpdateSystemUser -Session $Session -Username $ApiUsername -Externalauth 'DISABLED' -Allowedmanagementinterface @('API') | Out-Null
+                        } catch {
+                            Write-Verbose "Could not restrict allowed management interface to API: $($_.Exception.Message)"
+                        }
                     }
+                    $userResult = [PSCustomObject]@{ Username = $ApiUsername; Action = 'Created' }
+                    Write-NSStatusResult -Status OK -Detail 'created'
                 }
-                $userResult = [pscustomobject]@{ Username = $ApiUsername; Action = 'Created' }
+            } catch {
+                Write-NSStatusResult -Status FAIL -ErrorRecord $_
+                throw
             }
+
+            Write-NSStatusSection -Title 'Policy bindings'
 
             $existingBindings = @()
             $bindingResponse = Invoke-NSGetSystemUserSystemCmdPolicyBinding -Session $Session -Username $ApiUsername -ReturnNullOnNotFound -ErrorAction Stop
@@ -277,10 +314,12 @@
                         ($_.policyname -in $expectedNames -and $expectedPolicy -and [int]$_.priority -ne [int]$expectedPolicy.Priority)
                     })
                 foreach ($binding in $bindingsToRemove) {
+                    Write-NSStatusItem -Label $binding.policyname -Value "priority $($binding.priority)"
                     if ($PSCmdlet.ShouldProcess("$ApiUsername/$($binding.policyname)", 'Remove NetScaler system user command policy binding')) {
                         Invoke-NSDeleteSystemUserSystemCmdPolicyBinding -Session $Session -Username $ApiUsername -Policyname $binding.policyname | Out-Null
                     }
-                    $bindingResults += [pscustomobject]@{ Username = $ApiUsername; PolicyName = $binding.policyname; Priority = $binding.priority; Action = 'Removed' }
+                    $bindingResults += [PSCustomObject]@{ Username = $ApiUsername; PolicyName = $binding.policyname; Priority = $binding.priority; Action = 'Removed' }
+                    Write-NSStatusResult -Status OK -Detail 'unbound'
                 }
                 if ($bindingsToRemove.Count -gt 0) {
                     $bindingResponse = Invoke-NSGetSystemUserSystemCmdPolicyBinding -Session $Session -Username $ApiUsername -ReturnNullOnNotFound -ErrorAction Stop
@@ -289,37 +328,86 @@
             }
 
             foreach ($policy in $policyResults) {
+                Write-NSStatusItem -Label $policy.PolicyName -Value "priority $($policy.Priority)"
                 $present = @($existingBindings | Where-Object { $_.policyname -ieq $policy.PolicyName -and [int]$_.priority -eq [int]$policy.Priority }).Count -gt 0
                 if ($present) {
-                    $bindingResults += [pscustomobject]@{ Username = $ApiUsername; PolicyName = $policy.PolicyName; Priority = $policy.Priority; Action = 'Present' }
+                    $bindingResults += [PSCustomObject]@{ Username = $ApiUsername; PolicyName = $policy.PolicyName; Priority = $policy.Priority; Action = 'Present' }
+                    Write-NSStatusResult -Status SKIP -Detail 'already bound'
                 } else {
                     if ($PSCmdlet.ShouldProcess("$ApiUsername/$($policy.PolicyName)", 'Create NetScaler system user command policy binding')) {
                         Invoke-NSAddSystemUserSystemCmdPolicyBinding -Session $Session -Username $ApiUsername -Policyname $policy.PolicyName -Priority ([double]$policy.Priority) | Out-Null
                     }
-                    $bindingResults += [pscustomobject]@{ Username = $ApiUsername; PolicyName = $policy.PolicyName; Priority = $policy.Priority; Action = 'Bound' }
+                    $bindingResults += [PSCustomObject]@{ Username = $ApiUsername; PolicyName = $policy.PolicyName; Priority = $policy.Priority; Action = 'Bound' }
+                    Write-NSStatusResult -Status OK -Detail 'bound'
                 }
             }
 
             foreach ($partition in @($Partitions | Where-Object { $_ -and $_ -ne 'default' })) {
+                Write-NSStatusItem -Label 'Partition binding' -Value $partition
                 try {
                     $partitionBindings = Invoke-NSGetSystemUserNSPartitionBinding -Session $Session -Username $ApiUsername -ErrorAction Stop
                     $partitionPresent = @($partitionBindings | Where-Object { $_.partitionname -eq $partition }).Count -gt 0
                     if (-not $partitionPresent -and $PSCmdlet.ShouldProcess("$ApiUsername/$partition", 'Create NetScaler system user partition binding')) {
                         Invoke-NSAddSystemUserNSPartitionBinding -Session $Session -Username $ApiUsername -Partitionname $partition | Out-Null
                     }
+                    Write-NSStatusResult -Status $(if ($partitionPresent) { 'SKIP' } else { 'OK' }) -Detail $(if ($partitionPresent) { 'already bound' } else { 'bound' })
                 } catch {
                     Write-Warning "Could not bind partition '$partition' to '$ApiUsername': $($_.Exception.Message)"
+                    Write-NSStatusResult -Status WARN -Detail $_.Exception.Message
                 }
             }
         }
 
         if ($SaveADCConfig) {
-            if ($PSCmdlet.ShouldProcess('nsconfig', 'Save NetScaler configuration')) {
-                Invoke-NSSaveNSConfig -Session $Session | Out-Null
+            Write-NSStatusSection -Title 'Save'
+            Write-NSStatusItem -Label 'Save NetScaler config' -Value 'nsconfig'
+            try {
+                if ($PSCmdlet.ShouldProcess('nsconfig', 'Save NetScaler configuration')) {
+                    Invoke-NSSaveNSConfig -Session $Session | Out-Null
+                }
+                Write-NSStatusResult -Status OK
+            } catch {
+                Write-NSStatusResult -Status FAIL -ErrorRecord $_
+                throw
             }
         }
 
-        $result = [pscustomobject]@{
+        # The item labels are too narrow for a full policy name, so report the effective
+        # names once the base has been truncated and the suffixes applied.
+        Write-NSStatusSection -Title 'Results'
+
+        $resultLines = @()
+        $resultLines += [PSCustomObject]@{
+            Label  = 'Policy base'
+            Detail = if ($effectivePolicyBase -ne $PolicyName) {
+                # The supplied name is already in the title block, so only note the cut.
+                '{0} (truncated to {1} characters)' -f $effectivePolicyBase, $effectivePolicyBase.Length
+            } else {
+                $effectivePolicyBase
+            }
+        }
+        foreach ($policy in $policyResults) {
+            $resultLines += [PSCustomObject]@{
+                Label  = 'Command policy'
+                Detail = '{0} (priority {1}, {2})' -f $policy.PolicyName, $policy.Priority, $policy.Action.ToLower()
+            }
+        }
+        if ($userResult) {
+            $resultLines += [PSCustomObject]@{
+                Label  = 'API user'
+                Detail = '{0} ({1})' -f $userResult.Username, $userResult.Action.ToLower()
+            }
+        }
+
+        foreach ($line in $resultLines) {
+            # NoRecord: data lines, not outcomes, so they stay out of the summary counts.
+            Write-NSStatusItem -Label $line.Label
+            Write-NSStatusResult -Status OK -Detail $line.Detail -NoRecord
+        }
+
+        Write-NSStatusSummary
+
+        $result = [PSCustomObject]@{
             PolicyBase       = $effectivePolicyBase
             Policies         = $policyResults
             User             = $userResult
@@ -328,16 +416,17 @@
             PrunedBindings   = [bool]$PruneExistingPolicyBindings
         }
 
-        if ($PassThru) { return $result }
-        return $result
+        if ($PassThru) {
+            return $result
+        }
     }
 }
 
 # SIG # Begin signature block
 # MII6AgYJKoZIhvcNAQcCoII58zCCOe8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAMrNY59/FiYu+t
-# lOiUU+HB4KKAU0tA1QE1+JsWAv3gg6CCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBUnZEELcfMyA2Y
+# cy1cai348BFB+XpiDXK8l4s5tGBD3aCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
 # lUgTecgRwIeZMA0GCSqGSIb3DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
 # ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVu
 # dGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAy
@@ -368,61 +457,61 @@
 # uVxzmq/FdxeDWds3GhhyVKVB0rYjdaNDmuV3fJZ5t0GNv+zcgKCf0Xd1WF81E+Al
 # GmcLfc4l+gcK5GEh2NQc5QfGNpn0ltDGFf5Ozdeui53bFv0ExpK91IjmqaOqu/dk
 # ODtfzAzQNb50GQOmxapMomE2gj4d8yu8l13bS3g7LfU772Aj6PXsCyM2la+YZr9T
-# 03u4aUoqlmZpxJTG9F9urJh4iIAGXKKy7aIwggbAMIIEqKADAgECAhMzAAQqYjg2
-# C/C7UthEAAAABCpiMA0GCSqGSIb3DQEBDAUAMFoxCzAJBgNVBAYTAlVTMR4wHAYD
+# 03u4aUoqlmZpxJTG9F9urJh4iIAGXKKy7aIwggbAMIIEqKADAgECAhMzAAS405bY
+# qvWOnUNsAAAABLjTMA0GCSqGSIb3DQEBDAUAMFoxCzAJBgNVBAYTAlVTMR4wHAYD
 # VQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzApBgNVBAMTIk1pY3Jvc29mdCBJ
-# RCBWZXJpZmllZCBDUyBBT0MgQ0EgMDQwHhcNMjYwODAxMTk0NTU5WhcNMjYwODA0
-# MTk0NTU5WjCBgzELMAkGA1UEBhMCTkwxFjAUBgNVBAgTDU5vb3JkLUJyYWJhbnQx
+# RCBWZXJpZmllZCBDUyBBT0MgQ0EgMDQwHhcNMjYwODEyMjAwNzA0WhcNMjYwODE1
+# MjAwNzA0WjCBgzELMAkGA1UEBhMCTkwxFjAUBgNVBAgTDU5vb3JkLUJyYWJhbnQx
 # EjAQBgNVBAcTCVNjaGlqbmRlbDEjMCEGA1UEChMaSm9obiBCaWxsZWtlbnMgQ29u
 # c3VsdGFuY3kxIzAhBgNVBAMTGkpvaG4gQmlsbGVrZW5zIENvbnN1bHRhbmN5MIIB
-# ojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAzJVfDiyD7X5wjaVAbNcWusQ1
-# m3nZDHQpCr9Tac4NJB+RO2I778PjqBIVN5CyAGRYbP/nK+yy2tOAjaC/Fo5hatz0
-# 5EFprl6CuV28E2OulBZ6fZm1NByGMHdctNVVoQDnZp0H32GVlavYJKwiLzESO01m
-# 5DV2mQxEyxWGQlPyNUZousEvBi0LyvtQ/MnekqzqSqRnoT1HNul8Em4CoEMqUsLe
-# nyYSQJ/YBj5ZiLbPdvEdSSZfHBnKFyJSzU1LoXYpgH1BLsS24pIlF3kHUxN8LcKd
-# yBkqISEUElx7O4+fi71na+s04CjDI2ffkGt4Uhhcd2kzMsUEATi5YLLW/0m3SX1k
-# AaSX4k2SmIGrCIiD7Tg5dxsnoz37mshvEhsGCd91PLsxVlCQrTcz1Pg2lLki9RXv
-# ekrOS9B8jAdXbN5cU42szS4Z6olfShAHFBo1TizkYMgjxAOqZPWKCsgAZrT4R9SH
-# auKCkCkTqGV3XoIKQ22FozT/NMfxKcmo4kh0MCaNAgMBAAGjggHTMIIBzzAMBgNV
+# ojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAi56FBfwzf5vShzPjNpAFDlIx
+# rP+WNwkHmP1Ca70ZVfvy+KP7+SJg61G0oDAs401zvQ84SQ+vpU8/DLCA66MphoTa
+# 0lynwbUy7I4gX/Ei+x1PnFa7O+XlkkAkU/S8AS8+MD7SZN258+t0r9dv+6aDiIZi
+# se826v+dg7qk2zhWUC77gLaTxYxUUP0aJsCd6ma6Wk073Hlro33++lgZe9wFs/Wv
+# jyvOi7hdbvNVoYrbmbumwqx4VXFhqeozGkZipsw7q3TE5zhsiKaNjsnMfoReiVe9
+# XcgBV1zpyLB10atYXKnA58jzrJrBf1plp9JFlmRRdyPLddK+QAPDdod74OAuVyui
+# zZAgxJEOiXpiwUiiR4wt5LIZWBrnHkBIX3n6avnMoPIUfWAHNoz3JB7tnYUeupQP
+# 4KFoKDJjqAnD+gnpEkqT5pKu1sVDU5tOhTppB5OGtULEwUToj3c3Twprl6P48u2x
+# BPvHdbRNfZSkEEjqOIUAZRzgTBW2vAdq5TJKQA8jAgMBAAGjggHTMIIBzzAMBgNV
 # HRMBAf8EAjAAMA4GA1UdDwEB/wQEAwIHgDA6BgNVHSUEMzAxBgorBgEEAYI3YQEA
 # BggrBgEFBQcDAwYZKwYBBAGCN2HK9PELgrHSgxH33KNOluu6MTAdBgNVHQ4EFgQU
-# SNqcq9sa54tVhaeGFcwQwietz+UwHwYDVR0jBBgwFoAUayVB3vtrfP0YgAotf492
+# iG7CwBXCUdrbg+i9vMzoTbq78g4wHwYDVR0jBBgwFoAUayVB3vtrfP0YgAotf492
 # XapzPbgwZwYDVR0fBGAwXjBcoFqgWIZWaHR0cDovL3d3dy5taWNyb3NvZnQuY29t
 # L3BraW9wcy9jcmwvTWljcm9zb2Z0JTIwSUQlMjBWZXJpZmllZCUyMENTJTIwQU9D
 # JTIwQ0ElMjAwNC5jcmwwdAYIKwYBBQUHAQEEaDBmMGQGCCsGAQUFBzAChlhodHRw
 # Oi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2NlcnRzL01pY3Jvc29mdCUyMElE
 # JTIwVmVyaWZpZWQlMjBDUyUyMEFPQyUyMENBJTIwMDQuY3J0MFQGA1UdIARNMEsw
 # SQYEVR0gADBBMD8GCCsGAQUFBwIBFjNodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20v
-# cGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wDQYJKoZIhvcNAQEMBQADggIBADop
-# 8VvsB0PCl6Oomj6RIkJs5sJADvWluNDY8wf4eidt0AX2JpTTLzXVWcZTE+78wYhe
-# 2sBmufBXIw6PRhOcTSOfReICWaUTSKLTWX0Z1x9YN1HugpMpvMatentzINPYpP+q
-# ao91Rsn9lT91MES6CnrhhB/sBZEK4KHf2yNQ3MJ+kRAf1qre1j9S9DWuBiprg+2C
-# sOex2VKs2+rHbuT6CFdw67T9k+bleKiktjFInfVlJ0dfMTa6D/mv5ED/az9xccjQ
-# cses9dSiGIXg2stIc49dvfZZK16/zFfn4JXZOHcenYvg1HXNaywh8htkOz2ylbQB
-# XB8JtDmY5sLCT8oYxILmhgmZ8FWrRaW7yOnGUSAxRYaiGj7tiDcIhwI86tuxEKFu
-# vkGoFTOh5fch0g/pNqAxDnUlDyrlkaZ3w6c2cC6lEeOEnX9wMNbpgdE0kX/vNB6Y
-# p2IqGZ9e01rKS0T1yHYy2jvY761YirKkewV/xWqjj9OQktKA9ri+LRcizKD1PqkH
-# uVyjsUs5LDdZbkjJTCkr07LEda/cGG9SFxd4nFuUWW+IcU7QwCMLpCUaoUmpVNJF
-# 93lLntphbR4lQjJqcO68JXvJ8zE2yCjQ/07fk+BqJDe9/ha1pJpqizxeqkCsdJcg
-# Fc3dv1gLb4r3GwBWsVpvKE+gTpVk/1z1SK7OjMKRMIIGwDCCBKigAwIBAgITMwAE
-# KmI4Ngvwu1LYRAAAAAQqYjANBgkqhkiG9w0BAQwFADBaMQswCQYDVQQGEwJVUzEe
+# cGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wDQYJKoZIhvcNAQEMBQADggIBAKjO
+# LANEbvVcXnVYrx4NjQmly/9j4fNQvIBC3OxcnOR2ioVCrTfraGPFcVBYr0yl5G/m
+# Aj7anDfPVghMcTfMkqbd+WZ0Rt099iOuyZBELH5T4K2lOPT3fHr/jAPTZnF5x0eo
+# eftM2dJldo4n1hauwudmLrC9sv6K95lolW+ZNC19L96/xJBvXHjFQKeLs8XiMOBz
+# OCOzT2g0TiUut5I6XbwGDy9Jjr7vh8WRruFTLHFN5RD2+svsFQwUihUdOSNY7iBm
+# 4FLVVoRGB6JnbueJJkmLDqfjx9h+FjUoVgRVNLXCmUJDe6PZJKpx4WyAlH2eLjtG
+# S/xu/R9eXN/fk5YJl3eNhRMQ05j+7XFk8YpJKAkpX24Zitf8LPDZlIiEbl2RSAom
+# 23ib878A+MhkT5zvIFAXQglL4ydbkRDow5BNJYk2QNODgVm5KadMH2kQnZHAVNx+
+# d72G1Q5OEdGi1A2D+nhWB36P66FFKUlNvZ5zNdDxewSeWnNczGQoOrxykYckymdh
+# w/Po58mkeGeyKxd4ofvkurfhVJocrRg3/ytLk+jXLTXUCy5hgXb9cb7eybhSC7Rt
+# v83aXsk5ZpSCKnZ6KNRSJXo6u8UWLPrbqR4M4diIHBv6szF4XYynCiV+vqgYn1tf
+# R8PWV/zHIz92zHXqyd0dZVF6numJlaJS7dl7/L0jMIIGwDCCBKigAwIBAgITMwAE
+# uNOW2Kr1jp1DbAAAAAS40zANBgkqhkiG9w0BAQwFADBaMQswCQYDVQQGEwJVUzEe
 # MBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSswKQYDVQQDEyJNaWNyb3Nv
-# ZnQgSUQgVmVyaWZpZWQgQ1MgQU9DIENBIDA0MB4XDTI2MDgwMTE5NDU1OVoXDTI2
-# MDgwNDE5NDU1OVowgYMxCzAJBgNVBAYTAk5MMRYwFAYDVQQIEw1Ob29yZC1CcmFi
+# ZnQgSUQgVmVyaWZpZWQgQ1MgQU9DIENBIDA0MB4XDTI2MDgxMjIwMDcwNFoXDTI2
+# MDgxNTIwMDcwNFowgYMxCzAJBgNVBAYTAk5MMRYwFAYDVQQIEw1Ob29yZC1CcmFi
 # YW50MRIwEAYDVQQHEwlTY2hpam5kZWwxIzAhBgNVBAoTGkpvaG4gQmlsbGVrZW5z
 # IENvbnN1bHRhbmN5MSMwIQYDVQQDExpKb2huIEJpbGxla2VucyBDb25zdWx0YW5j
-# eTCCAaIwDQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBAMyVXw4sg+1+cI2lQGzX
-# FrrENZt52Qx0KQq/U2nODSQfkTtiO+/D46gSFTeQsgBkWGz/5yvsstrTgI2gvxaO
-# YWrc9ORBaa5egrldvBNjrpQWen2ZtTQchjB3XLTVVaEA52adB99hlZWr2CSsIi8x
-# EjtNZuQ1dpkMRMsVhkJT8jVGaLrBLwYtC8r7UPzJ3pKs6kqkZ6E9RzbpfBJuAqBD
-# KlLC3p8mEkCf2AY+WYi2z3bxHUkmXxwZyhciUs1NS6F2KYB9QS7EtuKSJRd5B1MT
-# fC3CncgZKiEhFBJcezuPn4u9Z2vrNOAowyNn35BreFIYXHdpMzLFBAE4uWCy1v9J
-# t0l9ZAGkl+JNkpiBqwiIg+04OXcbJ6M9+5rIbxIbBgnfdTy7MVZQkK03M9T4NpS5
-# IvUV73pKzkvQfIwHV2zeXFONrM0uGeqJX0oQBxQaNU4s5GDII8QDqmT1igrIAGa0
-# +EfUh2rigpApE6hld16CCkNthaM0/zTH8SnJqOJIdDAmjQIDAQABo4IB0zCCAc8w
+# eTCCAaIwDQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBAIuehQX8M3+b0ocz4zaQ
+# BQ5SMaz/ljcJB5j9Qmu9GVX78vij+/kiYOtRtKAwLONNc70POEkPr6VPPwywgOuj
+# KYaE2tJcp8G1MuyOIF/xIvsdT5xWuzvl5ZJAJFP0vAEvPjA+0mTdufPrdK/Xb/um
+# g4iGYrHvNur/nYO6pNs4VlAu+4C2k8WMVFD9GibAnepmulpNO9x5a6N9/vpYGXvc
+# BbP1r48rzou4XW7zVaGK25m7psKseFVxYanqMxpGYqbMO6t0xOc4bIimjY7JzH6E
+# XolXvV3IAVdc6ciwddGrWFypwOfI86yawX9aZafSRZZkUXcjy3XSvkADw3aHe+Dg
+# Llcros2QIMSRDol6YsFIokeMLeSyGVga5x5ASF95+mr5zKDyFH1gBzaM9yQe7Z2F
+# HrqUD+ChaCgyY6gJw/oJ6RJKk+aSrtbFQ1ObToU6aQeThrVCxMFE6I93N08Ka5ej
+# +PLtsQT7x3W0TX2UpBBI6jiFAGUc4EwVtrwHauUySkAPIwIDAQABo4IB0zCCAc8w
 # DAYDVR0TAQH/BAIwADAOBgNVHQ8BAf8EBAMCB4AwOgYDVR0lBDMwMQYKKwYBBAGC
 # N2EBAAYIKwYBBQUHAwMGGSsGAQQBgjdhyvTxC4Kx0oMR99yjTpbrujEwHQYDVR0O
-# BBYEFEjanKvbGueLVYWnhhXMEMInrc/lMB8GA1UdIwQYMBaAFGslQd77a3z9GIAK
+# BBYEFIhuwsAVwlHa24PovbzM6E26u/IOMB8GA1UdIwQYMBaAFGslQd77a3z9GIAK
 # LX+Pdl2qcz24MGcGA1UdHwRgMF4wXKBaoFiGVmh0dHA6Ly93d3cubWljcm9zb2Z0
 # LmNvbS9wa2lvcHMvY3JsL01pY3Jvc29mdCUyMElEJTIwVmVyaWZpZWQlMjBDUyUy
 # MEFPQyUyMENBJTIwMDQuY3JsMHQGCCsGAQUFBwEBBGgwZjBkBggrBgEFBQcwAoZY
@@ -430,17 +519,17 @@
 # MjBJRCUyMFZlcmlmaWVkJTIwQ1MlMjBBT0MlMjBDQSUyMDA0LmNydDBUBgNVHSAE
 # TTBLMEkGBFUdIAAwQTA/BggrBgEFBQcCARYzaHR0cDovL3d3dy5taWNyb3NvZnQu
 # Y29tL3BraW9wcy9Eb2NzL1JlcG9zaXRvcnkuaHRtMA0GCSqGSIb3DQEBDAUAA4IC
-# AQA6KfFb7AdDwpejqJo+kSJCbObCQA71pbjQ2PMH+HonbdAF9iaU0y811VnGUxPu
-# /MGIXtrAZrnwVyMOj0YTnE0jn0XiAlmlE0ii01l9GdcfWDdR7oKTKbzGrXp7cyDT
-# 2KT/qmqPdUbJ/ZU/dTBEugp64YQf7AWRCuCh39sjUNzCfpEQH9aq3tY/UvQ1rgYq
-# a4PtgrDnsdlSrNvqx27k+ghXcOu0/ZPm5XiopLYxSJ31ZSdHXzE2ug/5r+RA/2s/
-# cXHI0HLHrPXUohiF4NrLSHOPXb32WStev8xX5+CV2Th3Hp2L4NR1zWssIfIbZDs9
-# spW0AVwfCbQ5mObCwk/KGMSC5oYJmfBVq0Wlu8jpxlEgMUWGoho+7Yg3CIcCPOrb
-# sRChbr5BqBUzoeX3IdIP6TagMQ51JQ8q5ZGmd8OnNnAupRHjhJ1/cDDW6YHRNJF/
-# 7zQemKdiKhmfXtNayktE9ch2Mto72O+tWIqypHsFf8Vqo4/TkJLSgPa4vi0XIsyg
-# 9T6pB7lco7FLOSw3WW5IyUwpK9OyxHWv3BhvUhcXeJxblFlviHFO0MAjC6QlGqFJ
-# qVTSRfd5S57aYW0eJUIyanDuvCV7yfMxNsgo0P9O35PgaiQ3vf4WtaSaaos8XqpA
-# rHSXIBXN3b9YC2+K9xsAVrFabyhPoE6VZP9c9UiuzozCkTCCBygwggUQoAMCAQIC
+# AQCoziwDRG71XF51WK8eDY0Jpcv/Y+HzULyAQtzsXJzkdoqFQq0362hjxXFQWK9M
+# peRv5gI+2pw3z1YITHE3zJKm3flmdEbdPfYjrsmQRCx+U+CtpTj093x6/4wD02Zx
+# ecdHqHn7TNnSZXaOJ9YWrsLnZi6wvbL+iveZaJVvmTQtfS/ev8SQb1x4xUCni7PF
+# 4jDgczgjs09oNE4lLreSOl28Bg8vSY6+74fFka7hUyxxTeUQ9vrL7BUMFIoVHTkj
+# WO4gZuBS1VaERgeiZ27niSZJiw6n48fYfhY1KFYEVTS1wplCQ3uj2SSqceFsgJR9
+# ni47Rkv8bv0fXlzf35OWCZd3jYUTENOY/u1xZPGKSSgJKV9uGYrX/Czw2ZSIhG5d
+# kUgKJtt4m/O/APjIZE+c7yBQF0IJS+MnW5EQ6MOQTSWJNkDTg4FZuSmnTB9pEJ2R
+# wFTcfne9htUOThHRotQNg/p4Vgd+j+uhRSlJTb2eczXQ8XsEnlpzXMxkKDq8cpGH
+# JMpnYcPz6OfJpHhnsisXeKH75Lq34VSaHK0YN/8rS5Po1y011AsuYYF2/XG+3sm4
+# Ugu0bb/N2l7JOWaUgip2eijUUiV6OrvFFiz626keDOHYiBwb+rMxeF2Mpwolfr6o
+# GJ9bX0fD1lf8xyM/dsx16sndHWVRep7piZWiUu3Ze/y9IzCCBygwggUQoAMCAQIC
 # EzMAAAAWMZKNkgJle5oAAAAAABYwDQYJKoZIhvcNAQEMBQAwYzELMAkGA1UEBhMC
 # VVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjE0MDIGA1UEAxMrTWlj
 # cm9zb2Z0IElEIFZlcmlmaWVkIENvZGUgU2lnbmluZyBQQ0EgMjAyMTAeFw0yNjAz
@@ -521,26 +610,26 @@
 # 7Yww94lDf+8oG2oZmDh5O1Qe38E+M3vhKwmzIeoB1dVLlz4i3IpaDcR+iuGjH2Td
 # aC1ZOmBXiCRKJLj4DT2uhJ04ji+tHD6n58vhavFIrmcxghcyMIIXLgIBATBxMFox
 # CzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzAp
-# BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDQCEzMABCpi
-# ODYL8LtS2EQAAAAEKmIwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
-# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgTIJq
-# uNYradJlGpvBFnXFFyRokaRAstQ7Wqlx3Ig9iyowDQYJKoZIhvcNAQEBBQAEggGA
-# rz0lEgJuHAgw3wcLcmNZ2pq7lKoSYnFBIC34/JdV0O9fHyHjiWyY/+k4nEiXa8mg
-# Aa/DB955iWWdPBFhvQrOU3HjxJNXM5Fr7TaowLjD/DEFviatuRcM7OPJRqzGXUwb
-# 7QP4+4lqfLRAQlmTZK2z2IG1KjAWZp8m+PHFQ5AEiuf4vMHxobR7GPPuuY4owY8H
-# 79pLWh4CxF0+grZD2ZkPFryOR58v3dvxK2KXTw61eHx5CxuT4sGWLMnRsl10fGUL
-# D3+qmvcMQuC9JUNekRNQu5WsBvv5nu1k4JsSjI9AY+q8MiPykSSElfPszPy5nPKa
-# jwicMUtDVUu3pgJDXzjREvyUGetaVHfVD9syWUN4aiGywTJEFEg1AeuWP5Ik/yKC
-# aIifWb/SNha7hgv8iaLPwykDfO5PSaJoGee2fpGOXSGcyu8D8w4IfqU+4rOdp//W
-# gnKLNhTTmOCi4uo8NJjOVcBXwSZr8trwnj9gerP4G6eSkpLFIwKc2rBYCrsqPXpX
+# BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDQCEzMABLjT
+# ltiq9Y6dQ2wAAAAEuNMwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
+# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQggMr7
+# TeI2wOOTGhbi86cyUs5uNB/0LnEiXRnSbv9CDscwDQYJKoZIhvcNAQEBBQAEggGA
+# JN9kh7T1AF9nAVXnGL9MPBWEojHZZvcV8hQ+7zqOIyNehW/wS/UeIOeWczHPv5kV
+# pDr2Z3Mp4MrqvoJw8ylSRqafiaOl/PeA/DOydpaTYScrjeKHzpaqSRXAwounVkdU
+# iLGrsZPIDhkDScHGN9HWInLkM1LlMB1fAVEUmdip0zccYAcXCKTXz0b7TtUtULx/
+# uCDGOKcAgkxhQmE+EO8irV9mTrU5JgWuy0XD7bR3YulMHJFAY6LmEuxVRc5d3+Pf
+# GbD1KyxLwAyvBBIgar0wA3fbprBpAuBmHUQSUSKH8gOEzdhvkOw7lfrbHvJ4bPaw
+# DXXKifqplcDbSPK5ZapDFKUH/bIyZN9axnEyBWY9NahHSIH7YXKd6VClKHL2Hm6I
+# lfyV7W/92ZKwhGKGsHJl0UKygsnCKil8ngQsmUCyWuHq3CmbV+InwCcnp0slKQPl
+# m+KV2xv02Vv/5ooBxH5T7KRhgJDk3VSJMDyugZtsGrtcF0DocxNezOz3uRIR+6ly
 # oYIUsjCCFK4GCisGAQQBgjcDAwExghSeMIIUmgYJKoZIhvcNAQcCoIIUizCCFIcC
 # AQMxDzANBglghkgBZQMEAgEFADCCAWoGCyqGSIb3DQEJEAEEoIIBWQSCAVUwggFR
-# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEILyjgDBYjWxMhkLs+NIC
-# lXHXyhk1WAp3SiBAuVbM+p33AgZqNWdtwv8YEzIwMjYwODAzMTI1MDQwLjMyN1ow
+# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIP+Ew/WJyAqA7+bD7c8y
+# 7MdVGJoMQMZ3sQBV1RkptSmwAgZqNTB/BuwYEzIwMjYwODE0MTU0MzM1LjIyM1ow
 # BIACAfSggemkgeYwgeMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xLTArBgNVBAsTJE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRl
-# ZDEnMCUGA1UECxMeblNoaWVsZCBUU1MgRVNOOjdBMUEtMDVFMC1EOTQ3MTUwMwYD
+# ZDEnMCUGA1UECxMeblNoaWVsZCBUU1MgRVNOOjQ5MUEtMDVFMC1EOTQ3MTUwMwYD
 # VQQDEyxNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lIFN0YW1waW5nIEF1dGhvcml0
 # eaCCDykwggeCMIIFaqADAgECAhMzAAAABeXPD/9mLsmHAAAAAAAFMA0GCSqGSIb3
 # DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9y
@@ -582,28 +671,28 @@
 # k4MhF/KgaXn0GxdH8elEa2Imq45gaa8D+mTm8LWVydt4ytxYP/bqjN49D9NZ81co
 # E6aQWm88TwIf4R4YZbOpMKN0CyejaPNN41LGXHeCUMYmBx3PkP8ADHD1J2Cr/6tj
 # uOOCztfp+o9Nc+ZoIAkpUcA/X2gSMkgHAPUvIdtoSAHEUKiBhI6JQivRepyvWcl+
-# JYbYbBh7pmgAXVswggefMIIFh6ADAgECAhMzAAAAW0q1jUEybdx0AAAAAABbMA0G
+# JYbYbBh7pmgAXVswggefMIIFh6ADAgECAhMzAAAAWvYNZ4yF7d0IAAAAAABaMA0G
 # CSqGSIb3DQEBDAUAMGExCzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQg
 # Q29ycG9yYXRpb24xMjAwBgNVBAMTKU1pY3Jvc29mdCBQdWJsaWMgUlNBIFRpbWVz
-# dGFtcGluZyBDQSAyMDIwMB4XDTI2MDEwODE4NTkwNVoXDTI3MDEwNzE4NTkwNVow
+# dGFtcGluZyBDQSAyMDIwMB4XDTI2MDEwODE4NTkwM1oXDTI3MDEwNzE4NTkwM1ow
 # geMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdS
 # ZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xLTArBgNVBAsT
 # JE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRlZDEnMCUGA1UECxMe
-# blNoaWVsZCBUU1MgRVNOOjdBMUEtMDVFMC1EOTQ3MTUwMwYDVQQDEyxNaWNyb3Nv
+# blNoaWVsZCBUU1MgRVNOOjQ5MUEtMDVFMC1EOTQ3MTUwMwYDVQQDEyxNaWNyb3Nv
 # ZnQgUHVibGljIFJTQSBUaW1lIFN0YW1waW5nIEF1dGhvcml0eTCCAiIwDQYJKoZI
-# hvcNAQEBBQADggIPADCCAgoCggIBAJBUzBbbnlDXee0B0KD5G4/475thFyfctCyu
-# ESTWQXvlLi4Wx/td2qUdeq4ideeg6VWhiOHfu3wJV4TUGSRtqh9Ccr1BmiBKv9iu
-# FpgHyIBu5Qx38ZsxwlFeXVS+ZqJJKnXRbDNQdcYSoC/6c0hQJ/PH50DBRDQkPXVw
-# yFizLrRH9AlrJeUg7BKeT23zftS8/KOJLvEEbHOF6pSOY3ZVprZUWbWjWwRTmoHa
-# Q/E8vrWtLNyEJ+b089VW1Ikra3t4GTB5Wby3CL1K2zYnAxBIvafsKMFyj9OuXHcT
-# PKMDoFSMeamG9MKOMb6uoG1PjdnDgsLP6EOMRSzrLL7jED1mbB9RSd9fhty+HQr6
-# vZgsBn6oUy+YTpNVLskwdtUM82WYAkPztlOt3AiL0qyV7/U3j/uq3vHMjPM0w034
-# 0M57Nei0g4BCcMt0dbqoc91VgCb3/36sHQANontn1HOF2oLk8190QRS43isHVra8
-# H8sf5+GlqIYsYiCKX04HZiOzZW826nVI6d++8lyTeWmpj90Ua9uPbJhVjwE3oh6t
-# O510ySqmSMSLEN07p3Ibe3E6BAb2w93rWzb26+dpSthbKF4kApofqBsWPX4MEtHK
-# SOftPmVTCQ47tghrVuHia9jY+Hsj01m4KW4WtkmVm3L6hMZECMa4sjMxAXz+bX/A
-# JhWTe6TZAgMBAAGjggHLMIIBxzAdBgNVHQ4EFgQU7/LqUlWWYhXJdXwgYKx4b8Gv
-# 0rYwHwYDVR0jBBgwFoAUa2koOjUvSGNAz3vYr0npPtk92yEwbAYDVR0fBGUwYzBh
+# hvcNAQEBBQADggIPADCCAgoCggIBAO/0O0eWjgUb9rnHcQLRdfWPN4H+91a3Ynla
+# P46E1m4uD+JKx6csWMStX79fxLJUAqHJqQWE19UlNMhS9jEB32dAJ4yuWsHyUuM+
+# dphjDz4E5jl4gYGZEmaOrKvNt+KqlFayyg/oTg3BlLRu4aBq8668A5qlHcfsuh6D
+# dSqFID1ixJFZzHrZFG1iGBG7U1Bn2ONLDo7jbwX5rMcPduTAUw/c7M3WhSxQBuZp
+# Qiz8RQGKIqCKfIxgQkKdzpCpU0SWQOE/DgTXbz3c15KMRCdkGlL2zb+lnuSV4sse
+# Qm3qflZiZckLyn2xJI8ZXDkq+Ig+b/rsPPIfI8di228WvK1j67JXpyeVCaSUO9Er
+# zlLnTrnjQkeXVQIp73xuVBVrmvoTf/v4a7MnrmuKSyIXc5vJUHEGB345+O8omFt1
+# w8b+Xg9D9PKIRqDPEv7HRk0C+Yvxu8FvHJvSocSIZK+v/FmKFOipYnpP76yAmJNn
+# yheucShOgk8QiU53USn/+AyMb7xW905gZnyNqb29HeVdQ175pDHJGEz8Cx5wiHeV
+# liGz5hABucFDylR9z3LSTmB6+3ZuIxeG9BZS46P6ANPkuVuD5m8wgc7GLLzg73Cs
+# DF09ukt8Uf8dTcMBX3ro+7/k9M6Xt8WPG7IL9v/4DvyMY03tkb9Y9Ri6HWavXRPY
+# RCUePspPAgMBAAGjggHLMIIBxzAdBgNVHQ4EFgQUjmOyQ6twMcP1ZbRytJxI4fnX
+# mcIwHwYDVR0jBBgwFoAUa2koOjUvSGNAz3vYr0npPtk92yEwbAYDVR0fBGUwYzBh
 # oF+gXYZbaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9jcmwvTWljcm9z
 # b2Z0JTIwUHVibGljJTIwUlNBJTIwVGltZXN0YW1waW5nJTIwQ0ElMjAyMDIwLmNy
 # bDB5BggrBgEFBQcBAQRtMGswaQYIKwYBBQUHMAKGXWh0dHA6Ly93d3cubWljcm9z
@@ -612,36 +701,36 @@
 # JQEB/wQMMAoGCCsGAQUFBwMIMA4GA1UdDwEB/wQEAwIHgDBmBgNVHSAEXzBdMFEG
 # DCsGAQQBgjdMg30BATBBMD8GCCsGAQUFBwIBFjNodHRwOi8vd3d3Lm1pY3Jvc29m
 # dC5jb20vcGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wCAYGZ4EMAQQCMA0GCSqG
-# SIb3DQEBDAUAA4ICAQAAH+zd+XKh4OxXYMWFmtgilXAQGctOjCUB1w/uBiC/OXcH
-# 3Ia4/XbdUhKzFbaiTbIE6vYZKd1p4u7nKOLkawymAMVyuO7LSl6rLKttZIyLhWjT
-# K0zXOz0u4xLq9+bRtBEKJvA6sD5nJwH1IO6z1YizyuIRoalMCnbrUixfWxQn4TAm
-# N7t9uk+X2FUThEa3ewzRwhtG+xwaAbLMkxRmR24JnfXd1VxKo90+m7Wzuov96Uug
-# x5wZdewiIIm1ZWTj4lCJHup679LcOa7tAxJMipVaSltQH9fm9TOKczlfxtWuBcLU
-# 4duZfqwgsILsH7PMkcX1zwQzQD0yAtPhnYz9KNG125bX+iilOe1S8RHqv2bbBpMp
-# ao4kcUvQI6dMgKRvFmm1eLbhSNOQplDMTGD1tNVdNGkI96jUu+troUjWMMi46TQf
-# BAHxtDTpRhIu/87vAVQ8Z6RHhFxesz4Ed5JThaIQRAy6GcO/Jk+QzDzoZ0arRIkI
-# sGJ7rZgOVAjx9ctfw8lH9RfjcwB3wdGBYNMNVJqQpUai2Taddf5pXzTZEHIqLEF5
-# 3SrBjIeInoQrP7U5VlXiMQsxewLdINrAE2l2TR3KBikb+RQRygbTp8jj2yiC0NCU
-# wG+K+ndglN5RMbXjFW6aKa59Xq+b8XzK/DK+AJtgOpHgJv8Qrk62A+twOVLOpjGC
+# SIb3DQEBDAUAA4ICAQCAlM8r+t3hIb2h1lDTAx+iYkQlxFuU7QONeyIFIBZ29xvG
+# l8pehKxErDzIniOpIX/eluUAwQKoaI0zwuKAdR0mrSHXCniMoLNko5W+5r7sXNam
+# KX7QMV3BfGOX3gi9qVfxyUe7AHXbqQ8KBQHNYCnNFtQQHgARrlYhtyAKol5ctM0C
+# Ac/y3oY7bTMsVJvnA5u7DVWPeXoST2KEMDeLBvJYq0IJZ6yMpDOWLZ4UP82bksyS
+# hIB/XdawirIGLdseudryRxVMk313mAcjGRb59+Ittt6otVvYQWqH+PGrTUzEcez8
+# aQuO3umoNZjKuFoX5VsPP/gSZse+orhG3zfZk9IDyE3DfUFrhvkv6H0tijK1D0uI
+# GhwMBWSm9ktQ6oeU+aurZFx3MI+LODnHsbRFZAy11uMvwKq+ZNC1Se4tIM1u9piW
+# AhnTPoh6mULKikHOVhHaO953tkzDCtjsse5GUKOx9yg9nqHKWMgnODp62/uPPzC/
+# yDEISrXCcU7UB7tATr3zWNEdtM4d009iXWI6dV/SdcIIX44rpoLyCLw+nXjxp+fY
+# /dygLO7UdSQaVaUFVj3K2nVyuujPspt5Lunc5FvuYPqmi/z8kASmmwbiF+W0P0UT
+# WFaC84MWfU2h6MDg5s0oxmdNFK76jXr3wZfdSoV7FCKfq5GdeGoy5UwDQwMC0DGC
 # A9QwggPQAgEBMHgwYTELMAkGA1UEBhMCVVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBD
 # b3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGltZXN0
-# YW1waW5nIENBIDIwMjACEzMAAABbSrWNQTJt3HQAAAAAAFswDQYJYIZIAWUDBAIB
+# YW1waW5nIENBIDIwMjACEzMAAABa9g1njIXt3QgAAAAAAFowDQYJYIZIAWUDBAIB
 # BQCgggEtMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQx
-# IgQgEeYpZ4C3/5UOmNu+GoREsvB9zA6RsxVXChkZEAB9s2Iwgd0GCyqGSIb3DQEJ
-# EAIvMYHNMIHKMIHHMIGgBCAvMQNVXZ0b0xxlGw8X/3IEybObuT6a5W1d61CW+cGD
-# 7zB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
+# IgQgUq30TxeJMWEbE0cL6ZwAnxvbn+ROk64FoMkl7f97/cUwgd0GCyqGSIb3DQEJ
+# EAIvMYHNMIHKMIHHMIGgBCBiuWRAi+p96PRsBt3TwW3jNozgPQS+Qco1CVm/NaU0
+# QzB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
 # cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3RhbXBp
-# bmcgQ0EgMjAyMAITMwAAAFtKtY1BMm3cdAAAAAAAWzAiBCAbqG4YmPPZjXQMdTxD
-# kTahOynpFQpsK7T7qt7engOZRjANBgkqhkiG9w0BAQsFAASCAgCHllsxqKPcizUb
-# Ecx1G+2MCeLm6dJkLKcIZvPQAm1F7nyRCXA9NhQV4/TxNxmzDR4Ki5yp/YhTT7a4
-# 78mgpowUJetCPEjbkGLFGTg6+ahw22MkO4jIQDKVfrp/KkNmWX+EcA0opgeDzwDU
-# u2HW1be7PC8OnemiVFD6elu+xTL7276CzGNZn3J/lo3v6uj9hqgYjR5fz/nmAvP2
-# HJaGDXXu3DSJZuWQ5d85vDCZ7hJ6rLgbbfAa6PdFbk9aX+AJOhlt1fnqEmG3mTjl
-# ryyScKBigj/2Iyv/5ZBVTwH1oBEVP1tXz+7MJUcFVtdpUFEje+HnfYFngDKXDZyl
-# ZMNWCaXYCMZU4Ae2rnGZFF0I9oSIcbzzkEaMYvmqpOgg55yvSm9QA0M0P/DXS5y4
-# fmavLlCoFRlNVSNjDDfWVzYfRzvY+doCYmF04dNvBEmRE+shDVUQZf6GRS+eQtYn
-# rrGOVTeU7K1/JjZCSrR1+EGrqkYVo/b9MT2aa3m12U6GLu1gjZvCnLp1JKDv39Gk
-# zweI7g5UBVg/182EA46l/vRI0GxyieXB38whUkacXHNHOcr/v2QGbJAc7azQcXiy
-# hhAaBQn/ip18rYe1doiEIcZEBohlO/WvY8UWwtt34LrOC0vMZzUM64kkzyyWnk5G
-# Bgd+eTHgBvPCEq+OWku7sd/chDNtGQ==
+# bmcgQ0EgMjAyMAITMwAAAFr2DWeMhe3dCAAAAAAAWjAiBCBZpUyQOVsWq4KUwKfM
+# 3TKYU5v1wAVksV44QW5LY9OsrTANBgkqhkiG9w0BAQsFAASCAgBY2IKRPGCRrh7K
+# 2isoZc/lZQBZmGychGlN7QKirq/zFZcsmEXL5gnrNOx2lQ4U63BgP1GezKzWdfs6
+# QA3BxlKm3gNXwM2Iw0rfBbgyRsW2TwAPp1e/9p9igvnsGB/rxcuIrtAQd0OQmRag
+# Smk6wOPIIc/fsBEkLYurgpQD4Wn8bgvhoKhRur5H+I+PGGArSB+Kz7mo1gaXGtq4
+# XFmlL52dSLF65kjqdLQ/SWGbXkBMvsDo10N5Xa28c2V4WXH7UCANYqUbxKdQAG5A
+# 6gyM302SbMxdLqxWN6GRn8kcCmJyLk1GYRUjN7lVLX5VGzIRWwHQnZGmaYElAOiR
+# s7UUgEMhi4Vxu7WiWLGokVRMJRgj7Vgbp7y7xdFaI1VonugZwPm6s+St7aMuZzk5
+# 5vlvlGhTSjm645Xj8tEYBHfZAkhGFgtgNsWlp+3rd2sJ5+IGD1vDPaIoFSvfQBZe
+# WhUyV7H2wqXtUxkk4V+31LRcj0HXxPbsWvzAPjd8jYgNnjUm+oOxtsXUpMWEfo+H
+# aLYvpY1Ve9/NA+dFWgnyQVFqAr6Uke4n0udBVfKof7gt8O+20JXgK+QmBP3c8qcV
+# VkSiLmfZTiQRstzwOXDBSdfv6RT6cjNoDmStm/LvCK6P2lKep/HceUa6LE0cirjr
+# 9NdcZ44fDvaFggyr3HdXH5CasqeWgQ==
 # SIG # End signature block

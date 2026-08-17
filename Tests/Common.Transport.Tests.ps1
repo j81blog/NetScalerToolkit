@@ -105,6 +105,52 @@ Describe 'Common NITRO transport' {
             $result | Should -BeNullOrEmpty
         }
 
+        It 'returns null when a system user does not exist' {
+            # Through Invoke-NSRestRequest, which carries its own copy of the not-found list.
+            Mock Invoke-NSRestMethod {
+                return New-TestNitroResponse -StatusCode 599 -Response ([pscustomobject] @{
+                    errorcode = 2626
+                    message = 'User does not exist'
+                    severity = 'ERROR'
+                }) -Method $Request.Method
+            }
+
+            $session = New-TestNSSession
+            $result = Invoke-NSRestRequest -Session $session -Method GET -Task config -Type systemuser -Resource 'NoSuchUser' -ReturnNullOnNotFound
+
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'suggests SkipCertificateCheck when the TLS handshake is rejected' {
+            Mock Invoke-WebRequest {
+                $inner = [System.Security.Authentication.AuthenticationException]::new('The remote certificate is invalid according to the validation procedure.')
+                throw [System.InvalidOperationException]::new('The SSL connection could not be established, see inner exception.', $inner)
+            }
+
+            $request = @{ Uri = 'https://ns.example.test/nitro/v1/config/login'; Method = 'POST' }
+
+            { Invoke-NSRestMethod -Request $request } | Should -Throw -ExpectedMessage '*-SkipCertificateCheck*'
+        }
+
+        It 'does not suggest SkipCertificateCheck when it is already set' {
+            Mock Invoke-WebRequest {
+                $inner = [System.Security.Authentication.AuthenticationException]::new('The remote certificate is invalid according to the validation procedure.')
+                throw [System.InvalidOperationException]::new('The SSL connection could not be established, see inner exception.', $inner)
+            }
+
+            $request = @{ Uri = 'https://ns.example.test/nitro/v1/config/login'; Method = 'POST' }
+
+            $thrown = $null
+            try {
+                Invoke-NSRestMethod -Request $request -SkipCertificateCheck
+            } catch {
+                $thrown = $_
+            }
+
+            $thrown | Should -Not -BeNullOrEmpty
+            $thrown.Exception.Message | Should -Not -BeLike '*-SkipCertificateCheck*'
+        }
+
         It 'throws a structured error record for NITRO failures' {
             $response = New-TestNitroResponse -StatusCode 400 -Response ([pscustomobject] @{
                 errorcode = 273
