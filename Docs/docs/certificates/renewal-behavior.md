@@ -4,16 +4,37 @@ NetScalerToolkit checks whether a request is due before it starts a new ACME ord
 
 ## Renewal Decision Order
 
-The module uses the first reliable source it can find:
+The certificate installed on the NetScaler is the only source that describes what is actually serving traffic, so it decides whether a replacement is needed. Local Posh-ACME state is a per-machine cache and is never authoritative on its own. That matters when runs are spread across an automation pool or a CI pipeline, where any given machine may hold no ACME state at all, or state left over from an older account.
 
-1. Refreshed Posh-ACME order metadata.
-2. Existing ACME certificate validity from local Posh-ACME storage.
-3. Existing NetScaler certkey validity from `CertKeyNameToUpdate`.
-4. Legacy `RenewAfter` and `CertExpires` values from a request or JSON config.
+A renewal starts when any of these hold, checked in order:
 
-When the ACME provider supplies renewal information through Posh-ACME, that provider-supplied renewal window is preferred. When no provider renewal window is available but the certificate validity dates are known, NetScalerToolkit calculates the renewal window from the certificate lifetime and starts renewal after roughly two thirds of the lifetime has passed.
+1. `-ForceCertRenew` or `-Force`, or `ForceCertRenew` on the request in the JSON config.
+2. The request no longer matches the certificate it last produced. See [Request Definition Drift](#request-definition-drift).
+3. A staging certificate is installed and this is a production run.
+4. The NetScaler reports the certkey status as anything other than `Valid`.
+5. The installed certificate is expired, or inside its renewal window.
 
-This avoids assuming a fixed certificate lifetime. The same behavior works for 90-day, 45-day, short-lived, and custom-lifetime certificates when the certificate validity dates are available.
+Otherwise the request is skipped.
+
+When `CertKeyNameToUpdate` resolves to nothing, or the certkey has no usable validity dates, the decision falls back to refreshed Posh-ACME order metadata, then the ACME certificate in local Posh-ACME storage, then legacy `RenewAfter` and `CertExpires` values from the request or JSON config. A request with no reliable source at all is renewed.
+
+The renewal window is calculated from the certificate lifetime, starting after roughly two thirds of that lifetime has passed. This avoids assuming a fixed lifetime, so 90-day, 45-day, short-lived, and custom-lifetime certificates all work. Provider renewal information supplied through Posh-ACME, such as ARI, can move renewal earlier than the two-thirds point, but only when the ACME order describes the certificate that is actually installed. An order whose `CertExpires` does not match the installed certificate is stale and is ignored.
+
+## Request Definition Drift
+
+`LastIssuedDomains`, `LastIssuedAcmeServer`, `LastIssuedKeyLength` and `LastIssuedSerial` record what a request last produced. They are written to the JSON config only after a successful deploy, so any machine reading the config sees the same record.
+
+The record is only trusted when `LastIssuedSerial` still matches the serial of the installed certkey. That corroboration is what makes the check safe to run from several machines: if something else replaced the certificate, or the record is missing because this is the first run after upgrading, the record is treated as unknown and drift is not considered. Nothing is renewed on that basis until a new record is written.
+
+When the record is corroborated, a renewal starts if the requested domains, the ACME server, or the key length differ from what was last issued. Adding a SAN therefore renews a certificate that is otherwise still valid, and so does moving a request from staging to production.
+
+## Force Renewal Is One Shot
+
+`ForceCertRenew` set on a request in a JSON config is reset to `false` after the certificate is successfully deployed to the NetScaler. Without that reset the flag renews the same certificate on every subsequent run.
+
+The reset happens after the deploy, not after issuance. If the certificate is issued but the NetScaler update fails, the flag survives so the next run retries.
+
+The `-ForceCertRenew` command line switch is never written to the config and needs no reset.
 
 ## Valid Certificate Skip
 
@@ -25,6 +46,28 @@ j81.nl skipped. Outside renewal window. Use -ForceCertRenew to renew now.
 
 This can happen with direct splatted requests and with JSON config runs. A direct splatted request does not need to include `RenewAfter`; the module can use the existing ACME order or NetScaler certkey when available.
 
+## Previewing a Run
+
+`-WhatIf` answers "what would this run do" without changing anything:
+
+```powershell
+Request-NSACMECertificate -ConfigFile C:\Certs\config.json -AutoRun -Production -WhatIf
+```
+
+The run connects, reads the installed certkeys and the ACME metadata, and makes the real renewal decision for every request. It then stops at the point it would commit to a change:
+
+```text
+  Renewal check             vpn.example.com    ......... renewal required [  OK  ]
+What if: Performing the operation "Request a new certificate and deploy it to the NetScaler" on target "vpn.example.com".
+  Renewal action            vpn.example.com    ............ not performed [ SKIP ]
+```
+
+Nothing is requested from the ACME provider, no NetScaler object is created or changed, and the config file is not written. The log is still written, so the decision and its reason are recorded for every request exactly as in a real run.
+
+This is deliberately not a simulation of the whole ACME exchange. Publishing a challenge the CA cannot validate and then reporting the resulting failures would say nothing useful, so the preview stops once the decision is made.
+
+`-Confirm` uses the same point to prompt per certificate, which is useful for a one-off run over a large config where only some requests should proceed.
+
 ## Debug Decision Details
 
 Use `-LogLevel Debug` when you need to see why a request was renewed or skipped. The console shows the final decision source and dates:
@@ -32,10 +75,12 @@ Use `-LogLevel Debug` when you need to see why a request was renewed or skipped.
 ```text
 DEBUG  CheckCertRenewal    Renewal decision.
        Decision              Skip
-       Source                ACME order
+       Source                NetScaler certificate
        RenewAfter            2026-07-04 12:00:00
        CertExpires           2026-09-02 12:00:00
 ```
+
+`Source` names which input decided: `Force`, `request definition`, `NetScaler certificate`, `ACME order`, `ACME certificate`, `request metadata`, or `none`.
 
 The log file also stores the full structured decision details, including the reason, strategy, days until expiry, days until renewal, and whether ACME renewal information was available from the selected server.
 
@@ -43,22 +88,29 @@ The log file also stores the full structured decision details, including the rea
 
 When a JSON config file is used or generated, NetScalerToolkit stores renewal information for visibility and later runs:
 
+Written after a successful deploy, describing the certificate that was issued:
+
 - `CertExpires`
 - `RenewAfter`
-- `RenewalSource`
-- `RenewalStrategy`
+- `LastIssuedSerial`
+- `LastIssuedDomains`
+- `LastIssuedAcmeServer`
+- `LastIssuedKeyLength`
 - `AcmeProvider`
 - `AcmeServer`
 - `AcmeRenewalInfoSupported`
 
-These values describe what the module observed during the run. They are useful for troubleshooting and scheduled renewal visibility, but live ACME order metadata and certificate validity are preferred when available.
+`CurrentCertIsProduction` was written by earlier versions and is removed from a request when that request is next saved. `LastIssuedAcmeServer` carries the same information, since the server name is `*_PROD` or `*_STAGE` per provider.
 
-## When Renewal Still Starts
+Written on every run, describing what the last decision used:
 
-The module starts a renewal when:
+- `RenewalSource`
+- `RenewalStrategy`
 
-- `-ForceCertRenew` or `-Force` is specified.
-- The provider renewal window has started.
-- The calculated certificate lifetime window has started.
-- The known certificate expiry date has passed.
-- No reliable renewal window or certificate validity data is available.
+`CertExpires` and `RenewAfter` are stored as UTC and are not rewritten by a run that only checks a request, so repeated runs leave them unchanged.
+
+### Saving
+
+The config is saved by merging into the file as it stands at that moment, not by overwriting it with the copy loaded at run start. Only the fields listed above are replaced, and only on requests the run processed. Everything else, including `Enabled`, the `settings` block, and requests the run did not touch, is left as found. An edit made to the file while a run is in progress therefore survives.
+
+The write goes through a temporary file and the previous version is kept as `<config>.bak`, so an interrupted write cannot leave an unusable config behind.

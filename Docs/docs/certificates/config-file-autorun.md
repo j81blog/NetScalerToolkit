@@ -56,7 +56,11 @@ Request-NSACMECertificate @autorunParams
 
 Add `Production = $true` to request production certificates from the same config.
 
-Scheduled runs skip certificates that are still valid and outside their renewal window. The module prefers ACME provider renewal metadata through Posh-ACME, then falls back to the existing certificate lifetime when needed. The generated JSON can include `CertExpires`, `RenewAfter`, `RenewalSource`, `RenewalStrategy`, `AcmeProvider`, `AcmeServer`, and `AcmeRenewalInfoSupported` for visibility. Use `LogLevel = "Debug"` when the scheduled log should include the full renewal decision.
+Scheduled runs skip certificates that are still valid and outside their renewal window. The module decides from the certificate installed on the NetScaler, so runs spread across several machines reach the same decision regardless of what local Posh-ACME state each one holds. The generated JSON can include `CertExpires`, `RenewAfter`, `RenewalSource`, `RenewalStrategy`, `AcmeProvider`, `AcmeServer`, `AcmeRenewalInfoSupported`, and the `LastIssuedSerial`, `LastIssuedDomains`, `LastIssuedAcmeServer` and `LastIssuedKeyLength` values that record what each request last produced. Use `LogLevel = "Debug"` when the scheduled log should include the full renewal decision.
+
+A `ForceCertRenew` flag set on a request in the config is one shot. It is reset once that certificate deploys successfully, so it does not force a renewal on every later run.
+
+The config is saved by merging into the file as it stands rather than overwriting it with the copy loaded at run start, and the previous version is kept as `<config>.bak`. An edit made while a run is in progress is therefore preserved.
 
 ## Multiple Certificate Requests
 

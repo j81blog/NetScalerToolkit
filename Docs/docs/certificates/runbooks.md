@@ -19,7 +19,7 @@
 
 ## Scheduled Renewal
 
-Use the same command without `-ForceCertRenew`. NetScalerToolkit evaluates ACME order metadata, certificate validity, and legacy renewal metadata, then skips requests that are not due.
+Use the same command without `-ForceCertRenew`. NetScalerToolkit evaluates the certificate installed on the NetScaler, then ACME order metadata, certificate validity in local Posh-ACME storage, and legacy renewal metadata, and skips requests that are not due.
 
 For JSON config based schedules, use:
 

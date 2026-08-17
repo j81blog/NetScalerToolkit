@@ -15,7 +15,7 @@
 | [SAN certificate](san-certificate.md) |  | `-CN`, `-SAN` |
 | [Wildcard certificate with DNS-01](wildcard-certificates.md) |  | wildcard value in `-SAN`, DNS validation |
 | [`tlsserver` ACME profile](tlsserver-profile.md) |  | `-Profile tlsserver` |
-| [Renewal decision behavior](renewal-behavior.md) |  | `RenewAfter`, ARI/order metadata, dynamic lifetime fallback |
+| [Renewal decision behavior](renewal-behavior.md) |  | Installed certkey first, ARI/order metadata, `RenewAfter` fallback |
 | [Upload PFX and update existing SSL certkey](deployment.md#update-an-existing-certkey) |  | `-CertKeyNameToUpdate` |
 | [Create new SSL certkey](deployment.md#create-a-new-certkey) |  | omit `-CertKeyNameToUpdate` |
 | [Upload and link intermediate/root chain certkeys](deployment.md#chain-handling) |  | automatic |

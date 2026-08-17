@@ -35,7 +35,7 @@ Actions:
 
 ## Certificate Skipped During Renewal
 
-If a request is skipped because the certificate is still valid, the module found a renewal window from ACME order metadata or from the current certificate lifetime.
+If a request is skipped because the certificate is still valid, the module found a renewal window from the certificate installed on the NetScaler, or from ACME order metadata or the current certificate lifetime when nothing is deployed.
 
 Actions:
 

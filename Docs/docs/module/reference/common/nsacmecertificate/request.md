@@ -21,7 +21,7 @@ Request-NSACMECertificate [-CleanPoshACMEStorage] -ManagementURL <String> [-User
  [-LogFile <String>] [-LogLevel <String>] [-LogType <String>] [-SaveADCConfig] [-SendMail] [-SMTPTo <String[]>]
  [-SMTPFrom <String>] [-SMTPCredential <PSCredential>] [-SMTPServer <String>] [-SMTPPort <Int32>] [-SMTPUseSSL]
  [-LogAsAttachment] [-DisableIPCheck] [-IPv6] [-UpdateIIS] [-UpdateGlobalVPNCertBinding]
- [-GlobalVPNCertBindingIncludeCA] [-GlobalVPNCertBindingCrlCheck <String>]
+ [-UnbindGlobalVPNCertOnUpdate] [-GlobalVPNCertBindingIncludeCA] [-GlobalVPNCertBindingCrlCheck <String>]
  [-GlobalVPNCertBindingOcspCheck <String>] [-IISSiteToUpdate <String>] [-PostPoSHScriptFilename <String>]
  [-PostPoSHScriptExtraParameters <Hashtable>] [-CsVipName <String[]>] [-UseLbVip] [-CspName <String>]
  [-CsaName <String>] [-CsVipBinding <String>] [-SvcName <String>] [-SvcDestination <String>] [-LbName <String>]
@@ -32,12 +32,12 @@ Request-NSACMECertificate [-CleanPoshACMEStorage] -ManagementURL <String> [-User
  [-ExternalAccountBindingHmacKey <Object>] [-ExternalAccountBindingAlgorithm <String>]
  [-UseModernPfxEncryption] [-CertificateChainValidation <String>] [-PreferredChain <String>]
  [-Profile <String>] [-DnsAlias <String[]>] [-ValidationTimeout <Int32>] [-LifetimeDays <Int32>]
- [-AlwaysNewKey] [-SkipPoshACMEInstall] [-RemoveUploadedPfx] [<CommonParameters>]
+ [-AlwaysNewKey] [-SkipPoshACMEInstall] [-RemoveUploadedPfx] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ### Help
 ```
-Request-NSACMECertificate [-Help] [-NoConsoleOutput] [-AutoUpdate] [<CommonParameters>]
+Request-NSACMECertificate [-Help] [-NoConsoleOutput] [-AutoUpdate] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ### CleanADC
@@ -47,15 +47,15 @@ Request-NSACMECertificate [-CleanADC] -ManagementURL <String> [-Username <String
  [-SaveADCConfig] [-CsVipName <String[]>] [-CspName <String>] [-CsaName <String>] [-CsVipBinding <String>]
  [-SvcName <String>] [-SvcDestination <String>] [-LbName <String>] [-TrafficDomain <Int32>] [-RspName <String>]
  [-RsaName <String>] [-Partitions <String[]>] [-NoConsoleOutput] [-AutoUpdate] [-SkipCertificateCheck]
- [<CommonParameters>]
+ [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ### CleanTestCertificate
 ```
 Request-NSACMECertificate [-RemoveTestCertificates] [-CleanPoshACMEStorage] -ManagementURL <String>
  [-Username <String>] [-Password <Object>] [-Credential <PSCredential>] [-DisableLogging] [-LogFile <String>]
- [-LogLevel <String>] [-LogType <String>] [-NoConsoleOutput] [-AutoUpdate] [-SkipCertificateCheck]
- [<CommonParameters>]
+ [-LogLevel <String>] [-LogType <String>] [-NoConsoleOutput] [-AutoUpdate] [-SkipCertificateCheck] [-WhatIf]
+ [-Confirm] [<CommonParameters>]
 ```
 
 ### LECertificatesDNS
@@ -68,7 +68,7 @@ Request-NSACMECertificate [-CleanPoshACMEStorage] -ManagementURL <String> [-User
  [-LogLevel <String>] [-LogType <String>] [-SaveADCConfig] [-SendMail] [-SMTPTo <String[]>]
  [-SMTPFrom <String>] [-SMTPCredential <PSCredential>] [-SMTPServer <String>] [-SMTPPort <Int32>] [-SMTPUseSSL]
  [-LogAsAttachment] [-DisableIPCheck] [-IPv6] [-UpdateIIS] [-UpdateGlobalVPNCertBinding]
- [-GlobalVPNCertBindingIncludeCA] [-GlobalVPNCertBindingCrlCheck <String>]
+ [-UnbindGlobalVPNCertOnUpdate] [-GlobalVPNCertBindingIncludeCA] [-GlobalVPNCertBindingCrlCheck <String>]
  [-GlobalVPNCertBindingOcspCheck <String>] [-IISSiteToUpdate <String>] [-PostPoSHScriptFilename <String>]
  [-PostPoSHScriptExtraParameters <Hashtable>] [-CsVipName <String[]>] [-UseLbVip] [-CspName <String>]
  [-CsaName <String>] [-CsVipBinding <String>] [-SvcName <String>] [-SvcDestination <String>] [-LbName <String>]
@@ -80,7 +80,7 @@ Request-NSACMECertificate [-CleanPoshACMEStorage] -ManagementURL <String> [-User
  [-ExternalAccountBindingHmacKey <Object>] [-ExternalAccountBindingAlgorithm <String>]
  [-UseModernPfxEncryption] [-CertificateChainValidation <String>] [-PreferredChain <String>]
  [-Profile <String>] [-DnsAlias <String[]>] [-ValidationTimeout <Int32>] [-LifetimeDays <Int32>]
- [-AlwaysNewKey] [-SkipPoshACMEInstall] [-RemoveUploadedPfx] [<CommonParameters>]
+ [-AlwaysNewKey] [-SkipPoshACMEInstall] [-RemoveUploadedPfx] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ### CommandPolicyUser
@@ -91,7 +91,7 @@ Request-NSACMECertificate -ManagementURL <String> [-Username <String>] [-Passwor
  [-SvcName <String>] [-LbName <String>] [-RspName <String>] [-RsaName <String>] [-Partitions <String[]>]
  [-EnableVipBefore] [-UseNetScalerDNS] [-DisableVipAfter] [-CreateUserPermissions] [-NSCPName <String>]
  [-CreateApiUser] -ApiUsername <String> -ApiPassword <Object> [-NoConsoleOutput] [-AutoUpdate]
- [-SkipCertificateCheck] [<CommonParameters>]
+ [-SkipCertificateCheck] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ### CommandPolicy
@@ -101,7 +101,7 @@ Request-NSACMECertificate -ManagementURL <String> [-Username <String>] [-Passwor
  [-UpdateGlobalVPNCertBinding] [-CsVipName <String[]>] [-UseLbVip] [-CspName <String>] [-CsaName <String>]
  [-SvcName <String>] [-LbName <String>] [-RspName <String>] [-RsaName <String>] [-Partitions <String[]>]
  [-EnableVipBefore] [-UseNetScalerDNS] [-DisableVipAfter] [-CreateUserPermissions] [-NSCPName <String>]
- [-NoConsoleOutput] [-AutoUpdate] [-SkipCertificateCheck] [<CommonParameters>]
+ [-NoConsoleOutput] [-AutoUpdate] [-SkipCertificateCheck] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ### AutoRun
@@ -111,13 +111,15 @@ Request-NSACMECertificate [-CertDir <String>] [-Production] -ConfigFile <String>
  [-AcmeDirectoryUrl <String>] [-ExternalAccountBindingKeyId <String>] [-ExternalAccountBindingHmacKey <Object>]
  [-ExternalAccountBindingAlgorithm <String>] [-UseModernPfxEncryption] [-CertificateChainValidation <String>]
  [-PreferredChain <String>] [-Profile <String>] [-DnsAlias <String[]>] [-ValidationTimeout <Int32>]
- [-LifetimeDays <Int32>] [-AlwaysNewKey] [-SkipPoshACMEInstall] [-RemoveUploadedPfx] [<CommonParameters>]
+ [-LifetimeDays <Int32>] [-AlwaysNewKey] [-SkipPoshACMEInstall] [-RemoveUploadedPfx] [-WhatIf] [-Confirm]
+ [<CommonParameters>]
 ```
 
 ### CleanExpiredCerts
 ```
 Request-NSACMECertificate -CertDir <String> [-CleanAllExpiredCertsOnDisk]
- [-CleanExpiredCertsOnDiskDays <Int16>] [-NoConsoleOutput] [-AutoUpdate] [<CommonParameters>]
+ [-CleanExpiredCertsOnDiskDays <Int16>] [-NoConsoleOutput] [-AutoUpdate] [-WhatIf] [-Confirm]
+ [<CommonParameters>]
 ```
 
 ## DESCRIPTION
@@ -135,6 +137,10 @@ A single run can process many certificates from a config file with -AutoRun.
 Renewal is skipped for certificates that are still outside their renewal window
 unless -ForceCertRenew is used, and one ACME account is reused for all requests
 that share a contact address and account key length.
+
+The certificate installed on the NetScaler decides whether a replacement is needed.
+Local Posh-ACME state is a per-machine cache and is not authoritative on its own,
+so runs spread across several machines reach the same decision.
 
 Besides requesting certificates, the function also creates the NetScaler command
 policies and API user used for automation, cleans up NetScaler validation
@@ -843,6 +849,25 @@ Accept pipeline input: False
 Accept wildcard characters: False
 ```
 
+### -UnbindGlobalVPNCertOnUpdate
+Allows the certkey update to unbind the certificate from the VPN global configuration
+and bind it back afterwards.
+NetScaler refuses to update a certkey while it is bound
+there.
+Without this switch such a request fails and reports the binding.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: LECertificatesHTTP, LECertificatesDNS
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
 ### -GlobalVPNCertBindingIncludeCA
 Also binds the issuing CA certificate to the VPN global configuration.
 
@@ -1346,6 +1371,10 @@ Accept wildcard characters: False
 
 ### -ForceCertRenew
 Renews certificates even when they are still outside their renewal window.
+The switch itself is never written to a config file.
+A ForceCertRenew flag set on a request inside a JSON config is one shot, and is
+reset once that certificate deploys successfully, so it does not renew the same
+certificate on every later run.
 
 ```yaml
 Type: SwitchParameter
@@ -1716,6 +1745,37 @@ Accept pipeline input: False
 Accept wildcard characters: False
 ```
 
+### -WhatIf
+Shows what would happen if the cmdlet runs.
+The cmdlet is not run.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: wi
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Confirm
+Prompts you for confirmation before running the cmdlet.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: cf
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
 ### CommonParameters
 This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
 
@@ -1730,5 +1790,4 @@ This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable
 [https://netscalertoolkit.j81.nl/module/reference/common/nsacmecertificate/request/](https://netscalertoolkit.j81.nl/module/reference/common/nsacmecertificate/request/)
 
 [https://netscalertoolkit.j81.nl/](https://netscalertoolkit.j81.nl/)
-
 
