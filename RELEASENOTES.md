@@ -1,5 +1,25 @@
 ﻿# Release Notes
 
+## v2026.817.1230
+
+### New
+- NEW: Console output now runs through ConsoleStatus, with sections, per-item ticks and a closing summary for `Request-NSACMECertificate` and `Invoke-NSCleanCertKeyFiles`. Both commands end with a Results block naming what they produced. Plain text is used when ConsoleStatus is not available
+- NEW: `-UnbindGlobalVPNCertOnUpdate` on `Request-NSACMECertificate` opts in to unbinding a certkey from VPN global so it can be updated in place. Without the switch the run still fails, but the message names the fix
+
+### Fixed
+- FIX: A failed notification mail left the attachment file handle open, which locked the log file for the rest of the run
+- FIX: An unwritable log file no longer aborts the run
+- FIX: HTTP-01 validation now fails right away when the content switch vServer is not serving, instead of waiting for the CA to time out. The failure message names the `-EnableVipBefore` / `-DisableVipAfter` pairing
+- FIX: A certkey bound to VPN global cannot be updated in place. NITRO 1541 lists every possible cause but the real one, so the reference is now looked up and named in the error
+- FIX: NITRO 2626 ("does not exist" for a system user) was missing from the not-found list, so `-ReturnNullOnNotFound` threw instead of returning null and `New-NSACMECertificateUser` could not create a user. Fixed in both `ConvertFrom-NSNitroResponse` and `Invoke-NSRestRequest`
+- FIX: A rejected TLS handshake now suggests `-SkipCertificateCheck`, covering the PowerShell 7 and 5.1 exception shapes, and stays quiet when the switch is already set
+- FIX: `New-NSACMECertificateUser` returned its result unconditionally, which made `-PassThru` a no-op
+- FIX: `Invoke-NSCleanCertKeyFiles` counted an expired certkey twice, once as expired and once as expiring
+- FIX: `.gitattributes` disables text normalization for `.ps1`, `.psm1` and `.psd1`, so `core.autocrlf` can no longer strip the CR and invalidate Authenticode signatures
+
+### Known Issues
+- None at the moment
+
 ## v2026.803.1615
 
 ### Fixed
