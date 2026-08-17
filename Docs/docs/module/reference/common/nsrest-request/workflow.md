@@ -1,156 +1,440 @@
-﻿# Invoke-NSRestRequest
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version: https://netscalertoolkit.j81.nl/module/reference/common/nsrest-request/workflow/
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Invoke-NSRestRequest
 
-## Synopsis
+## SYNOPSIS
+Sends a NITRO REST request through the current NetScaler session.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Invoke-NSRestRequest [-Session <PSObject>] [-Method <String>] [-Operation <String>] -Task <String> -Type <String> [-Resource <String>] [-Action <String>] [-Query <Hashtable>] [-Payload <Hashtable>] [-RawResponse <SwitchParameter>] [-Headers <Hashtable>] [-IgnoreNotFound <SwitchParameter>] [-NotFoundErrorCode <Int32[]>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>] [-NitroWarning <String>] [-NitroOnError <String>] [-RetryCount <Int32>] [-RetryDelaySeconds <Int32>] [-RetryStatusCode <Int32[]>] [-RetryUnsafeMethods <SwitchParameter>]
+### ByResource (Default)
+```
+Invoke-NSRestRequest [-Session <PSObject>] [-Method <String>] [-Operation <String>] -Task <String>
+ -Type <String> [-Resource <String>] [-Action <String>] [-Query <Hashtable>] [-Payload <Hashtable>]
+ [-RawResponse] [-Headers <Hashtable>] [-IgnoreNotFound] [-NotFoundErrorCode <Int32[]>] [-ReturnNullOnNotFound]
+ [-ThrowOnWarning] [-NitroWarning <String>] [-NitroOnError <String>] [-RetryCount <Int32>]
+ [-RetryDelaySeconds <Int32>] [-RetryStatusCode <Int32[]>] [-RetryUnsafeMethods] [<CommonParameters>]
 ```
 
-```powershell
-Invoke-NSRestRequest [-Session <PSObject>] [-Method <String>] [-Operation <String>] -NitroPath <String> [-Action <String>] [-Query <Hashtable>] [-Payload <Hashtable>] [-RawResponse <SwitchParameter>] [-Headers <Hashtable>] [-IgnoreNotFound <SwitchParameter>] [-NotFoundErrorCode <Int32[]>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>] [-NitroWarning <String>] [-NitroOnError <String>] [-RetryCount <Int32>] [-RetryDelaySeconds <Int32>] [-RetryStatusCode <Int32[]>] [-RetryUnsafeMethods <SwitchParameter>]
+### ByPath
+```
+Invoke-NSRestRequest [-Session <PSObject>] [-Method <String>] [-Operation <String>] -NitroPath <String>
+ [-Action <String>] [-Query <Hashtable>] [-Payload <Hashtable>] [-RawResponse] [-Headers <Hashtable>]
+ [-IgnoreNotFound] [-NotFoundErrorCode <Int32[]>] [-ReturnNullOnNotFound] [-ThrowOnWarning]
+ [-NitroWarning <String>] [-NitroOnError <String>] [-RetryCount <Int32>] [-RetryDelaySeconds <Int32>]
+ [-RetryStatusCode <Int32[]>] [-RetryUnsafeMethods] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Low level access to the NetScaler NITRO API for operations the generated
+configuration and statistics functions do not cover.
+The request target is given
+either as a resource (-Task, -Type and optionally -Resource) or as a full NITRO
+path (-NitroPath).
 
-### -Action
+Responses are unwrapped to the resource collection by default.
+Use -RawResponse
+to get the complete NITRO response including the errorcode and message fields.
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+Not-found responses can be turned into an empty result or null instead of an
+error, and failed requests can be retried for transient HTTP status codes.
 
-### -Headers
+## EXAMPLES
 
-- Type: `System.Collections.Hashtable`
-- Required: `False`
-- Pipeline input: `False`
+### EXAMPLE 1
+```
+Invoke-NSRestRequest -Task config -Type lbvserver
+```
 
-### -IgnoreNotFound
+Returns all load balancing vServers.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+### EXAMPLE 2
+```
+Invoke-NSRestRequest -Task config -Type lbvserver -Resource lb_web -IgnoreNotFound
+```
 
-### -Method
+Returns one vServer, or an empty result when it does not exist.
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+### EXAMPLE 3
+```
+Invoke-NSRestRequest -Task config -Type sslcertkey -Operation ADD -Payload @{ sslcertkey = @{ certkey = 'web-cert'; cert = 'web.cer'; key = 'web.key' } }
+```
 
-### -NitroOnError
+Creates a certkey from files already present on the appliance.
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+### EXAMPLE 4
+```
+Invoke-NSRestRequest -NitroPath 'nitro/v1/config/nsversion' -RawResponse
+```
 
-### -NitroPath
+Calls an endpoint by path and returns the full NITRO response.
 
-- Type: `System.String`
-- Required: `True`
-- Pipeline input: `False`
-
-### -NitroWarning
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -NotFoundErrorCode
-
-- Type: `System.Int32[]`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Operation
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Payload
-
-- Type: `System.Collections.Hashtable`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Query
-
-- Type: `System.Collections.Hashtable`
-- Required: `False`
-- Pipeline input: `False`
-
-### -RawResponse
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Resource
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -RetryCount
-
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
-
-### -RetryDelaySeconds
-
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
-
-### -RetryStatusCode
-
-- Type: `System.Int32[]`
-- Required: `False`
-- Pipeline input: `False`
-
-### -RetryUnsafeMethods
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ReturnNullOnNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+## PARAMETERS
 
 ### -Session
+NetScaler session to use.
+Defaults to the active session from Get-NSSession.
 
-- Type: `System.Management.Automation.PSObject`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: PSObject
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: (Get-NSSession)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Method
+HTTP method: GET, POST, PUT or DELETE.
+Derived from the operation when omitted.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Operation
+NITRO operation such as ADD, UPDATE, DELETE, ENABLE or GET.
+Determines the method
+and payload shape when those are not given explicitly.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -NitroPath
+Full NITRO path to call, for example 'nitro/v1/config/lbvserver'.
+Use this
+instead of Task and Type for endpoints that do not follow the resource layout.
+
+```yaml
+Type: String
+Parameter Sets: ByPath
+Aliases:
+
+Required: True
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Task
+NITRO area to address: 'config' for configuration or 'stat' for statistics.
 
-- Type: `System.String`
-- Required: `True`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: ByResource
+Aliases:
 
-### -ThrowOnWarning
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: True
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Type
+NITRO resource type, for example lbvserver, sslcertkey or service.
 
-- Type: `System.String`
-- Required: `True`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: ByResource
+Aliases:
 
-## Notes
+Required: True
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Resource
+Name of a specific resource instance.
+Omit to address the whole collection.
+
+```yaml
+Type: String
+Parameter Sets: ByResource
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Action
+NITRO action appended to the request, for example 'enable' or 'update'.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Query
+Hashtable of NITRO query arguments such as filter, args or attrs.
+
+```yaml
+Type: Hashtable
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Payload
+Hashtable sent as the request body for operations that need one.
+
+```yaml
+Type: Hashtable
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -RawResponse
+Returns the complete NITRO response instead of only the resource collection.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Headers
+Additional HTTP headers merged into the request.
+
+```yaml
+Type: Hashtable
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -IgnoreNotFound
+Treats not-found responses as success and returns an empty result.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -NotFoundErrorCode
+NITRO error codes treated as not-found.
+Defaults to the common no-such-resource
+codes.
+
+```yaml
+Type: Int32[]
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: @(258, 344, 373, 538, 1540, 3441)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ReturnNullOnNotFound
+Returns null instead of an empty collection when the resource is not found.
+Requires IgnoreNotFound.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ThrowOnWarning
+Turns NITRO warnings into terminating errors.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -NitroWarning
+Sets the NITRO warning header to 'yes' or 'no'.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -NitroOnError
+NITRO behavior when part of a bulk request fails: EXIT, CONTINUE or ROLLBACK.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -RetryCount
+Number of times a failed request is retried.
+Default is 0.
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -RetryDelaySeconds
+Seconds to wait between retries.
+Default is 1.
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 1
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -RetryStatusCode
+HTTP status codes that trigger a retry.
+Defaults to 429 and the 5xx codes that
+usually indicate a busy appliance.
+
+```yaml
+Type: Int32[]
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: @(429, 500, 502, 503, 504)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -RetryUnsafeMethods
+Also retries POST, PUT and DELETE.
+By default only GET is retried, because
+repeating a write may not be safe.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+## NOTES
+
+## RELATED LINKS
+
+[https://netscalertoolkit.j81.nl/module/reference/common/nsrest-request/workflow/](https://netscalertoolkit.j81.nl/module/reference/common/nsrest-request/workflow/)
+
+[https://netscalertoolkit.j81.nl/](https://netscalertoolkit.j81.nl/)
+
 

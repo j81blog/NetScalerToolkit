@@ -1,64 +1,169 @@
-﻿# Update-NetScalerToolkit
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version: https://netscalertoolkit.j81.nl/module/reference/common/net-scaler-toolkit/update/
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Update-NetScalerToolkit
 
-## Synopsis
+## SYNOPSIS
+Updates NetScalerToolkit from the PowerShell Gallery when a newer version is available.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Update-NetScalerToolkit [-Repository <String>] [-Scope <String>] [-AllowPrerelease <SwitchParameter>] [-AcceptLicense <SwitchParameter>] [-SkipPublisherCheck <SwitchParameter>]
+```
+Update-NetScalerToolkit [[-Repository] <String>] [[-Scope] <String>] [-AllowPrerelease] [-AcceptLicense]
+ [-SkipPublisherCheck] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Checks the configured PowerShell Gallery repository for the latest NetScalerToolkit version.
+If the gallery version is newer than the currently loaded module version, installs that exact version.
 
-### -AcceptLicense
+The command returns a status object so it can be used from scheduled tasks or automation logs.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+## EXAMPLES
 
-### -AllowPrerelease
+### EXAMPLE 1
+```
+Update-NetScalerToolkit
+```
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+### EXAMPLE 2
+```
+Update-NetScalerToolkit -Scope AllUsers -Confirm:$false
+```
 
-### -Confirm
+### EXAMPLE 3
+```
+Register-ScheduledTask -TaskName 'Update NetScalerToolkit' -Action (New-ScheduledTaskAction -Execute 'pwsh.exe' -Argument '-NoProfile -Command "Import-Module NetScalerToolkit; Update-NetScalerToolkit -Confirm:$false"') -Trigger (New-ScheduledTaskTrigger -Daily -At 03:00)
+```
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `cf`
+## PARAMETERS
 
 ### -Repository
+PowerShellGet repository to query.
+Defaults to PSGallery.
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 1
+Default value: PSGallery
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Scope
+Installation scope used when a newer version is installed.
+Defaults to CurrentUser.
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 2
+Default value: CurrentUser
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -AllowPrerelease
+Includes prerelease gallery versions when checking and installing.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -AcceptLicense
+Accepts the module license during installation when the gallery package requires it.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -SkipPublisherCheck
+Allows installation when publisher metadata differs from the installed module.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -WhatIf
+Shows what would happen if the cmdlet runs.
+The cmdlet is not run.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `wi`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: wi
 
-## Notes
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Confirm
+Prompts you for confirmation before running the cmdlet.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: cf
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+### System.Management.Automation.PSCustomObject
+## NOTES
+
+## RELATED LINKS
+
+[https://netscalertoolkit.j81.nl/module/reference/common/net-scaler-toolkit/update/](https://netscalertoolkit.j81.nl/module/reference/common/net-scaler-toolkit/update/)
+
+[https://netscalertoolkit.j81.nl/](https://netscalertoolkit.j81.nl/)
+
 

@@ -1,134 +1,351 @@
-﻿# Invoke-NSTraceroute
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version:
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Invoke-NSTraceroute
 
-## Synopsis
+## SYNOPSIS
+Sends a NetScaler traceroute request.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Invoke-NSTraceroute -HostName <String> [-Summary <String>] [-N <Boolean>] [-R <Boolean>] [-VerboseOutput <Boolean>] [-MinimumTTL <Int32>] [-MaximumTTL <Int32>] [-Protocol <Int32>] [-Port <Int32>] [-QueryCount <Int32>] [-SourceAddress <String>] [-TrafficDomainId <Int32>] [-TypeOfService <Int32>] [-WaitTime <Int32>] [-Packetlen <Int32>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>]
+```
+Invoke-NSTraceroute [-HostName] <String> [-Summary <String>] [-N <Boolean>] [-R <Boolean>]
+ [-VerboseOutput <Boolean>] [-MinimumTTL <Int32>] [-MaximumTTL <Int32>] [-Protocol <Int32>] [-Port <Int32>]
+ [-QueryCount <Int32>] [-SourceAddress <String>] [-TrafficDomainId <Int32>] [-TypeOfService <Int32>]
+ [-WaitTime <Int32>] [-Packetlen <Int32>] [-Session <PSObject>] [-IgnoreNotFound] [-ReturnNullOnNotFound]
+ [-ThrowOnWarning] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Configuration for 0 resource.
+
+## EXAMPLES
+
+### EXAMPLE 1
+```
+Invoke-NSTraceroute -HostName '192.0.2.10'
+```
+
+## PARAMETERS
 
 ### -HostName
+Destination host IP address or name.
+Minimum length = 1 Maximum length = 64
 
-- Type: `System.String`
-- Required: `True`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -IgnoreNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -MaximumTTL
-
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
-
-### -MinimumTTL
-
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
-
-### -N
-
-- Type: `System.Boolean`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Packetlen
-
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Port
-
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Protocol
-
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
-
-### -QueryCount
-
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
-
-### -R
-
-- Type: `System.Boolean`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ReturnNullOnNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Session
-
-- Type: `System.Management.Automation.PSObject`
-- Required: `False`
-- Pipeline input: `False`
-
-### -SourceAddress
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+Required: True
+Position: 1
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Summary
+Print a summary of how many probes were not answered for each hop.
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -ThrowOnWarning
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+### -N
+Print hop addresses numerically instead of symbolically and numerically.
 
-### -TrafficDomainId
+```yaml
+Type: Boolean
+Parameter Sets: (All)
+Aliases:
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-### -TypeOfService
+### -R
+Bypass normal routing tables and send directly to a host on an attached network.
+If the host is not on a directly attached network, an error is returned.
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Boolean
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -VerboseOutput
+Verbose output.
+List received ICMP packets other than TIME_EXCEEDED and UNREACHABLE.
 
-- Type: `System.Boolean`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Boolean
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -MinimumTTL
+Minimum TTL value used in outgoing probe packets.
+Default value: 1 Minimum value = 1 Maximum value = 255
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -MaximumTTL
+Minimum TTL value used in outgoing probe packets.
+Default value: 1 Minimum value = 1 Maximum value = 255
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Protocol
+Send packets of specified IP protocol.
+The currently supported protocols are UDP and ICMP.
+Minimum length = 1 Maximum length = 20
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Port
+Send packets of specified IP protocol.
+The currently supported protocols are UDP and ICMP.
+Minimum length = 1 Maximum length = 20
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -QueryCount
+Number of queries per hop.
+For Nitro API, defalut value is taken as 1.
+Default value: 3 Minimum value = 1 Maximum value = 65535
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -SourceAddress
+Print a summary of how many probes were not answered for each hop.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -TrafficDomainId
+Traffic Domain Id.
+Minimum value = 1 Maximum value = 4094
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -TypeOfService
+Traffic Domain Id.
+Minimum value = 1 Maximum value = 4094
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -WaitTime
+Time (in seconds) to wait for a response to a query.
+For Nitro API, defalut value is set to 3.
+Default value: 5 Minimum value = 2 Maximum value = 86399
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
 
-## Notes
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Packetlen
+Length (in bytes) of the query packets.
+Default value: 44 Minimum value = 44 Maximum value = 32768
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 0
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Session
+The NetScaler session.
+If omitted, the current default session is used.
+
+```yaml
+Type: PSObject
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: (Get-NSSession)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -IgnoreNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ReturnNullOnNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ThrowOnWarning
+Treats NITRO warning responses as terminating errors.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+### System.Management.Automation.PSCustomObject
+## NOTES
+Generated from NetScaler NITRO API metadata.
+Generated: 2026-06-01 21:28
+Supported metadata versions: 13.1, 14.1.
+
+## RELATED LINKS
 

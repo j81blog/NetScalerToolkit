@@ -1,214 +1,565 @@
-﻿# Invoke-NSDeleteAppFwLearningData
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version:
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Invoke-NSDeleteAppFwLearningData
 
-## Synopsis
+## SYNOPSIS
+Removes a NetScaler appfwlearningdata resource.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Invoke-NSDeleteAppFwLearningData [-ProfileName <String>] [-StartURL <String>] [-CookieConsistency <String>] [-FieldConsistency <String>] [-FormActionURLFfc <String>] [-ContentType <String>] [-Crosssitescripting <String>] [-FormActionURLXss <String>] [-AsScanLocationXss <String>] [-AsValueTypeXss <String>] [-AsValueExprXss <String>] [-Sqlinjection <String>] [-FormActionURLSql <String>] [-AsScanLocationSql <String>] [-AsValueTypeSql <String>] [-AsValueExprSql <String>] [-FieldFormAt <String>] [-FormActionURLFf <String>] [-Csrftag <String>] [-CsrfFormOriginURL <String>] [-Creditcardnumber <String>] [-CreditcardnumberURL <String>] [-XMLDoscheck <String>] [-XMLWsicheck <String>] [-XMLAttachmentcheck <String>] [-TotalXMLRequestS <Boolean>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>]
+```
+Invoke-NSDeleteAppFwLearningData [[-ProfileName] <String>] [[-StartURL] <String>]
+ [[-CookieConsistency] <String>] [[-FieldConsistency] <String>] [[-FormActionURLFfc] <String>]
+ [[-ContentType] <String>] [[-Crosssitescripting] <String>] [[-FormActionURLXss] <String>]
+ [[-AsScanLocationXss] <String>] [[-AsValueTypeXss] <String>] [[-AsValueExprXss] <String>]
+ [[-Sqlinjection] <String>] [[-FormActionURLSql] <String>] [[-AsScanLocationSql] <String>]
+ [[-AsValueTypeSql] <String>] [[-AsValueExprSql] <String>] [[-FieldFormAt] <String>]
+ [[-FormActionURLFf] <String>] [[-Csrftag] <String>] [[-CsrfFormOriginURL] <String>]
+ [[-Creditcardnumber] <String>] [[-CreditcardnumberURL] <String>] [[-XMLDoscheck] <String>]
+ [[-XMLWsicheck] <String>] [[-XMLAttachmentcheck] <String>] [[-TotalXMLRequestS] <Boolean>]
+ [[-Session] <PSObject>] [-IgnoreNotFound] [-ReturnNullOnNotFound] [-ThrowOnWarning] [-WhatIf] [-Confirm]
+ [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Configuration for learning data resource.
 
-### -AsScanLocationSql
+## EXAMPLES
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+### EXAMPLE 1
+```
+Invoke-NSDeleteAppFwLearningData -ProfileName 'example' -StartURL 'example' -CookieConsistency 'example' -FieldConsistency 'example' -ContentType 'example' -Crosssitescripting 'example' -Sqlinjection 'example' -FieldFormAt 'example' -Csrftag 'example' -CsrfFormOriginURL 'example' -Creditcardnumber 'example' -CreditcardnumberURL 'example' -XMLDoscheck 'example' -XMLWsicheck 'example' -XMLAttachmentcheck 'example' -TotalXMLRequestS $true -Confirm:$false
+```
 
-### -AsScanLocationXss
+### EXAMPLE 2
+```
+Invoke-NSGetAppFwLearningData  | Invoke-NSDeleteAppFwLearningData -Confirm:$false
+```
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -AsValueExprSql
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -AsValueExprXss
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -AsValueTypeSql
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -AsValueTypeXss
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Confirm
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `cf`
-
-### -ContentType
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -CookieConsistency
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Creditcardnumber
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -CreditcardnumberURL
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Crosssitescripting
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -CsrfFormOriginURL
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Csrftag
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -FieldConsistency
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -FieldFormAt
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -FormActionURLFf
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -FormActionURLFfc
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -FormActionURLSql
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -FormActionURLXss
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
-
-### -IgnoreNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+## PARAMETERS
 
 ### -ProfileName
+Name of the profile.
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -ReturnNullOnNotFound
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Session
-
-- Type: `System.Management.Automation.PSObject`
-- Required: `False`
-- Pipeline input: `False`
-
-### -Sqlinjection
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: 1
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -StartURL
+Start URL configuration.
+Minimum length = 1
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -ThrowOnWarning
+Required: False
+Position: 2
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+### -CookieConsistency
+Cookie Name.
+Minimum length = 1
 
-### -TotalXMLRequestS
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-- Type: `System.Boolean`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: 3
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-### -WhatIf
+### -FieldConsistency
+Form field name.
+Minimum length = 1
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `wi`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -XMLAttachmentcheck
+Required: False
+Position: 4
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+### -FormActionURLFfc
+Form action URL.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 5
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ContentType
+Content Type Name.
+Minimum length = 1
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 6
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Crosssitescripting
+Cross-site scripting.
+Minimum length = 1
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 7
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -FormActionURLXss
+Form action URL.
+Minimum length = 1
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 8
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -AsScanLocationXss
+Location of cross-site scripting exception - form field, header, cookie or url.
+Possible values = FORMFIELD, HEADER, COOKIE, URL
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 9
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -AsValueTypeXss
+XSS value type.
+(Tag | Attribute | Pattern).
+Possible values = Tag, Attribute, Pattern
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 10
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -AsValueExprXss
+XSS value expressions consistituting expressions for Tag, Attribute or Pattern.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 11
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Sqlinjection
+Form field name.
+Minimum length = 1
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 12
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -FormActionURLSql
+Form action URL.
+Minimum length = 1
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 13
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -AsScanLocationSql
+Location of sql injection exception - form field, header or cookie.
+Possible values = FORMFIELD, HEADER, COOKIE
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 14
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -AsValueTypeSql
+SQL value type.
+Keyword, SpecialString or Wildchar.
+Possible values = Keyword, SpecialString, Wildchar
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 15
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -AsValueExprSql
+SQL value expressions consistituting expressions for Keyword, SpecialString or Wildchar.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 16
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -FieldFormAt
+Field format name.
+Minimum length = 1
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 17
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -FormActionURLFf
+Form action URL.
+Minimum length = 1
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 18
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Csrftag
+CSRF Form Action URL.
+Minimum length = 1
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 19
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -CsrfFormOriginURL
+CSRF Form Origin URL.
+Minimum length = 1
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 20
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Creditcardnumber
+The object expression that is to be excluded from safe commerce check.
+Minimum length = 1
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 21
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -CreditcardnumberURL
+The url for which the list of credit card numbers are needed to be bypassed from inspection.
+Minimum length = 1
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 22
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -XMLDoscheck
+XML Denial of Service check, one of MaxAttributes MaxAttributeNameLength MaxAttributeValueLength MaxElementNameLength MaxFileSize MinFileSize MaxCDATALength MaxElements MaxElementDepth MaxElementChildren NumDTDs NumProcessingInstructions NumExternalEntities MaxEntityExpansions MaxEntityExpansionDepth MaxNamespaces MaxNamespaceUriLength MaxSOAPArraySize MaxSOAPArrayRank .
+Minimum length = 1
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 23
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -XMLWsicheck
+Web Services Interoperability Rule ID.
+Minimum length = 1
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-## Notes
+Required: False
+Position: 24
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -XMLAttachmentcheck
+XML Attachment Content-Type.
+Minimum length = 1
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 25
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -TotalXMLRequestS
+Total XML requests.
+
+```yaml
+Type: Boolean
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 26
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Session
+The NetScaler session.
+If omitted, the current default session is used.
+
+```yaml
+Type: PSObject
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: 27
+Default value: (Get-NSSession)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -IgnoreNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ReturnNullOnNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ThrowOnWarning
+Treats NITRO warning responses as terminating errors.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -WhatIf
+Shows what would happen if the cmdlet runs.
+The cmdlet is not run.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: wi
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Confirm
+Prompts you for confirmation before running the cmdlet.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: cf
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+### System.Management.Automation.PSCustomObject
+## NOTES
+Generated from NetScaler NITRO API metadata.
+Generated: 2026-06-01 21:28
+Supported metadata versions: 13.1, 14.1.
+
+## RELATED LINKS
 

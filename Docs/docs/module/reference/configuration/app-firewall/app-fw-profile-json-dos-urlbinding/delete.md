@@ -1,76 +1,218 @@
-﻿# Invoke-NSDeleteAppFwProfileJsonDosURLBinding
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version:
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Invoke-NSDeleteAppFwProfileJsonDosURLBinding
 
-## Synopsis
+## SYNOPSIS
+Removes a NetScaler appfwprofile_jsondosurl_binding resource.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Invoke-NSDeleteAppFwProfileJsonDosURLBinding -Name <String> [-JsonDosURL <String>] [-RuleType <String>] [-Session <PSObject>] [-IgnoreNotFound <SwitchParameter>] [-ReturnNullOnNotFound <SwitchParameter>] [-ThrowOnWarning <SwitchParameter>]
+```
+Invoke-NSDeleteAppFwProfileJsonDosURLBinding [-Name] <String> [-JsonDosURL <String>] [-RuleType <String>]
+ [-Session <PSObject>] [-IgnoreNotFound] [-ReturnNullOnNotFound] [-ThrowOnWarning] [-WhatIf] [-Confirm]
+ [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Binding object showing the jsondosurl that can be bound to appfwprofile.
 
-### -Confirm
+## EXAMPLES
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `cf`
+### EXAMPLE 1
+```
+Invoke-NSDeleteAppFwProfileJsonDosURLBinding -Name 'example' -JsonDosURL 'example' -RuleType ALLOW -Confirm:$false
+```
 
-### -IgnoreNotFound
+### EXAMPLE 2
+```
+Invoke-NSGetAppFwProfileJsonDosURLBinding -Name 'appfwprofile_jsondosurl_binding_example' | Invoke-NSDeleteAppFwProfileJsonDosURLBinding -Confirm:$false
+```
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-
-### -JsonDosURL
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+## PARAMETERS
 
 ### -Name
+Name of the profile to which to bind an exemption or rule.
+Minimum length = 1
 
-- Type: `System.String`
-- Required: `True`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
 
-### -ReturnNullOnNotFound
+Required: True
+Position: 1
+Default value: None
+Accept pipeline input: True (ByPropertyName)
+Accept wildcard characters: False
+```
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+### -JsonDosURL
+The URL on which we need to enforce the specified JSON denial-of-service (JSONDoS) attack protections.
+An JSON DoS configuration consists of the following items: * URL.
+PCRE-format regular expression for the URL.
+* Maximum-document-length-check toggle.
+ON to enable this check, OFF to disable it.
+* Maximum document length.
+Positive integer representing the maximum length of the JSON document.
+* Maximum-container-depth-check toggle.
+ON to enable, OFF to disable.
+* Maximum container depth.
+Positive integer representing the maximum container depth of the JSON document.
+* Maximum-object-key-count-check toggle.
+ON to enable, OFF to disable.
+* Maximum object key count.
+Positive integer representing the maximum allowed number of keys in any of the JSON object.
+* Maximum-object-key-length-check toggle.
+ON to enable, OFF to disable.
+* Maximum object key length.
+Positive integer representing the maximum allowed length of key in any of the JSON object.
+* Maximum-array-value-count-check toggle.
+ON to enable, OFF to disable.
+* Maximum array value count.
+Positive integer representing the maximum allowed number of values in any of the JSON array.
+* Maximum-string-length-check toggle.
+ON to enable, OFF to disable.
+* Maximum string length.
+Positive integer representing the maximum length of string in JSON.
+Minimum length = 1 Maximum length = 2047
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -RuleType
+Specifies rule type of binding.
+Possible values = ALLOW, DENY
 
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Session
+The NetScaler session.
+If omitted, the current default session is used.
 
-- Type: `System.Management.Automation.PSObject`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: PSObject
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: (Get-NSSession)
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -IgnoreNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ReturnNullOnNotFound
+Returns null instead of throwing for known NITRO not-found responses.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -ThrowOnWarning
+Treats NITRO warning responses as terminating errors.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -WhatIf
+Shows what would happen if the cmdlet runs.
+The cmdlet is not run.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `wi`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: wi
 
-## Notes
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Confirm
+Prompts you for confirmation before running the cmdlet.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: cf
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+### System.Management.Automation.PSCustomObject
+## NOTES
+Generated from NetScaler NITRO API metadata.
+Generated: 2026-06-01 21:28
+Supported metadata versions: 13.1, 14.1.
+
+## RELATED LINKS
 

@@ -72,25 +72,25 @@ nav:
       - Reference: module/reference/index.md
   - Certificates:
       - Introduction: certificates/overview.md
-      - Staging And Production: certificates/staging-production.md
       - ACME How It Works: certificates/acme-how-it-works.md
+      - Staging And Production: certificates/staging-production.md
+      - API User Bootstrap: certificates/api-user-bootstrap.md
       - Scenario Matrix: certificates/scenario-matrix.md
       - Certificate Deployment: certificates/deployment.md
-      - Renewal Behavior: certificates/renewal-behavior.md
       - SAN Certificate: certificates/san-certificate.md
       - HTTP-01 Through NetScaler: certificates/http-01.md
       - HTTP-01 With LB VIP: certificates/http-lb-vip.md
       - DNS-01 With Posh-ACME: certificates/dns-poshacme.md
-      - Alternative ACME Providers: certificates/alternative-acme-providers.md
       - Wildcard Certificates: certificates/wildcard-certificates.md
-      - DNS-01 Hosted On NetScaler: certificates/netscaler-dns.md
+      - Alternative ACME Providers: certificates/alternative-acme-providers.md
       - tlsserver Profile: certificates/tlsserver-profile.md
+      - DNS-01 Hosted On NetScaler: certificates/netscaler-dns.md
       - Config File And AutoRun: certificates/config-file-autorun.md
       - Global VPN Binding: certificates/global-vpn-binding.md
       - Local IIS Binding: certificates/iis-binding.md
       - Post-Run Actions: certificates/post-run-actions.md
       - Legacy Wrapper: certificates/legacy-wrapper.md
-      - API User Bootstrap: certificates/api-user-bootstrap.md
+      - Renewal Behavior: certificates/renewal-behavior.md
       - Cleanup: certificates/cleanup.md
       - Operations Runbooks: certificates/runbooks.md
       - Troubleshooting: certificates/troubleshooting.md

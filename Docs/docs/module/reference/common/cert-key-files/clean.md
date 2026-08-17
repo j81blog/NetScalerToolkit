@@ -1,128 +1,325 @@
-﻿# Invoke-NSCleanCertKeyFiles
+﻿---
+external help file: NetScalerToolkit-help.xml
+Module Name: NetScalerToolkit
+online version: https://netscalertoolkit.j81.nl/module/reference/common/cert-key-files/clean/
+schema: 2.0.0
+---
 
-Module area: `NetScalerToolkit`
+# Invoke-NSCleanCertKeyFiles
 
-## Synopsis
+## SYNOPSIS
+Removes unused NetScaler SSL certkey objects and orphaned certificate files.
 
-Generated command reference. Review the command syntax and parameter metadata before use.
+## SYNTAX
 
-## Syntax
-
-```powershell
-Invoke-NSCleanCertKeyFiles -Session <PSObject> [-Backup <SwitchParameter>] [-NoSaveConfig <SwitchParameter>] [-Attempts <Int32>] [-ExpirationDays <Int32>] [-FileLocation <String>] [-ExcludeCertKey <String[]>] [-ExcludeFile <String[]>] [-ExcludeFilePattern <String[]>] [-PassThru <SwitchParameter>] [-Summary <SwitchParameter>]
+### Session (Default)
+```
+Invoke-NSCleanCertKeyFiles -Session <PSObject> [-Backup] [-NoSaveConfig] [-Attempts <Int32>]
+ [-ExpirationDays <Int32>] [-FileLocation <String>] [-ExcludeCertKey <String[]>] [-ExcludeFile <String[]>]
+ [-ExcludeFilePattern <String[]>] [-PassThru] [-Summary] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
-```powershell
-Invoke-NSCleanCertKeyFiles -ManagementUrl <Uri> -Credential <PSCredential> [-SkipCertificateCheck <SwitchParameter>] [-UseNitroHeader <SwitchParameter>] [-Backup <SwitchParameter>] [-NoSaveConfig <SwitchParameter>] [-Attempts <Int32>] [-ExpirationDays <Int32>] [-FileLocation <String>] [-ExcludeCertKey <String[]>] [-ExcludeFile <String[]>] [-ExcludeFilePattern <String[]>] [-PassThru <SwitchParameter>] [-Summary <SwitchParameter>]
+### Connect
+```
+Invoke-NSCleanCertKeyFiles -ManagementUrl <Uri> -Credential <PSCredential> [-SkipCertificateCheck]
+ [-UseNitroHeader] [-Backup] [-NoSaveConfig] [-Attempts <Int32>] [-ExpirationDays <Int32>]
+ [-FileLocation <String>] [-ExcludeCertKey <String[]>] [-ExcludeFile <String[]>]
+ [-ExcludeFilePattern <String[]>] [-PassThru] [-Summary] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
-## Parameters
+## DESCRIPTION
+Scans SSL certkey objects, generated binding resources, selected global references, linked certificates, SAML actions,
+SSL DH file references, and the running configuration before removing anything.
+A certkey or file is only removed
+when no detected configuration reference remains.
 
-### -Attempts
+## EXAMPLES
 
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
+### EXAMPLE 1
+```
+Invoke-NSCleanCertKeyFiles -ManagementUrl 'https://ns-01.domain.local' -Credential (Get-Credential) -Backup -WhatIf
+```
 
-### -Backup
+### EXAMPLE 2
+```
+$session = Connect-NSNode -ManagementUrl 'https://ns-01.domain.local' -Credential (Get-Credential) -HA -PassThru
+```
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Invoke-NSCleanCertKeyFiles -Session $session -PassThru
 
-### -Confirm
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `cf`
-
-### -Credential
-
-- Type: `System.Management.Automation.PSCredential`
-- Required: `True`
-- Pipeline input: `False`
-
-### -ExcludeCertKey
-
-- Type: `System.String[]`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ExcludeFile
-
-- Type: `System.String[]`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ExcludeFilePattern
-
-- Type: `System.String[]`
-- Required: `False`
-- Pipeline input: `False`
-
-### -ExpirationDays
-
-- Type: `System.Int32`
-- Required: `False`
-- Pipeline input: `False`
-
-### -FileLocation
-
-- Type: `System.String`
-- Required: `False`
-- Pipeline input: `False`
+## PARAMETERS
 
 ### -ManagementUrl
+NetScaler management URL used to create a new HA-aware session.
 
-- Type: `System.Uri`
-- Required: `True`
-- Pipeline input: `False`
+```yaml
+Type: Uri
+Parameter Sets: Connect
+Aliases:
 
-### -NoSaveConfig
+Required: True
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+### -Credential
+Credential used when connecting to the NetScaler.
 
-### -PassThru
+```yaml
+Type: PSCredential
+Parameter Sets: Connect
+Aliases:
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: True
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -Session
+Existing NetScaler session.
+If it contains PrimarySession and SecondarySession records, files are removed from both nodes.
 
-- Type: `System.Management.Automation.PSObject`
-- Required: `True`
-- Pipeline input: `False`
+```yaml
+Type: PSObject
+Parameter Sets: Session
+Aliases:
+
+Required: True
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -SkipCertificateCheck
+Skips TLS certificate validation when creating a new NetScaler session with ManagementUrl and Credential.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: Connect
+Aliases:
 
-### -Summary
-
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -UseNitroHeader
+Uses the NITRO authentication header when creating a new NetScaler session with ManagementUrl and Credential.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
+```yaml
+Type: SwitchParameter
+Parameter Sets: Connect
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Backup
+Saves nsconfig and creates a full system backup before cleanup.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -NoSaveConfig
+Skips saving nsconfig after cleanup.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Attempts
+Number of certkey removal scan attempts before file cleanup.
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 2
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ExpirationDays
+Warns about remaining certificates expiring in this many days.
+
+```yaml
+Type: Int32
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: 30
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -FileLocation
+NetScaler file location to scan for certificate files.
+
+```yaml
+Type: String
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: /nsconfig/ssl/
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ExcludeCertKey
+SSL certkey names that must never be removed.
+
+```yaml
+Type: String[]
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: @('ns-server-certificate')
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ExcludeFile
+Certificate file names that must never be removed.
+
+```yaml
+Type: String[]
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: @('adc-root-certs.crt', 'trusted_root_certs.pem')
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -ExcludeFilePattern
+Wildcard file-name patterns that must never be removed.
+Default patterns protect NetScaler SSL support files and certificate hash links.
+
+```yaml
+Type: String[]
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: @('ns-root.*', 'ns-server.*', 'ns-sftrust-root.*', 'ns-sftrust.*', '*.0', '*.1', '*.2', '*.3', '*.4', '*.5', '*.6', '*.7', '*.8', '*.9', '*.a', '*.b', '*.c', '*.d', '*.e', '*.f')
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -PassThru
+Returns the final cleanup plan with removed certkey and file details.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -Summary
+Writes a compact cleanup summary to the host and returns the final cleanup plan.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases:
+
+Required: False
+Position: Named
+Default value: False
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
 ### -WhatIf
+Shows what would happen if the cmdlet runs.
+The cmdlet is not run.
 
-- Type: `System.Management.Automation.SwitchParameter`
-- Required: `False`
-- Pipeline input: `False`
-- Aliases: `wi`
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: wi
 
-## Notes
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
 
-This page was generated from exported PowerShell command metadata.
+### -Confirm
+Prompts you for confirmation before running the cmdlet.
+
+```yaml
+Type: SwitchParameter
+Parameter Sets: (All)
+Aliases: cf
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### CommonParameters
+This cmdlet supports the common parameters: -Debug, -ErrorAction, -ErrorVariable, -InformationAction, -InformationVariable, -OutVariable, -OutBuffer, -PipelineVariable, -Verbose, -WarningAction, and -WarningVariable. For more information, see [about_CommonParameters](http://go.microsoft.com/fwlink/?LinkID=113216).
+
+## INPUTS
+
+## OUTPUTS
+
+## NOTES
+
+## RELATED LINKS
+
+[https://netscalertoolkit.j81.nl/module/reference/common/cert-key-files/clean/](https://netscalertoolkit.j81.nl/module/reference/common/cert-key-files/clean/)
+
+[https://netscalertoolkit.j81.nl/](https://netscalertoolkit.j81.nl/)
+
 

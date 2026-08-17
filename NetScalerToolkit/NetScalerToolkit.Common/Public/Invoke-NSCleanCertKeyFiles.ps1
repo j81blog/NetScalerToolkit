@@ -16,26 +16,6 @@ function Get-NSCleanCertKeyFilesName {
     return ($normalized -split '/')[-1]
 }
 
-function Test-NSCleanCertKeyFilesExcludedFile {
-    param(
-        [Parameter(Mandatory)]
-        [string] $FileName,
-
-        [Parameter(Mandatory)]
-        [string[]] $ExcludeFile,
-
-        [Parameter(Mandatory)]
-        [string[]] $ExcludeFilePattern
-    )
-
-    if ($ExcludeFile -contains $FileName) { return $true }
-    foreach ($pattern in $ExcludeFilePattern) {
-        if ($FileName -like $pattern) { return $true }
-    }
-
-    return $false
-}
-
 function Add-NSCleanCertKeyReference {
     param(
         [Parameter(Mandatory)]
@@ -104,113 +84,6 @@ function Invoke-NSCleanCertKeyFilesOperation {
     }
 }
 
-function New-NSCleanCertKeyFilesSummary {
-    param(
-        [Parameter(Mandatory)]
-        [object] $InitialPlan,
-
-        [Parameter(Mandatory)]
-        [object] $FinalPlan,
-
-        [object[]] $RemovedCertKey,
-
-        [object[]] $RemovedFile,
-
-        [Parameter(Mandatory)]
-        [bool] $Changed,
-
-        [Parameter(Mandatory)]
-        [bool] $SavedConfig
-    )
-
-    [pscustomobject] @{
-        PSTypeName = 'NetScalerToolkit.CertKeyCleanup.Summary'
-        InitialCertKeys = @($InitialPlan.CertKeys).Count
-        FinalCertKeys = @($FinalPlan.CertKeys).Count
-        RemovedCertKeys = @($RemovedCertKey).Count
-        RemainingRemovableCertKeys = @($FinalPlan.CertKeys | Where-Object { $_.Removable }).Count
-        InitialFiles = @($InitialPlan.Files).Count
-        FinalFiles = @($FinalPlan.Files).Count
-        RemovedFiles = @($RemovedFile).Count
-        RemainingRemovableFiles = @($FinalPlan.Files | Where-Object { $_.Removable }).Count
-        Changed = $Changed
-        SavedConfig = $SavedConfig
-    }
-}
-
-function Add-NSCleanCertKeyFilesResultMetadata {
-    param(
-        [Parameter(Mandatory)]
-        [object] $Plan,
-
-        [object[]] $RemovedCertKey,
-
-        [object[]] $RemovedFile
-    )
-
-    $Plan | Add-Member -NotePropertyName RemovedCertKeys -NotePropertyValue @($RemovedCertKey) -Force
-    $Plan | Add-Member -NotePropertyName RemovedFiles -NotePropertyValue @($RemovedFile) -Force
-    $Plan
-}
-
-function Write-NSCleanCertKeyFilesSummary {
-    param(
-        [Parameter(Mandatory)]
-        [object] $Summary
-    )
-
-    Write-Host 'NetScaler certificate cleanup summary'
-    Write-Host ('  CertKeys: {0} initial, {1} final, {2} removed, {3} remaining removable' -f $Summary.InitialCertKeys, $Summary.FinalCertKeys, $Summary.RemovedCertKeys, $Summary.RemainingRemovableCertKeys)
-    Write-Host ('  Files:    {0} initial, {1} final, {2} removed, {3} remaining removable' -f $Summary.InitialFiles, $Summary.FinalFiles, $Summary.RemovedFiles, $Summary.RemainingRemovableFiles)
-    Write-Host ('  Changed: {0}' -f $Summary.Changed)
-    Write-Host ('  Saved config: {0}' -f $Summary.SavedConfig)
-}
-
-function Test-NSCleanCertKeyFilesObjectHasValue {
-    param([object] $InputObject)
-
-    foreach ($item in (ConvertTo-NSCleanCertKeyFilesArray $InputObject)) {
-        if ($null -eq $item) { continue }
-        foreach ($property in $item.PSObject.Properties) {
-            # Binding APIs can echo only the requested certkey name; that alone is not a real reference.
-            if ($property.Name -in @('certkey', 'certkeyname')) { continue }
-            if ($null -eq $property.Value) { continue }
-            if ($property.Value -is [string] -and [string]::IsNullOrWhiteSpace($property.Value)) { continue }
-            if ($property.Value -is [System.Array] -and $property.Value.Count -eq 0) { continue }
-            return $true
-        }
-    }
-
-    return $false
-}
-
-function Invoke-NSCleanCertKeyFilesOptionalCertKeyReferenceOperation {
-    param(
-        [Parameter(Mandatory)]
-        [System.Collections.IDictionary] $ReferenceMap,
-
-        [Parameter(Mandatory)]
-        [string] $CertKey,
-
-        [Parameter(Mandatory)]
-        [string] $Operation,
-
-        [Parameter(Mandatory)]
-        [scriptblock] $ScriptBlock
-    )
-
-    try {
-        return Invoke-NSCleanCertKeyFilesOperation -Operation $Operation -ScriptBlock $ScriptBlock
-    } catch {
-        # If an optional reference check fails, keep this certkey instead of risking a bad delete.
-        $reason = 'reference check failed: {0}' -f $Operation
-        Add-NSCleanCertKeyReference -ReferenceMap $ReferenceMap -CertKey $CertKey -Reason $reason
-        Write-Warning ('Skipping cleanup for SSL certkey "{0}" because reference check "{1}" failed. {2}' -f $CertKey, $Operation, $_.Exception.Message)
-        Write-Verbose ('Certkey "{0}" marked non-removable because optional reference check failed.' -f $CertKey)
-        return $null
-    }
-}
-
 function Get-NSCleanCertKeyFilesRunningConfigLine {
     param([object] $InputObject)
 
@@ -256,27 +129,30 @@ function Test-NSCleanCertKeyFilesRunningConfigReference {
     return $false
 }
 
-function Get-NSCleanCertKeyFilesNodeSession {
-    param([Parameter(Mandatory)][psobject] $Session)
+function Add-NSCleanCertKeyFilesWarning {
+    param(
+        [System.Collections.Generic.List[string]] $Sink,
 
-    # HA sessions expose node-specific sessions so file removal can run on both nodes.
-    $sessions = [System.Collections.Generic.List[object]]::new()
-    if ($Session.PrimarySession -and $Session.PrimarySession.Session) {
-        $sessions.Add($Session.PrimarySession) | Out-Null
+        [Parameter(Mandatory)]
+        [string] $Message
+    )
+
+    # A raw Write-Warning splits the open ConsoleStatus item line, so collect it for the note instead.
+    if ($null -ne $Sink) {
+        $Sink.Add($Message) | Out-Null
+    } else {
+        Write-Warning $Message
     }
+}
 
-    if ($Session.SecondarySession -and $Session.SecondarySession.Session) {
-        $sessions.Add($Session.SecondarySession) | Out-Null
-    }
+function Write-NSCleanCertKeyFilesWarning {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Message
+    )
 
-    if ($sessions.Count -eq 0) {
-        $sessions.Add([pscustomobject] @{
-            State = if ($Session.IsPrimary) { 'Primary' } elseif ($Session.IsSecondary) { 'Secondary' } else { 'Connected' }
-            Session = $Session
-        }) | Out-Null
-    }
-
-    return $sessions
+    # ConsoleStatus item lines carry the warning; without it the warning stream is all there is.
+    if (-not $script:NSConsoleStatusEnabled) { Write-Warning $Message }
 }
 
 function Get-NSCleanCertKeyFilesSystemFile {
@@ -287,7 +163,9 @@ function Get-NSCleanCertKeyFilesSystemFile {
         [Parameter(Mandatory)]
         [string] $FileLocation,
 
-        [System.Collections.Generic.HashSet[string]] $VisitedLocation = ([System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase))
+        [System.Collections.Generic.HashSet[string]] $VisitedLocation = ([System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)),
+
+        [System.Collections.Generic.List[string]] $WarningSink
     )
 
     $normalizedLocation = '/' + $FileLocation.Trim('/') + '/'
@@ -299,7 +177,7 @@ function Get-NSCleanCertKeyFilesSystemFile {
             Invoke-NSGetSystemFile -Session $Session -FileLocation $normalizedLocation -ReturnNullOnNotFound
         }
     } catch {
-        Write-Warning ('Skipping certificate file cleanup for location "{0}" because the file listing failed. {1}' -f $normalizedLocation, $_.Exception.Message)
+        Add-NSCleanCertKeyFilesWarning -Sink $WarningSink -Message ('Skipping certificate file cleanup for location "{0}" because the file listing failed. {1}' -f $normalizedLocation, $_.Exception.Message)
         return @()
     }
 
@@ -312,12 +190,12 @@ function Get-NSCleanCertKeyFilesSystemFile {
         if ($file.filemode -eq 'DIRECTORY' -or $file.filemode -eq 'DIR') {
             if ($fileName -notin @('.', '..')) {
                 Write-Verbose ('Descending into certificate file directory {0}/{1}.' -f $fileLocationValue.TrimEnd('/'), $fileName)
-                Get-NSCleanCertKeyFilesSystemFile -Session $Session -FileLocation (('{0}/{1}' -f $fileLocationValue.TrimEnd('/'), $fileName).TrimEnd('/') + '/') -VisitedLocation $VisitedLocation
+                Get-NSCleanCertKeyFilesSystemFile -Session $Session -FileLocation (('{0}/{1}' -f $fileLocationValue.TrimEnd('/'), $fileName).TrimEnd('/') + '/') -VisitedLocation $VisitedLocation -WarningSink $WarningSink
             }
             continue
         }
 
-        [pscustomobject] @{
+        [PSCustomObject] @{
             FileName = $fileName
             FileLocation = $fileLocationValue
             FileMode = $file.filemode
@@ -340,13 +218,21 @@ function Get-NSCleanCertKeyFilesPlan {
         [string[]] $ExcludeFile,
 
         [Parameter(Mandatory)]
-        [string[]] $ExcludeFilePattern
+        [string[]] $ExcludeFilePattern,
+
+        [string] $StatusLabel,
+
+        [string] $StatusValue
     )
 
     Write-Verbose ('Building NetScaler certificate cleanup plan for {0}.' -f $FileLocation)
+    $gatherWarnings = [System.Collections.Generic.List[string]]::new()
+    # Scanning is the slow part of a run, so it gets a progress bar of its own.
+    if ($StatusLabel) { Write-NSStatusItem -Label $StatusLabel -Value $StatusValue }
     $certKeys = @(Invoke-NSCleanCertKeyFilesOperation -Operation 'Get SSL certkeys' -ScriptBlock {
         Invoke-NSGetSSLCertKey -Session $Session -ReturnNullOnNotFound
     } | Where-Object { $_.certkey })
+    Write-NSStatusTick
     Write-Verbose ('Found {0} SSL certkey object(s).' -f $certKeys.Count)
 
     $referenceMap = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -354,6 +240,7 @@ function Get-NSCleanCertKeyFilesPlan {
     $runningConfig = Invoke-NSCleanCertKeyFilesOperation -Operation 'Get running configuration' -ScriptBlock {
         Invoke-NSGetNsrunningconfig -Session $Session -ReturnNullOnNotFound
     }
+    Write-NSStatusTick
     $runningConfigLines = @(Get-NSCleanCertKeyFilesRunningConfigLine $runningConfig)
     Write-Verbose ('Loaded {0} running configuration line(s) for conservative reference checks.' -f $runningConfigLines.Count)
 
@@ -373,10 +260,33 @@ function Get-NSCleanCertKeyFilesPlan {
             'Invoke-NSGetSSLCertKeySSLProfileBinding',
             'Invoke-NSGetSSLCertKeySSLVServerBinding'
         )) {
-            $binding = Invoke-NSCleanCertKeyFilesOptionalCertKeyReferenceOperation -ReferenceMap $referenceMap -CertKey $name -Operation ('{0} for certkey {1}' -f $bindingCommand, $name) -ScriptBlock {
-                & $bindingCommand -Session $Session -CertKey $name -ReturnNullOnNotFound
+            $bindingOperation = '{0} for certkey {1}' -f $bindingCommand, $name
+            $binding = try {
+                Invoke-NSCleanCertKeyFilesOperation -Operation $bindingOperation -ScriptBlock {
+                    & $bindingCommand -Session $Session -CertKey $name -ReturnNullOnNotFound
+                }
+            } catch {
+                # If an optional reference check fails, keep this certkey instead of risking a bad delete.
+                Add-NSCleanCertKeyReference -ReferenceMap $referenceMap -CertKey $name -Reason ('reference check failed: {0}' -f $bindingOperation)
+                Add-NSCleanCertKeyFilesWarning -Sink $gatherWarnings -Message ('Skipping cleanup for SSL certkey "{0}" because reference check "{1}" failed. {2}' -f $name, $bindingOperation, $_.Exception.Message)
+                Write-Verbose ('Certkey "{0}" marked non-removable because optional reference check failed.' -f $name)
+                $null
             }
-            if (Test-NSCleanCertKeyFilesObjectHasValue -InputObject $binding) {
+
+            # Binding APIs can echo only the requested certkey name; that alone is not a real reference.
+            $bindingHasValue = @(
+                foreach ($item in (ConvertTo-NSCleanCertKeyFilesArray $binding)) {
+                    if ($null -eq $item) { continue }
+                    foreach ($property in $item.PSObject.Properties) {
+                        if ($property.Name -in @('certkey', 'certkeyname')) { continue }
+                        if ($null -eq $property.Value) { continue }
+                        if ($property.Value -is [string] -and [string]::IsNullOrWhiteSpace($property.Value)) { continue }
+                        if ($property.Value -is [System.Array] -and $property.Value.Count -eq 0) { continue }
+                        $true
+                    }
+                }
+            ).Count -gt 0
+            if ($bindingHasValue) {
                 Add-NSCleanCertKeyReference -ReferenceMap $referenceMap -CertKey $name -Reason $bindingCommand
             }
         }
@@ -384,6 +294,7 @@ function Get-NSCleanCertKeyFilesPlan {
         if (Test-NSCleanCertKeyFilesRunningConfigReference -Line $runningConfigLines -Value $name -CertKeyDeclarationName $name) {
             Add-NSCleanCertKeyReference -ReferenceMap $referenceMap -CertKey $name -Reason 'running config'
         }
+        Write-NSStatusTick
     }
 
     $certLinks = try {
@@ -393,9 +304,10 @@ function Get-NSCleanCertKeyFilesPlan {
     } catch {
         $reason = 'reference check failed: Get SSL certificate links'
         Add-NSCleanCertKeyReferenceForAll -ReferenceMap $referenceMap -CertKey $certKeys -Reason $reason
-        Write-Warning ('Skipping certkey cleanup for this run because reference check "Get SSL certificate links" failed. {0}' -f $_.Exception.Message)
+        Add-NSCleanCertKeyFilesWarning -Sink $gatherWarnings -Message ('Skipping certkey cleanup for this run because reference check "Get SSL certificate links" failed. {0}' -f $_.Exception.Message)
         $null
     }
+    Write-NSStatusTick
     foreach ($link in (ConvertTo-NSCleanCertKeyFilesArray $certLinks)) {
         if ($link.certkeyname -and $link.linkcertkeyname) {
             Add-NSCleanCertKeyReference -ReferenceMap $referenceMap -CertKey $link.certkeyname -Reason ('linked to {0}' -f $link.linkcertkeyname)
@@ -410,9 +322,10 @@ function Get-NSCleanCertKeyFilesPlan {
     } catch {
         $reason = 'reference check failed: Get VPN global SSL certkey bindings'
         Add-NSCleanCertKeyReferenceForAll -ReferenceMap $referenceMap -CertKey $certKeys -Reason $reason
-        Write-Warning ('Skipping certkey cleanup for this run because reference check "Get VPN global SSL certkey bindings" failed. {0}' -f $_.Exception.Message)
+        Add-NSCleanCertKeyFilesWarning -Sink $gatherWarnings -Message ('Skipping certkey cleanup for this run because reference check "Get VPN global SSL certkey bindings" failed. {0}' -f $_.Exception.Message)
         $null
     }
+    Write-NSStatusTick
     foreach ($vpnBinding in (ConvertTo-NSCleanCertKeyFilesArray $vpnBindings)) {
         Add-NSCleanCertKeyReference -ReferenceMap $referenceMap -CertKey $vpnBinding.certkeyname -Reason 'VPN global binding'
     }
@@ -424,9 +337,10 @@ function Get-NSCleanCertKeyFilesPlan {
     } catch {
         $reason = 'reference check failed: Get authentication SAML actions'
         Add-NSCleanCertKeyReferenceForAll -ReferenceMap $referenceMap -CertKey $certKeys -Reason $reason
-        Write-Warning ('Skipping certkey cleanup for this run because reference check "Get authentication SAML actions" failed. {0}' -f $_.Exception.Message)
+        Add-NSCleanCertKeyFilesWarning -Sink $gatherWarnings -Message ('Skipping certkey cleanup for this run because reference check "Get authentication SAML actions" failed. {0}' -f $_.Exception.Message)
         $null
     }
+    Write-NSStatusTick
     foreach ($samlAction in (ConvertTo-NSCleanCertKeyFilesArray $samlActions)) {
         Add-NSCleanCertKeyReference -ReferenceMap $referenceMap -CertKey $samlAction.samlidpcertname -Reason 'SAML IdP certificate'
         Add-NSCleanCertKeyReference -ReferenceMap $referenceMap -CertKey $samlAction.samlsigningcertname -Reason 'SAML signing certificate'
@@ -448,9 +362,10 @@ function Get-NSCleanCertKeyFilesPlan {
     } catch {
         $reason = 'reference check failed: Get SSL profiles'
         $fileReferenceFailures.Add($reason) | Out-Null
-        Write-Warning ('Skipping certificate file cleanup for this run because reference check "Get SSL profiles" failed. {0}' -f $_.Exception.Message)
+        Add-NSCleanCertKeyFilesWarning -Sink $gatherWarnings -Message ('Skipping certificate file cleanup for this run because reference check "Get SSL profiles" failed. {0}' -f $_.Exception.Message)
         $null
     }
+    Write-NSStatusTick
     foreach ($sslProfile in (ConvertTo-NSCleanCertKeyFilesArray $sslProfiles)) {
         $name = Get-NSCleanCertKeyFilesName -Path $sslProfile.dhfile
         if ($name) { $dhFiles.Add($name) | Out-Null }
@@ -462,9 +377,10 @@ function Get-NSCleanCertKeyFilesPlan {
     } catch {
         $reason = 'reference check failed: Get SSL vServers'
         $fileReferenceFailures.Add($reason) | Out-Null
-        Write-Warning ('Skipping certificate file cleanup for this run because reference check "Get SSL vServers" failed. {0}' -f $_.Exception.Message)
+        Add-NSCleanCertKeyFilesWarning -Sink $gatherWarnings -Message ('Skipping certificate file cleanup for this run because reference check "Get SSL vServers" failed. {0}' -f $_.Exception.Message)
         $null
     }
+    Write-NSStatusTick
     foreach ($sslVServer in (ConvertTo-NSCleanCertKeyFilesArray $sslVServers)) {
         $name = Get-NSCleanCertKeyFilesName -Path $sslVServer.dhfile
         if ($name) { $dhFiles.Add($name) | Out-Null }
@@ -475,7 +391,7 @@ function Get-NSCleanCertKeyFilesPlan {
         $name = $certKey.certkey
         $excluded = $ExcludeCertKey -contains $name
         $referenceReasons = if ($referenceMap.Contains($name)) { @($referenceMap[$name]) } else { @() }
-        [pscustomobject] @{
+        [PSCustomObject] @{
             PSTypeName = 'NetScalerToolkit.CertKeyCleanup.CertKey'
             CertKey = $name
             Status = $certKey.status
@@ -488,10 +404,12 @@ function Get-NSCleanCertKeyFilesPlan {
         }
     }
 
-    $filePlan = foreach ($file in (Get-NSCleanCertKeyFilesSystemFile -Session $Session -FileLocation $FileLocation)) {
+    $systemFileList = @(Get-NSCleanCertKeyFilesSystemFile -Session $Session -FileLocation $FileLocation -WarningSink $gatherWarnings)
+    Write-NSStatusTick
+    $filePlan = foreach ($file in $systemFileList) {
         $fileName = $file.FileName
         $referenceReasons = [System.Collections.Generic.List[string]]::new()
-        if (Test-NSCleanCertKeyFilesExcludedFile -FileName $fileName -ExcludeFile $ExcludeFile -ExcludeFilePattern $ExcludeFilePattern) { $referenceReasons.Add('excluded file') | Out-Null }
+        if (($ExcludeFile -contains $fileName) -or (@($ExcludeFilePattern | Where-Object { $fileName -like $_ }).Count -gt 0)) { $referenceReasons.Add('excluded file') | Out-Null }
         if ($referencedFiles.Contains($fileName)) { $referenceReasons.Add('installed sslcertkey') | Out-Null }
         if ($dhFiles.Contains($fileName)) { $referenceReasons.Add('SSL DH file') | Out-Null }
         foreach ($failure in $fileReferenceFailures) { $referenceReasons.Add($failure) | Out-Null }
@@ -499,7 +417,7 @@ function Get-NSCleanCertKeyFilesPlan {
             $referenceReasons.Add('running config') | Out-Null
         }
 
-        [pscustomobject] @{
+        [PSCustomObject] @{
             PSTypeName = 'NetScalerToolkit.CertKeyCleanup.File'
             FileName = $fileName
             FileLocation = $file.FileLocation
@@ -513,7 +431,18 @@ function Get-NSCleanCertKeyFilesPlan {
     Write-Verbose ('Cleanup plan contains {0} removable certkey(s) and {1} removable file(s).' -f $removableCertKeyNames.Count, $removableFileNames.Count)
     if ($removableCertKeyNames.Count -gt 0) { Write-Debug ('Removable certkeys: {0}' -f ($removableCertKeyNames -join ', ')) }
     if ($removableFileNames.Count -gt 0) { Write-Debug ('Removable files: {0}' -f ($removableFileNames -join ', ')) }
-    [pscustomobject] @{
+    if ($StatusLabel) {
+        $scanDetail = '{0} certkey(s), {1} file(s), {2} removable' -f @($certKeyPlan).Count, @($filePlan).Count, ($removableCertKeyNames.Count + $removableFileNames.Count)
+        if ($gatherWarnings.Count -gt 0) {
+            Write-NSStatusResult -Status WARN -Detail $scanDetail -Note ($gatherWarnings -join ' ')
+        } else {
+            Write-NSStatusResult -Status OK -Detail $scanDetail
+        }
+        foreach ($gatherWarning in $gatherWarnings) { Write-NSCleanCertKeyFilesWarning -Message $gatherWarning }
+    } elseif ($gatherWarnings.Count -gt 0) {
+        foreach ($gatherWarning in $gatherWarnings) { Write-Warning $gatherWarning }
+    }
+    [PSCustomObject] @{
         CertKeys = @($certKeyPlan)
         Files = @($filePlan)
     }
@@ -562,6 +491,10 @@ function Invoke-NSCleanCertKeyFiles {
     .EXAMPLE
         $session = Connect-NSNode -ManagementUrl 'https://ns-01.domain.local' -Credential (Get-Credential) -HA -PassThru
         Invoke-NSCleanCertKeyFiles -Session $session -PassThru
+    .LINK
+        https://netscalertoolkit.j81.nl/module/reference/common/cert-key-files/clean/
+    .LINK
+        https://netscalertoolkit.j81.nl/
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High', DefaultParameterSetName = 'Session')]
     param(
@@ -626,7 +559,22 @@ function Invoke-NSCleanCertKeyFiles {
     }
 
     $primarySession = if ($Session.PrimarySession -and $Session.PrimarySession.Session) { $Session.PrimarySession.Session } else { $Session }
-    $nodeSessions = @(Get-NSCleanCertKeyFilesNodeSession -Session $Session)
+
+    # HA sessions expose node-specific sessions so file removal can run on both nodes.
+    $nodeSessions = [System.Collections.Generic.List[object]]::new()
+    if ($Session.PrimarySession -and $Session.PrimarySession.Session) {
+        $nodeSessions.Add($Session.PrimarySession) | Out-Null
+    }
+    if ($Session.SecondarySession -and $Session.SecondarySession.Session) {
+        $nodeSessions.Add($Session.SecondarySession) | Out-Null
+    }
+    if ($nodeSessions.Count -eq 0) {
+        $nodeSessions.Add([PSCustomObject] @{
+            State = if ($Session.IsPrimary) { 'Primary' } elseif ($Session.IsSecondary) { 'Secondary' } else { 'Connected' }
+            Session = $Session
+        }) | Out-Null
+    }
+
     $changed = $false
     $savedConfig = $false
     $initialPlan = $null
@@ -634,41 +582,78 @@ function Invoke-NSCleanCertKeyFiles {
     $removedFiles = [System.Collections.Generic.List[object]]::new()
     Write-Verbose ('Using {0} node session(s) for file cleanup: {1}.' -f $nodeSessions.Count, (($nodeSessions | ForEach-Object { $_.State }) -join ', '))
 
+    $null = Import-NSConsoleStatus
+    Write-NSStatusTitle -Title 'Invoke-NSCleanCertKeyFiles' -Subtitle @(
+        'Location : {0}' -f $FileLocation
+        'Nodes    : {0}' -f (($nodeSessions | ForEach-Object { $_.State }) -join ', ')
+        'Mode     : {0}' -f $(if ($WhatIfPreference) { 'WhatIf, no changes are made' } else { 'live' })
+    )
+
     if ($Backup) {
         $backupName = 'CleanCerts_{0}' -f (Get-Date -Format 'yyyyMMdd_HHmm')
         if ($PSCmdlet.ShouldProcess('NetScaler configuration', ('Create full system backup {0}' -f $backupName))) {
-            Invoke-NSCleanCertKeyFilesOperation -Operation 'Save nsconfig before backup' -ScriptBlock {
-                Invoke-NSSaveNSConfig -Session $primarySession -All $true -Confirm:$false
-            } | Out-Null
-            Invoke-NSCleanCertKeyFilesOperation -Operation ('Create system backup {0}' -f $backupName) -ScriptBlock {
-                Invoke-NSCreateSystemBackup -Session $primarySession -FileName $backupName -Level full -Comment 'Backup created by Invoke-NSCleanCertKeyFiles' -Confirm:$false
-            } | Out-Null
+            Write-NSStatusSection -Title 'Backup'
+            Write-NSStatusItem -Label 'Create system backup' -Value $backupName
+            try {
+                Invoke-NSCleanCertKeyFilesOperation -Operation 'Save nsconfig before backup' -ScriptBlock {
+                    Invoke-NSSaveNSConfig -Session $primarySession -All $true -Confirm:$false
+                } | Out-Null
+                Invoke-NSCleanCertKeyFilesOperation -Operation ('Create system backup {0}' -f $backupName) -ScriptBlock {
+                    Invoke-NSCreateSystemBackup -Session $primarySession -FileName $backupName -Level full -Comment 'Backup created by Invoke-NSCleanCertKeyFiles' -Confirm:$false
+                } | Out-Null
+                Write-NSStatusResult -Status OK -ShowDuration
+            } catch {
+                Write-NSStatusResult -Status FAIL -ErrorRecord $_
+                throw
+            }
         }
     }
 
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         Write-Verbose ('Starting certkey cleanup attempt {0}/{1}.' -f $attempt, $Attempts)
-        $plan = Get-NSCleanCertKeyFilesPlan -Session $primarySession -FileLocation $FileLocation -ExcludeCertKey $ExcludeCertKey -ExcludeFile $ExcludeFile -ExcludeFilePattern $ExcludeFilePattern
+        Write-NSStatusSection -Title ('Remove certkeys, attempt {0}/{1}' -f $attempt, $Attempts)
+        $plan = Get-NSCleanCertKeyFilesPlan -Session $primarySession -FileLocation $FileLocation -ExcludeCertKey $ExcludeCertKey -ExcludeFile $ExcludeFile -ExcludeFilePattern $ExcludeFilePattern -StatusLabel 'Scan configuration' -StatusValue ('attempt {0}/{1}' -f $attempt, $Attempts)
         if ($null -eq $initialPlan) { $initialPlan = $plan }
         $removableCertKeys = @($plan.CertKeys | Where-Object { $_.Removable })
         Write-Verbose ('Attempt {0}/{1} found {2} removable certkey object(s).' -f $attempt, $Attempts, $removableCertKeys.Count)
         if ($removableCertKeys.Count -eq 0) { break }
 
         foreach ($certKey in $removableCertKeys) {
+            Write-NSStatusItem -Label $certKey.CertKey -Value $certKey.Status
             if ($PSCmdlet.ShouldProcess($certKey.CertKey, ('Delete unused SSL certkey, attempt {0}/{1}' -f $attempt, $Attempts))) {
-                Invoke-NSCleanCertKeyFilesOperation -Operation ('Delete SSL certkey {0}' -f $certKey.CertKey) -ScriptBlock {
-                    Invoke-NSDeleteSSLCertKey -Session $primarySession -CertKey $certKey.CertKey -Confirm:$false
-                } | Out-Null
+                try {
+                    Invoke-NSCleanCertKeyFilesOperation -Operation ('Delete SSL certkey {0}' -f $certKey.CertKey) -ScriptBlock {
+                        Invoke-NSDeleteSSLCertKey -Session $primarySession -CertKey $certKey.CertKey -Confirm:$false
+                    } | Out-Null
+                    $removedCertKeys.Add($certKey) | Out-Null
+                    Write-Debug ('Removed SSL certkey: {0}' -f $certKey.CertKey)
+                    $changed = $true
+                    Write-NSStatusResult -Status OK -Detail 'removed'
+                } catch {
+                    Write-NSStatusResult -Status FAIL -ErrorRecord $_
+                    throw
+                }
+            } elseif ($WhatIfPreference) {
+                # Nothing was actually deleted under -WhatIf; record it so PassThru/Summary still preview it.
                 $removedCertKeys.Add($certKey) | Out-Null
-                Write-Debug ('Removed SSL certkey: {0}' -f $certKey.CertKey)
                 $changed = $true
+                Write-NSStatusResult -Status SKIP -Detail 'WhatIf, would be removed'
+            } else {
+                Write-NSStatusResult -Status SKIP -Detail 'declined'
             }
+        }
+
+        if ($WhatIfPreference) {
+            # Without a real deletion the next attempt would just find the same removable certkeys again.
+            break
         }
     }
 
     Write-Verbose 'Refreshing cleanup plan before deleting certificate files.'
-    $plan = Get-NSCleanCertKeyFilesPlan -Session $primarySession -FileLocation $FileLocation -ExcludeCertKey $ExcludeCertKey -ExcludeFile $ExcludeFile -ExcludeFilePattern $ExcludeFilePattern
-    foreach ($file in @($plan.Files | Where-Object { $_.Removable })) {
+    Write-NSStatusSection -Title 'Remove certificate files'
+    $plan = Get-NSCleanCertKeyFilesPlan -Session $primarySession -FileLocation $FileLocation -ExcludeCertKey $ExcludeCertKey -ExcludeFile $ExcludeFile -ExcludeFilePattern $ExcludeFilePattern -StatusLabel 'Scan configuration'
+    $removableFiles = @($plan.Files | Where-Object { $_.Removable })
+    foreach ($file in $removableFiles) {
         foreach ($nodeSession in $nodeSessions) {
             $targetSession = $nodeSession.Session
             $target = '{0}/{1} [{2}]' -f $file.FileLocation.TrimEnd('/'), $file.FileName, $nodeSession.State
@@ -677,7 +662,9 @@ function Invoke-NSCleanCertKeyFiles {
                     Invoke-NSGetSystemFile -Session $targetSession -FileName $file.FileName -FileLocation $file.FileLocation -ReturnNullOnNotFound
                 }
             } catch {
-                Write-Warning ('Skipping file cleanup for {0} because the existence check failed. {1}' -f $target, $_.Exception.Message)
+                Write-NSStatusItem -Label $file.FileName -Value $nodeSession.State
+                Write-NSStatusResult -Status WARN -Detail 'existence check failed' -Note ('Skipping {0}. {1}' -f $target, $_.Exception.Message)
+                Write-NSCleanCertKeyFilesWarning -Message ('Skipping file cleanup for {0} because the existence check failed. {1}' -f $target, $_.Exception.Message)
                 continue
             }
 
@@ -687,11 +674,12 @@ function Invoke-NSCleanCertKeyFiles {
             }
 
             if ($PSCmdlet.ShouldProcess($target, 'Delete unused certificate file')) {
+                Write-NSStatusItem -Label $file.FileName -Value $nodeSession.State
                 try {
                     Invoke-NSCleanCertKeyFilesOperation -Operation ('Delete system file {0}' -f $target) -ScriptBlock {
                         Invoke-NSDeleteSystemFile -Session $targetSession -FileName $file.FileName -FileLocation $file.FileLocation -Confirm:$false
                     } | Out-Null
-                    $removedFiles.Add([pscustomobject] @{
+                    $removedFiles.Add([PSCustomObject] @{
                         PSTypeName = 'NetScalerToolkit.CertKeyCleanup.RemovedFile'
                         FileName = $file.FileName
                         FileLocation = $file.FileLocation
@@ -700,38 +688,109 @@ function Invoke-NSCleanCertKeyFiles {
                     }) | Out-Null
                     Write-Debug ('Removed certificate file: {0}' -f $target)
                     $changed = $true
+                    Write-NSStatusResult -Status OK -Detail 'removed'
                 } catch {
-                    Write-Warning ('Deleting file {0} failed. Cleanup will continue with the next file. {1}' -f $target, $_.Exception.Message)
+                    Write-NSStatusResult -Status WARN -Detail $_.Exception.Message -Note ('Deleting {0} failed. Cleanup continues with the next file.' -f $target)
+                    Write-NSCleanCertKeyFilesWarning -Message ('Deleting file {0} failed. Cleanup will continue with the next file. {1}' -f $target, $_.Exception.Message)
                 }
+            } elseif ($WhatIfPreference) {
+                # Nothing was actually deleted under -WhatIf; record it so PassThru/Summary still preview it.
+                Write-NSStatusItem -Label $file.FileName -Value $nodeSession.State
+                $removedFiles.Add([PSCustomObject] @{
+                    PSTypeName = 'NetScalerToolkit.CertKeyCleanup.RemovedFile'
+                    FileName = $file.FileName
+                    FileLocation = $file.FileLocation
+                    NodeState = $nodeSession.State
+                    Target = $target
+                }) | Out-Null
+                $changed = $true
+                Write-NSStatusResult -Status SKIP -Detail 'WhatIf, would be removed'
             }
         }
     }
 
     Write-Verbose 'Building final cleanup plan.'
-    $finalPlan = Get-NSCleanCertKeyFilesPlan -Session $primarySession -FileLocation $FileLocation -ExcludeCertKey $ExcludeCertKey -ExcludeFile $ExcludeFile -ExcludeFilePattern $ExcludeFilePattern
-    foreach ($expiredCertKey in @($finalPlan.CertKeys | Where-Object { $_.Status -eq 'Expired' })) {
-        Write-Warning ('Certificate {0} is expired and remains configured.' -f $expiredCertKey.CertKey)
+    Write-NSStatusSection -Title 'Certificate expiry'
+    $finalPlan = Get-NSCleanCertKeyFilesPlan -Session $primarySession -FileLocation $FileLocation -ExcludeCertKey $ExcludeCertKey -ExcludeFile $ExcludeFile -ExcludeFilePattern $ExcludeFilePattern -StatusLabel 'Final scan'
+    $expiredCertKeys = @($finalPlan.CertKeys | Where-Object { $_.Status -eq 'Expired' })
+    # Expired certkeys report 0 days left, so they must not be counted twice.
+    $expiringCertKeys = @($finalPlan.CertKeys | Where-Object { $_.Status -ne 'Expired' -and $null -ne $_.DaysToExpiration -and $_.DaysToExpiration -ge 0 -and $_.DaysToExpiration -le $ExpirationDays })
+    foreach ($expiredCertKey in $expiredCertKeys) {
+        Write-NSStatusItem -Label $expiredCertKey.CertKey -Value 'expired'
+        Write-NSStatusResult -Status WARN -Detail 'expired and still configured'
+        Write-NSCleanCertKeyFilesWarning -Message ('Certificate {0} is expired and remains configured.' -f $expiredCertKey.CertKey)
     }
 
-    foreach ($expiringCertKey in @($finalPlan.CertKeys | Where-Object { $null -ne $_.DaysToExpiration -and $_.DaysToExpiration -ge 0 -and $_.DaysToExpiration -le $ExpirationDays })) {
-        Write-Warning ('Certificate {0} expires in {1} day(s).' -f $expiringCertKey.CertKey, $expiringCertKey.DaysToExpiration)
+    foreach ($expiringCertKey in $expiringCertKeys) {
+        Write-NSStatusItem -Label $expiringCertKey.CertKey -Value 'expiring'
+        Write-NSStatusResult -Status WARN -Detail ('expires in {0} day(s)' -f $expiringCertKey.DaysToExpiration)
+        Write-NSCleanCertKeyFilesWarning -Message ('Certificate {0} expires in {1} day(s).' -f $expiringCertKey.CertKey, $expiringCertKey.DaysToExpiration)
+    }
+
+    if ($expiredCertKeys.Count -eq 0 -and $expiringCertKeys.Count -eq 0) {
+        Write-NSStatusItem -Label 'Expiry check' -Value ('within {0} day(s)' -f $ExpirationDays)
+        Write-NSStatusResult -Status OK -Detail 'no expired or expiring certkeys'
     }
 
     if ($changed -and -not $NoSaveConfig) {
         if ($PSCmdlet.ShouldProcess('NetScaler configuration', 'Save nsconfig')) {
-            Invoke-NSCleanCertKeyFilesOperation -Operation 'Save nsconfig after cleanup' -ScriptBlock {
-                Invoke-NSSaveNSConfig -Session $primarySession -All $true -Confirm:$false
-            } | Out-Null
-            $savedConfig = $true
+            Write-NSStatusSection -Title 'Save'
+            Write-NSStatusItem -Label 'Save NetScaler config' -Value 'nsconfig'
+            try {
+                Invoke-NSCleanCertKeyFilesOperation -Operation 'Save nsconfig after cleanup' -ScriptBlock {
+                    Invoke-NSSaveNSConfig -Session $primarySession -All $true -Confirm:$false
+                } | Out-Null
+                $savedConfig = $true
+                Write-NSStatusResult -Status OK -ShowDuration
+            } catch {
+                Write-NSStatusResult -Status FAIL -ErrorRecord $_
+                throw
+            }
         }
     }
 
-    $summaryObject = New-NSCleanCertKeyFilesSummary -InitialPlan $initialPlan -FinalPlan $finalPlan -RemovedCertKey @($removedCertKeys) -RemovedFile @($removedFiles) -Changed $changed -SavedConfig $savedConfig
-    $result = Add-NSCleanCertKeyFilesResultMetadata -Plan $finalPlan -RemovedCertKey @($removedCertKeys) -RemovedFile @($removedFiles)
+    $summaryObject = [PSCustomObject] @{
+        PSTypeName = 'NetScalerToolkit.CertKeyCleanup.Summary'
+        InitialCertKeys = @($initialPlan.CertKeys).Count
+        FinalCertKeys = @($finalPlan.CertKeys).Count
+        RemovedCertKeys = @($removedCertKeys).Count
+        RemainingRemovableCertKeys = @($finalPlan.CertKeys | Where-Object { $_.Removable }).Count
+        InitialFiles = @($initialPlan.Files).Count
+        FinalFiles = @($finalPlan.Files).Count
+        RemovedFiles = @($removedFiles).Count
+        RemainingRemovableFiles = @($finalPlan.Files | Where-Object { $_.Removable }).Count
+        Changed = $changed
+        SavedConfig = $savedConfig
+    }
+
+    $finalPlan | Add-Member -NotePropertyName RemovedCertKeys -NotePropertyValue @($removedCertKeys) -Force
+    $finalPlan | Add-Member -NotePropertyName RemovedFiles -NotePropertyValue @($removedFiles) -Force
+    $result = $finalPlan
 
     if ($Summary) {
-        Write-NSCleanCertKeyFilesSummary -Summary $summaryObject
+        # NoRecord: already counted by the steps above.
+        Write-NSStatusSection -Title $(if ($WhatIfPreference) { 'Results, WhatIf preview' } else { 'Results' })
+
+        Write-NSStatusItem -Label 'CertKeys' -Value ('{0} -> {1}' -f $summaryObject.InitialCertKeys, $summaryObject.FinalCertKeys)
+        $certKeyDetail = '{0} removed, {1} still removable' -f $summaryObject.RemovedCertKeys, $summaryObject.RemainingRemovableCertKeys
+        Write-NSStatusResult -Status $(if ($summaryObject.RemainingRemovableCertKeys -gt 0) { 'WARN' } else { 'OK' }) -Detail $certKeyDetail -NoRecord
+
+        Write-NSStatusItem -Label 'Files' -Value ('{0} -> {1}' -f $summaryObject.InitialFiles, $summaryObject.FinalFiles)
+        $fileDetail = '{0} removed, {1} still removable' -f $summaryObject.RemovedFiles, $summaryObject.RemainingRemovableFiles
+        Write-NSStatusResult -Status $(if ($summaryObject.RemainingRemovableFiles -gt 0) { 'WARN' } else { 'OK' }) -Detail $fileDetail -NoRecord
+
+        Write-NSStatusItem -Label 'Configuration' -Value $(if ($summaryObject.Changed) { 'changed' } else { 'unchanged' })
+        if (-not $summaryObject.Changed) {
+            Write-NSStatusResult -Status SKIP -Detail 'nothing to save' -NoRecord
+        } elseif ($summaryObject.SavedConfig) {
+            Write-NSStatusResult -Status OK -Detail 'nsconfig saved' -NoRecord
+        } else {
+            Write-NSStatusResult -Status WARN -Detail 'not saved, changes are lost on reboot' -NoRecord
+        }
     }
+
+    # Reports the run timer started by the title.
+    Write-NSStatusSummary -Title 'Run summary'
 
     if ($PassThru -or $Summary) {
         return $result
@@ -739,210 +798,314 @@ function Invoke-NSCleanCertKeyFiles {
 }
 
 # SIG # Begin signature block
-# MIImdwYJKoZIhvcNAQcCoIImaDCCJmQCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MII6AgYJKoZIhvcNAQcCoII58zCCOe8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCVSobklF/kkKBu
-# Ns2MJ6go+cQegrp5JUK1JrPb+3OF9qCCIAowggYUMIID/KADAgECAhB6I67aU2mW
-# D5HIPlz0x+M/MA0GCSqGSIb3DQEBDAUAMFcxCzAJBgNVBAYTAkdCMRgwFgYDVQQK
-# Ew9TZWN0aWdvIExpbWl0ZWQxLjAsBgNVBAMTJVNlY3RpZ28gUHVibGljIFRpbWUg
-# U3RhbXBpbmcgUm9vdCBSNDYwHhcNMjEwMzIyMDAwMDAwWhcNMzYwMzIxMjM1OTU5
-# WjBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSwwKgYD
-# VQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNjCCAaIwDQYJ
-# KoZIhvcNAQEBBQADggGPADCCAYoCggGBAM2Y2ENBq26CK+z2M34mNOSJjNPvIhKA
-# VD7vJq+MDoGD46IiM+b83+3ecLvBhStSVjeYXIjfa3ajoW3cS3ElcJzkyZlBnwDE
-# JuHlzpbN4kMH2qRBVrjrGJgSlzzUqcGQBaCxpectRGhhnOSwcjPMI3G0hedv2eNm
-# GiUbD12OeORN0ADzdpsQ4dDi6M4YhoGE9cbY11XxM2AVZn0GiOUC9+XE0wI7CQKf
-# OUfigLDn7i/WeyxZ43XLj5GVo7LDBExSLnh+va8WxTlA+uBvq1KO8RSHUQLgzb1g
-# bL9Ihgzxmkdp2ZWNuLc+XyEmJNbD2OIIq/fWlwBp6KNL19zpHsODLIsgZ+WZ1AzC
-# s1HEK6VWrxmnKyJJg2Lv23DlEdZlQSGdF+z+Gyn9/CRezKe7WNyxRf4e4bwUtrYE
-# 2F5Q+05yDD68clwnweckKtxRaF0VzN/w76kOLIaFVhf5sMM/caEZLtOYqYadtn03
-# 4ykSFaZuIBU9uCSrKRKTPJhWvXk4CllgrwIDAQABo4IBXDCCAVgwHwYDVR0jBBgw
-# FoAU9ndq3T/9ARP/FqFsggIv0Ao9FCUwHQYDVR0OBBYEFF9Y7UwxeqJhQo1SgLqz
-# YZcZojKbMA4GA1UdDwEB/wQEAwIBhjASBgNVHRMBAf8ECDAGAQH/AgEAMBMGA1Ud
-# JQQMMAoGCCsGAQUFBwMIMBEGA1UdIAQKMAgwBgYEVR0gADBMBgNVHR8ERTBDMEGg
-# P6A9hjtodHRwOi8vY3JsLnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1lU3Rh
-# bXBpbmdSb290UjQ2LmNybDB8BggrBgEFBQcBAQRwMG4wRwYIKwYBBQUHMAKGO2h0
-# dHA6Ly9jcnQuc2VjdGlnby5jb20vU2VjdGlnb1B1YmxpY1RpbWVTdGFtcGluZ1Jv
-# b3RSNDYucDdjMCMGCCsGAQUFBzABhhdodHRwOi8vb2NzcC5zZWN0aWdvLmNvbTAN
-# BgkqhkiG9w0BAQwFAAOCAgEAEtd7IK0ONVgMnoEdJVj9TC1ndK/HYiYh9lVUacah
-# RoZ2W2hfiEOyQExnHk1jkvpIJzAMxmEc6ZvIyHI5UkPCbXKspioYMdbOnBWQUn73
-# 3qMooBfIghpR/klUqNxx6/fDXqY0hSU1OSkkSivt51UlmJElUICZYBodzD3M/SFj
-# eCP59anwxs6hwj1mfvzG+b1coYGnqsSz2wSKr+nDO+Db8qNcTbJZRAiSazr7KyUJ
-# Go1c+MScGfG5QHV+bps8BX5Oyv9Ct36Y4Il6ajTqV2ifikkVtB3RNBUgwu/mSiSU
-# ice/Jp/q8BMk/gN8+0rNIE+QqU63JoVMCMPY2752LmESsRVVoypJVt8/N3qQ1c6F
-# ibbcRabo3azZkcIdWGVSAdoLgAIxEKBeNh9AQO1gQrnh1TA8ldXuJzPSuALOz1Uj
-# b0PCyNVkWk7hkhVHfcvBfI8NtgWQupiaAeNHe0pWSGH2opXZYKYG4Lbukg7HpNi/
-# KqJhue2Keak6qH9A8CeEOB7Eob0Zf+fU+CCQaL0cJqlmnx9HCDxF+3BLbUufrV64
-# EbTI40zqegPZdA+sXCmbcZy6okx/SjwsusWRItFA3DE8MORZeFb6BmzBtqKJ7l93
-# 9bbKBy2jvxcJI98Va95Q5JnlKor3m0E7xpMeYRriWklUPsetMSf2NvUQa/E5vVye
-# fQIwggZFMIIELaADAgECAhAIMk+dt9qRb2Pk8qM8Xl1RMA0GCSqGSIb3DQEBCwUA
-# MFYxCzAJBgNVBAYTAlBMMSEwHwYDVQQKExhBc3NlY28gRGF0YSBTeXN0ZW1zIFMu
-# QS4xJDAiBgNVBAMTG0NlcnR1bSBDb2RlIFNpZ25pbmcgMjAyMSBDQTAeFw0yNDA0
-# MDQxNDA0MjRaFw0yNzA0MDQxNDA0MjNaMGsxCzAJBgNVBAYTAk5MMRIwEAYDVQQH
-# DAlTY2hpam5kZWwxIzAhBgNVBAoMGkpvaG4gQmlsbGVrZW5zIENvbnN1bHRhbmN5
-# MSMwIQYDVQQDDBpKb2huIEJpbGxla2VucyBDb25zdWx0YW5jeTCCAaIwDQYJKoZI
-# hvcNAQEBBQADggGPADCCAYoCggGBAMslntDbSQwHZXwFhmibivbnd0Qfn6sqe/6f
-# os3pKzKxEsR907RkDMet2x6RRg3eJkiIr3TFPwqBooyXXgK3zxxpyhGOcuIqyM9J
-# 28DVf4kUyZHsjGO/8HFjrr3K1hABNUszP0o7H3o6J31eqV1UmCXYhQlNoW9FOmRC
-# 1amlquBmh7w4EKYEytqdmdOBavAD5Xq4vLPxNP6kyA+B2YTtk/xM27TghtbwFGKn
-# u9Vwnm7dFcpLxans4ONt2OxDQOMA5NwgcUv/YTpjhq9qoz6ivG55NRJGNvUXsM3w
-# 2o7dR6Xh4MuEGrTSrOWGg2A5EcLH1XqQtkF5cZnAPM8W/9HUp8ggornWnFVQ9/6M
-# ga+ermy5wy5XrmQpN+x3u6tit7xlHk1Hc+4XY4a4ie3BPXG2PhJhmZAn4ebNSBwN
-# Hh8z7WTT9X9OFERepGSytZVeEP7hgyptSLcuhpwWeR4QdBb7dV++4p3PsAUQVHFp
-# wkSbrRTv4EiJ0Lcz9P1HPGFoHiFAQQIDAQABo4IBeDCCAXQwDAYDVR0TAQH/BAIw
-# ADA9BgNVHR8ENjA0MDKgMKAuhixodHRwOi8vY2NzY2EyMDIxLmNybC5jZXJ0dW0u
-# cGwvY2NzY2EyMDIxLmNybDBzBggrBgEFBQcBAQRnMGUwLAYIKwYBBQUHMAGGIGh0
-# dHA6Ly9jY3NjYTIwMjEub2NzcC1jZXJ0dW0uY29tMDUGCCsGAQUFBzAChilodHRw
-# Oi8vcmVwb3NpdG9yeS5jZXJ0dW0ucGwvY2NzY2EyMDIxLmNlcjAfBgNVHSMEGDAW
-# gBTddF1MANt7n6B0yrFu9zzAMsBwzTAdBgNVHQ4EFgQUO6KtBpOBgmrlANVAnyiQ
-# C6W6lJwwSwYDVR0gBEQwQjAIBgZngQwBBAEwNgYLKoRoAYb2dwIFAQQwJzAlBggr
-# BgEFBQcCARYZaHR0cHM6Ly93d3cuY2VydHVtLnBsL0NQUzATBgNVHSUEDDAKBggr
-# BgEFBQcDAzAOBgNVHQ8BAf8EBAMCB4AwDQYJKoZIhvcNAQELBQADggIBAEQsN8wg
-# PMdWVkwHPPTN+jKpdns5AKVFjcn00psf2NGVVgWWNQBIQc9lEuTBWb54IK6Ga3hx
-# QRZfnPNo5HGl73YLmFgdFQrFzZ1lnaMdIcyh8LTWv6+XNWfoyCM9wCp4zMIDPOs8
-# LKSMQqA/wRgqiACWnOS4a6fyd5GUIAm4CuaptpFYr90l4Dn/wAdXOdY32UhgzmSu
-# xpUbhD8gVJUaBNVmQaRqeU8y49MxiVrUKJXde1BCrtR9awXbqembc7Nqvmi60tYK
-# lD27hlpKtj6eGPjkht0hHEsgzU0Fxw7ZJghYG2wXfpF2ziN893ak9Mi/1dmCNmor
-# GOnybKYfT6ff6YTCDDNkod4egcMZdOSv+/Qv+HAeIgEvrxE9QsGlzTwbRtbm6gwY
-# YcVBs/SsVUdBn/TSB35MMxRhHE5iC3aUTkDbceo/XP3uFhVL4g2JZHpFfCSu2TQr
-# rzRn2sn07jfMvzeHArCOJgBW1gPqR3WrJ4hUxL06Rbg1gs9tU5HGGz9KNQMfQFQ7
-# 0Wz7UIhezGcFcRfkIfSkMmQYYpsc7rfzj+z0ThfDVzzJr2dMOFsMlfj1T6l22GBq
-# 9XQx0A4lcc5Fl9pRxbOuHHWFqIBD/BCEhwniOCySzqENd2N+oz8znKooSISStnkN
-# aYXt6xblJF2dx9Dn89FK7d1IquNxOwt0tI5dMIIGYjCCBMqgAwIBAgIRAKQpO24e
-# 3denNAiHrXpOtyQwDQYJKoZIhvcNAQEMBQAwVTELMAkGA1UEBhMCR0IxGDAWBgNV
-# BAoTD1NlY3RpZ28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGlt
-# ZSBTdGFtcGluZyBDQSBSMzYwHhcNMjUwMzI3MDAwMDAwWhcNMzYwMzIxMjM1OTU5
-# WjByMQswCQYDVQQGEwJHQjEXMBUGA1UECBMOV2VzdCBZb3Jrc2hpcmUxGDAWBgNV
-# BAoTD1NlY3RpZ28gTGltaXRlZDEwMC4GA1UEAxMnU2VjdGlnbyBQdWJsaWMgVGlt
-# ZSBTdGFtcGluZyBTaWduZXIgUjM2MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIIC
-# CgKCAgEA04SV9G6kU3jyPRBLeBIHPNyUgVNnYayfsGOyYEXrn3+SkDYTLs1crcw/
-# ol2swE1TzB2aR/5JIjKNf75QBha2Ddj+4NEPKDxHEd4dEn7RTWMcTIfm492TW22I
-# 8LfH+A7Ehz0/safc6BbsNBzjHTt7FngNfhfJoYOrkugSaT8F0IzUh6VUwoHdYDpi
-# ln9dh0n0m545d5A5tJD92iFAIbKHQWGbCQNYplqpAFasHBn77OqW37P9BhOASdmj
-# p3IijYiFdcA0WQIe60vzvrk0HG+iVcwVZjz+t5OcXGTcxqOAzk1frDNZ1aw8nFhG
-# EvG0ktJQknnJZE3D40GofV7O8WzgaAnZmoUn4PCpvH36vD4XaAF2CjiPsJWiY/j2
-# xLsJuqx3JtuI4akH0MmGzlBUylhXvdNVXcjAuIEcEQKtOBR9lU4wXQpISrbOT8ux
-# +96GzBq8TdbhoFcmYaOBZKlwPP7pOp5Mzx/UMhyBA93PQhiCdPfIVOCINsUY4U23
-# p4KJ3F1HqP3H6Slw3lHACnLilGETXRg5X/Fp8G8qlG5Y+M49ZEGUp2bneRLZoyHT
-# yynHvFISpefhBCV0KdRZHPcuSL5OAGWnBjAlRtHvsMBrI3AAA0Tu1oGvPa/4yeei
-# Ayu+9y3SLC98gDVbySnXnkujjhIh+oaatsk/oyf5R2vcxHahajMCAwEAAaOCAY4w
-# ggGKMB8GA1UdIwQYMBaAFF9Y7UwxeqJhQo1SgLqzYZcZojKbMB0GA1UdDgQWBBSI
-# YYyhKjdkgShgoZsx0Iz9LALOTzAOBgNVHQ8BAf8EBAMCBsAwDAYDVR0TAQH/BAIw
-# ADAWBgNVHSUBAf8EDDAKBggrBgEFBQcDCDBKBgNVHSAEQzBBMDUGDCsGAQQBsjEB
-# AgEDCDAlMCMGCCsGAQUFBwIBFhdodHRwczovL3NlY3RpZ28uY29tL0NQUzAIBgZn
-# gQwBBAIwSgYDVR0fBEMwQTA/oD2gO4Y5aHR0cDovL2NybC5zZWN0aWdvLmNvbS9T
-# ZWN0aWdvUHVibGljVGltZVN0YW1waW5nQ0FSMzYuY3JsMHoGCCsGAQUFBwEBBG4w
-# bDBFBggrBgEFBQcwAoY5aHR0cDovL2NydC5zZWN0aWdvLmNvbS9TZWN0aWdvUHVi
-# bGljVGltZVN0YW1waW5nQ0FSMzYuY3J0MCMGCCsGAQUFBzABhhdodHRwOi8vb2Nz
-# cC5zZWN0aWdvLmNvbTANBgkqhkiG9w0BAQwFAAOCAYEAAoE+pIZyUSH5ZakuPVKK
-# 4eWbzEsTRJOEjbIu6r7vmzXXLpJx4FyGmcqnFZoa1dzx3JrUCrdG5b//LfAxOGy9
-# Ph9JtrYChJaVHrusDh9NgYwiGDOhyyJ2zRy3+kdqhwtUlLCdNjFjakTSE+hkC9F5
-# ty1uxOoQ2ZkfI5WM4WXA3ZHcNHB4V42zi7Jk3ktEnkSdViVxM6rduXW0jmmiu71Z
-# pBFZDh7Kdens+PQXPgMqvzodgQJEkxaION5XRCoBxAwWwiMm2thPDuZTzWp/gUFz
-# i7izCmEt4pE3Kf0MOt3ccgwn4Kl2FIcQaV55nkjv1gODcHcD9+ZVjYZoyKTVWb4V
-# qMQy/j8Q3aaYd/jOQ66Fhk3NWbg2tYl5jhQCuIsE55Vg4N0DUbEWvXJxtxQQaVR5
-# xzhEI+BjJKzh3TQ026JxHhr2fuJ0mV68AluFr9qshgwS5SpN5FFtaSEnAwqZv3IS
-# +mlG50rK7W3qXbWwi4hmpylUfygtYLEdLQukNEX1jiOKMIIGgjCCBGqgAwIBAgIQ
-# NsKwvXwbOuejs902y8l1aDANBgkqhkiG9w0BAQwFADCBiDELMAkGA1UEBhMCVVMx
-# EzARBgNVBAgTCk5ldyBKZXJzZXkxFDASBgNVBAcTC0plcnNleSBDaXR5MR4wHAYD
-# VQQKExVUaGUgVVNFUlRSVVNUIE5ldHdvcmsxLjAsBgNVBAMTJVVTRVJUcnVzdCBS
-# U0EgQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkwHhcNMjEwMzIyMDAwMDAwWhcNMzgw
-# MTE4MjM1OTU5WjBXMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1p
-# dGVkMS4wLAYDVQQDEyVTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIFJvb3Qg
-# UjQ2MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAiJ3YuUVnnR3d6Lkm
-# gZpUVMB8SQWbzFoVD9mUEES0QUCBdxSZqdTkdizICFNeINCSJS+lV1ipnW5ihkQy
-# C0cRLWXUJzodqpnMRs46npiJPHrfLBOifjfhpdXJ2aHHsPHggGsCi7uE0awqKggE
-# /LkYw3sqaBia67h/3awoqNvGqiFRJ+OTWYmUCO2GAXsePHi+/JUNAax3kpqstbl3
-# vcTdOGhtKShvZIvjwulRH87rbukNyHGWX5tNK/WABKf+Gnoi4cmisS7oSimgHUI0
-# Wn/4elNd40BFdSZ1EwpuddZ+Wr7+Dfo0lcHflm/FDDrOJ3rWqauUP8hsokDoI7D/
-# yUVI9DAE/WK3Jl3C4LKwIpn1mNzMyptRwsXKrop06m7NUNHdlTDEMovXAIDGAvYy
-# nPt5lutv8lZeI5w3MOlCybAZDpK3Dy1MKo+6aEtE9vtiTMzz/o2dYfdP0KWZwZIX
-# bYsTIlg1YIetCpi5s14qiXOpRsKqFKqav9R1R5vj3NgevsAsvxsAnI8Oa5s2oy25
-# qhsoBIGo/zi6GpxFj+mOdh35Xn91y72J4RGOJEoqzEIbW3q0b2iPuWLA911cRxgY
-# 5SJYubvjay3nSMbBPPFsyl6mY4/WYucmyS9lo3l7jk27MAe145GWxK4O3m3gEFEI
-# kv7kRmefDR7Oe2T1HxAnICQvr9sCAwEAAaOCARYwggESMB8GA1UdIwQYMBaAFFN5
-# v1qqK0rPVIDh2JvAnfKyA2bLMB0GA1UdDgQWBBT2d2rdP/0BE/8WoWyCAi/QCj0U
-# JTAOBgNVHQ8BAf8EBAMCAYYwDwYDVR0TAQH/BAUwAwEB/zATBgNVHSUEDDAKBggr
-# BgEFBQcDCDARBgNVHSAECjAIMAYGBFUdIAAwUAYDVR0fBEkwRzBFoEOgQYY/aHR0
-# cDovL2NybC51c2VydHJ1c3QuY29tL1VTRVJUcnVzdFJTQUNlcnRpZmljYXRpb25B
-# dXRob3JpdHkuY3JsMDUGCCsGAQUFBwEBBCkwJzAlBggrBgEFBQcwAYYZaHR0cDov
-# L29jc3AudXNlcnRydXN0LmNvbTANBgkqhkiG9w0BAQwFAAOCAgEADr5lQe1oRLjl
-# ocXUEYfktzsljOt+2sgXke3Y8UPEooU5y39rAARaAdAxUeiX1ktLJ3+lgxtoLQhn
-# 5cFb3GF2SSZRX8ptQ6IvuD3wz/LNHKpQ5nX8hjsDLRhsyeIiJsms9yAWnvdYOdEM
-# q1W61KE9JlBkB20XBee6JaXx4UBErc+YuoSb1SxVf7nkNtUjPfcxuFtrQdRMRi/f
-# InV/AobE8Gw/8yBMQKKaHt5eia8ybT8Y/Ffa6HAJyz9gvEOcF1VWXG8OMeM7Vy7B
-# s6mSIkYeYtddU1ux1dQLbEGur18ut97wgGwDiGinCwKPyFO7ApcmVJOtlw9FVJxw
-# /mL1TbyBns4zOgkaXFnnfzg4qbSvnrwyj1NiurMp4pmAWjR+Pb/SIduPnmFzbSN/
-# G8reZCL4fvGlvPFk4Uab/JVCSmj59+/mB2Gn6G/UYOy8k60mKcmaAZsEVkhOFuoj
-# 4we8CYyaR9vd9PGZKSinaZIkvVjbH/3nlLb0a7SBIkiRzfPfS9T+JesylbHa1LtR
-# V9U/7m0q7Ma2CQ/t392ioOssXW7oKLdOmMBl14suVFBmbzrt5V5cQPnwtd3UOTpS
-# 9oCG+ZZheiIvPgkDmA8FzPsnfXW5qHELB43ET7HHFHeRPRYrMBKjkb8/IN7Po0d0
-# hQoF4TeMM+zYAJzoKQnVKOLg8pZVPT8wgga5MIIEoaADAgECAhEAmaOACiZVO2Wr
-# 3G6EprPqOTANBgkqhkiG9w0BAQwFADCBgDELMAkGA1UEBhMCUEwxIjAgBgNVBAoT
-# GVVuaXpldG8gVGVjaG5vbG9naWVzIFMuQS4xJzAlBgNVBAsTHkNlcnR1bSBDZXJ0
-# aWZpY2F0aW9uIEF1dGhvcml0eTEkMCIGA1UEAxMbQ2VydHVtIFRydXN0ZWQgTmV0
-# d29yayBDQSAyMB4XDTIxMDUxOTA1MzIxOFoXDTM2MDUxODA1MzIxOFowVjELMAkG
-# A1UEBhMCUEwxITAfBgNVBAoTGEFzc2VjbyBEYXRhIFN5c3RlbXMgUy5BLjEkMCIG
-# A1UEAxMbQ2VydHVtIENvZGUgU2lnbmluZyAyMDIxIENBMIICIjANBgkqhkiG9w0B
-# AQEFAAOCAg8AMIICCgKCAgEAnSPPBDAjO8FGLOczcz5jXXp1ur5cTbq96y34vuTm
-# flN4mSAfgLKTvggv24/rWiVGzGxT9YEASVMw1Aj8ewTS4IndU8s7VS5+djSoMcbv
-# IKck6+hI1shsylP4JyLvmxwLHtSworV9wmjhNd627h27a8RdrT1PH9ud0IF+njvM
-# k2xqbNTIPsnWtw3E7DmDoUmDQiYi/ucJ42fcHqBkbbxYDB7SYOouu9Tj1yHIohzu
-# C8KNqfcYf7Z4/iZgkBJ+UFNDcc6zokZ2uJIxWgPWXMEmhu1gMXgv8aGUsRdaCtVD
-# 2bSlbfsq7BiqljjaCun+RJgTgFRCtsuAEw0pG9+FA+yQN9n/kZtMLK+Wo837Q4QO
-# ZgYqVWQ4x6cM7/G0yswg1ElLlJj6NYKLw9EcBXE7TF3HybZtYvj9lDV2nT8mFSkc
-# SkAExzd4prHwYjUXTeZIlVXqj+eaYqoMTpMrfh5MCAOIG5knN4Q/JHuurfTI5XDY
-# O962WZayx7ACFf5ydJpoEowSP07YaBiQ8nXpDkNrUA9g7qf/rCkKbWpQ5boufUnq
-# 1UiYPIAHlezf4muJqxqIns/kqld6JVX8cixbd6PzkDpwZo4SlADaCi2JSplKShBS
-# ND36E/ENVv8urPS0yOnpG4tIoBGxVCARPCg1BnyMJ4rBJAcOSnAWd18Jx5n858JS
-# qPECAwEAAaOCAVUwggFRMA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFN10XUwA
-# 23ufoHTKsW73PMAywHDNMB8GA1UdIwQYMBaAFLahVDkCw6A/joq8+tT4HKbROg79
-# MA4GA1UdDwEB/wQEAwIBBjATBgNVHSUEDDAKBggrBgEFBQcDAzAwBgNVHR8EKTAn
-# MCWgI6Ahhh9odHRwOi8vY3JsLmNlcnR1bS5wbC9jdG5jYTIuY3JsMGwGCCsGAQUF
-# BwEBBGAwXjAoBggrBgEFBQcwAYYcaHR0cDovL3N1YmNhLm9jc3AtY2VydHVtLmNv
-# bTAyBggrBgEFBQcwAoYmaHR0cDovL3JlcG9zaXRvcnkuY2VydHVtLnBsL2N0bmNh
-# Mi5jZXIwOQYDVR0gBDIwMDAuBgRVHSAAMCYwJAYIKwYBBQUHAgEWGGh0dHA6Ly93
-# d3cuY2VydHVtLnBsL0NQUzANBgkqhkiG9w0BAQwFAAOCAgEAdYhYD+WPUCiaU58Q
-# 7EP89DttyZqGYn2XRDhJkL6P+/T0IPZyxfxiXumYlARMgwRzLRUStJl490L94C9L
-# GF3vjzzH8Jq3iR74BRlkO18J3zIdmCKQa5LyZ48IfICJTZVJeChDUyuQy6rGDxLU
-# UAsO0eqeLNhLVsgw6/zOfImNlARKn1FP7o0fTbj8ipNGxHBIutiRsWrhWM2f8pXd
-# d3x2mbJCKKtl2s42g9KUJHEIiLni9ByoqIUul4GblLQigO0ugh7bWRLDm0CdY9rN
-# LqyA3ahe8WlxVWkxyrQLjH8ItI17RdySaYayX3PhRSC4Am1/7mATwZWwSD+B7eMc
-# ZNhpn8zJ+6MTyE6YoEBSRVrs0zFFIHUR08Wk0ikSf+lIe5Iv6RY3/bFAEloMU+vU
-# BfSouCReZwSLo8WdrDlPXtR0gicDnytO7eZ5827NS2x7gCBibESYkOh1/w1tVxTp
-# V2Na3PR7nxYVlPu1JPoRZCbH86gc96UTvuWiOruWmyOEMLOGGniR+x+zPF/2DaGg
-# K2W1eEJfo2qyrBNPvF7wuAyQfiFXLwvWHamoYtPZo0LHuH8X3n9C+xN4YaNjt2yw
-# zOr+tKyEVAotnyU9vyEVOaIYMk3IeBrmFnn0gbKeTTyYeEEUz/Qwt4HOUBCrW602
-# NCmvO1nm+/80nLy5r0AZvCQxaQ4xggXDMIIFvwIBATBqMFYxCzAJBgNVBAYTAlBM
-# MSEwHwYDVQQKExhBc3NlY28gRGF0YSBTeXN0ZW1zIFMuQS4xJDAiBgNVBAMTG0Nl
-# cnR1bSBDb2RlIFNpZ25pbmcgMjAyMSBDQQIQCDJPnbfakW9j5PKjPF5dUTANBglg
-# hkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEMMQowCKACgAChAoAAMBkGCSqGSIb3
-# DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsxDjAMBgorBgEEAYI3AgEV
-# MC8GCSqGSIb3DQEJBDEiBCBtY9j98dLHbrfI4kz9nIDbx749PX4Ha89nkTZgeU7l
-# NzANBgkqhkiG9w0BAQEFAASCAYAaeCctHdn/6B+dJld4mmkjU6FDZJgKD8WNAGV9
-# tq8mCnIQkkRB3wHKhrMg5VEf8bH0BA4jbhGucT2C+NV4uX1j1msOSoOj/pCfnUTh
-# BzXAlVHfNo0t5cHr1Sryytlh5k/XOpscXbiekpYcU5KsSnVvNlGsAWptmYMZvIA+
-# 6gHnie9NBYawIoLqj5bp8J6PDO2LB05j54TVy8mF7I2UjI25tk3VO7OavoTBKApx
-# WVmXsS2uVjU1jAfuYKJ4obSnsZDIF3PXDXW25J/lzPPXUQ6PB53K3/zWi6MZZ8ef
-# KiJCIXpLSI2UHS9O3xcuZRu+VFrIbD263e+QhO0jd1yGIE39GJIp1UYjQjEhfSTH
-# iIc+SO2yG4fsbK7uAT5Uq56G80RrY7RMNAqOu7XJ+T4LVGxmw/78gJWfV1/or53M
-# A0TRZ7SUMdyq/giPDuSX4zdR3mfqFyjr2RHKzIjRN57Z8gFOGtVDSIYzBwzHTomh
-# sUGP5i50wqbq94UZNwrsfJ0EvkyhggMjMIIDHwYJKoZIhvcNAQkGMYIDEDCCAwwC
-# AQEwajBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMSww
-# KgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIENBIFIzNgIRAKQp
-# O24e3denNAiHrXpOtyQwDQYJYIZIAWUDBAICBQCgeTAYBgkqhkiG9w0BCQMxCwYJ
-# KoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA2MDQxODUwMjZaMD8GCSqGSIb3
-# DQEJBDEyBDB74JNKKJgdXj4W+3/mrVQqHpVTEJx/MYzbvpMJAEP3R4qib7eV9C2T
-# fFTe9GxnMekwDQYJKoZIhvcNAQEBBQAEggIAoDhkbL8LOlGZ4/AJXOibJ/Pe12wB
-# 7pQ5ki1gcagNJZSX6i4tfvCCGDeNx3sm86lX9RTagpRZ0Ljiib0RF6F3NakJdG6B
-# YSpZV33WwoyqXTb4sP30X876BppRmMLZdxg7DBFOROTn2FVtGDd72J4pR1F8jPui
-# IIBvEsOsTHLyGQ8zzsy/iE6g0KNXRa6vrPBPIdsUvHqets2qqMNlYHN3NKtHE3I8
-# 1BPcnGPflbkFISQPpI/MgctIRWBAvrhWEZpC+N4aBxLTtMzUdEw4+HTXQzA/G3Et
-# d5dkPDwKNjZu+M3ijGhuKNXPmijaCFVhLMHHXFBgSvRQK4kM9SLdI/BfFm+vWy+Y
-# nHdisbZBR2aau9JOzFRtRne4lprmI5hTlV5KyihUxdphFTVeRgf3YIiTd5KSFBIK
-# c0FmmXB0T/LMSymGb9eyvRsFpKA6my8q4AsjyfHV1n5VwrpLbRbFC7Y1QqPGKGVw
-# jqEiFvbfBZbETF9CydjTOLZru/UpXwk35mfIg2iEpBKOwwY6zG1LS+OVJt2ZD8ha
-# Tp/4k0qM7MHf/6muHw6ttgU7ctl+r2CJWduR4EiAuF0G0hqgUzOqf3X3OH53NTD1
-# fMNgzJoZXb5tq+YAdhH2Opgxa6HmNtOEv4FKQ5gS6Dlk7AjHwOMFVaxXvBXbteN8
-# neAX8Dq3EpNiBxk=
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC1YPNgzfig/xoU
+# +N4ky/FN+I9n5NJVmWdYGk6eNH/7EaCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
+# lUgTecgRwIeZMA0GCSqGSIb3DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
+# ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVu
+# dGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAy
+# MDAeFw0yMDA0MTYxODM2MTZaFw00NTA0MTYxODQ0NDBaMHcxCzAJBgNVBAYTAlVT
+# MR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jv
+# c29mdCBJZGVudGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRo
+# b3JpdHkgMjAyMDCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALORKgeD
+# Bmf9np3gx8C3pOZCBH8Ppttf+9Va10Wg+3cL8IDzpm1aTXlT2KCGhFdFIMeiVPvH
+# or+Kx24186IVxC9O40qFlkkN/76Z2BT2vCcH7kKbK/ULkgbk/WkTZaiRcvKYhOuD
+# PQ7k13ESSCHLDe32R0m3m/nJxxe2hE//uKya13NnSYXjhr03QNAlhtTetcJtYmrV
+# qXi8LW9J+eVsFBT9FMfTZRY33stuvF4pjf1imxUs1gXmuYkyM6Nix9fWUmcIxC70
+# ViueC4fM7Ke0pqrrBc0ZV6U6CwQnHJFnni1iLS8evtrAIMsEGcoz+4m+mOJyoHI1
+# vnnhnINv5G0Xb5DzPQCGdTiO0OBJmrvb0/gwytVXiGhNctO/bX9x2P29Da6SZEi3
+# W295JrXNm5UhhNHvDzI9e1eM80UHTHzgXhgONXaLbZ7LNnSrBfjgc10yVpRnlyUK
+# xjU9lJfnwUSLgP3B+PR0GeUw9gb7IVc+BhyLaxWGJ0l7gpPKWeh1R+g/OPTHU3mg
+# trTiXFHvvV84wRPmeAyVWi7FQFkozA8kwOy6CXcjmTimthzax7ogttc32H83rwjj
+# O3HbbnMbfZlysOSGM1l0tRYAe1BtxoYT2v3EOYI9JACaYNq6lMAFUSw0rFCZE4e7
+# swWAsk0wAly4JoNdtGNz764jlU9gKL431VulAgMBAAGjVDBSMA4GA1UdDwEB/wQE
+# AwIBhjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTIftJqhSobyhmYBAcnz1AQ
+# T2ioojAQBgkrBgEEAYI3FQEEAwIBADANBgkqhkiG9w0BAQwFAAOCAgEAr2rd5hnn
+# LZRDGU7L6VCVZKUDkQKL4jaAOxWiUsIWGbZqWl10QzD0m/9gdAmxIR6QFm3FJI9c
+# Zohj9E/MffISTEAQiwGf2qnIrvKVG8+dBetJPnSgaFvlVixlHIJ+U9pW2UYXeZJF
+# xBA2CFIpF8svpvJ+1Gkkih6PsHMNzBxKq7Kq7aeRYwFkIqgyuH4yKLNncy2RtNwx
+# AQv3Rwqm8ddK7VZgxCwIo3tAsLx0J1KH1r6I3TeKiW5niB31yV2g/rarOoDXGpc8
+# FzYiQR6sTdWD5jw4vU8w6VSp07YEwzJ2YbuwGMUrGLPAgNW3lbBeUU0i/OxYqujY
+# lLSlLu2S3ucYfCFX3VVj979tzR/SpncocMfiWzpbCNJbTsgAlrPhgzavhgplXHT2
+# 6ux6anSg8Evu75SjrFDyh+3XOjCDyft9V77l4/hByuVkrrOj7FjshZrM77nq81YY
+# uVxzmq/FdxeDWds3GhhyVKVB0rYjdaNDmuV3fJZ5t0GNv+zcgKCf0Xd1WF81E+Al
+# GmcLfc4l+gcK5GEh2NQc5QfGNpn0ltDGFf5Ozdeui53bFv0ExpK91IjmqaOqu/dk
+# ODtfzAzQNb50GQOmxapMomE2gj4d8yu8l13bS3g7LfU772Aj6PXsCyM2la+YZr9T
+# 03u4aUoqlmZpxJTG9F9urJh4iIAGXKKy7aIwggbAMIIEqKADAgECAhMzAAS405bY
+# qvWOnUNsAAAABLjTMA0GCSqGSIb3DQEBDAUAMFoxCzAJBgNVBAYTAlVTMR4wHAYD
+# VQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzApBgNVBAMTIk1pY3Jvc29mdCBJ
+# RCBWZXJpZmllZCBDUyBBT0MgQ0EgMDQwHhcNMjYwODEyMjAwNzA0WhcNMjYwODE1
+# MjAwNzA0WjCBgzELMAkGA1UEBhMCTkwxFjAUBgNVBAgTDU5vb3JkLUJyYWJhbnQx
+# EjAQBgNVBAcTCVNjaGlqbmRlbDEjMCEGA1UEChMaSm9obiBCaWxsZWtlbnMgQ29u
+# c3VsdGFuY3kxIzAhBgNVBAMTGkpvaG4gQmlsbGVrZW5zIENvbnN1bHRhbmN5MIIB
+# ojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAi56FBfwzf5vShzPjNpAFDlIx
+# rP+WNwkHmP1Ca70ZVfvy+KP7+SJg61G0oDAs401zvQ84SQ+vpU8/DLCA66MphoTa
+# 0lynwbUy7I4gX/Ei+x1PnFa7O+XlkkAkU/S8AS8+MD7SZN258+t0r9dv+6aDiIZi
+# se826v+dg7qk2zhWUC77gLaTxYxUUP0aJsCd6ma6Wk073Hlro33++lgZe9wFs/Wv
+# jyvOi7hdbvNVoYrbmbumwqx4VXFhqeozGkZipsw7q3TE5zhsiKaNjsnMfoReiVe9
+# XcgBV1zpyLB10atYXKnA58jzrJrBf1plp9JFlmRRdyPLddK+QAPDdod74OAuVyui
+# zZAgxJEOiXpiwUiiR4wt5LIZWBrnHkBIX3n6avnMoPIUfWAHNoz3JB7tnYUeupQP
+# 4KFoKDJjqAnD+gnpEkqT5pKu1sVDU5tOhTppB5OGtULEwUToj3c3Twprl6P48u2x
+# BPvHdbRNfZSkEEjqOIUAZRzgTBW2vAdq5TJKQA8jAgMBAAGjggHTMIIBzzAMBgNV
+# HRMBAf8EAjAAMA4GA1UdDwEB/wQEAwIHgDA6BgNVHSUEMzAxBgorBgEEAYI3YQEA
+# BggrBgEFBQcDAwYZKwYBBAGCN2HK9PELgrHSgxH33KNOluu6MTAdBgNVHQ4EFgQU
+# iG7CwBXCUdrbg+i9vMzoTbq78g4wHwYDVR0jBBgwFoAUayVB3vtrfP0YgAotf492
+# XapzPbgwZwYDVR0fBGAwXjBcoFqgWIZWaHR0cDovL3d3dy5taWNyb3NvZnQuY29t
+# L3BraW9wcy9jcmwvTWljcm9zb2Z0JTIwSUQlMjBWZXJpZmllZCUyMENTJTIwQU9D
+# JTIwQ0ElMjAwNC5jcmwwdAYIKwYBBQUHAQEEaDBmMGQGCCsGAQUFBzAChlhodHRw
+# Oi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2NlcnRzL01pY3Jvc29mdCUyMElE
+# JTIwVmVyaWZpZWQlMjBDUyUyMEFPQyUyMENBJTIwMDQuY3J0MFQGA1UdIARNMEsw
+# SQYEVR0gADBBMD8GCCsGAQUFBwIBFjNodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20v
+# cGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wDQYJKoZIhvcNAQEMBQADggIBAKjO
+# LANEbvVcXnVYrx4NjQmly/9j4fNQvIBC3OxcnOR2ioVCrTfraGPFcVBYr0yl5G/m
+# Aj7anDfPVghMcTfMkqbd+WZ0Rt099iOuyZBELH5T4K2lOPT3fHr/jAPTZnF5x0eo
+# eftM2dJldo4n1hauwudmLrC9sv6K95lolW+ZNC19L96/xJBvXHjFQKeLs8XiMOBz
+# OCOzT2g0TiUut5I6XbwGDy9Jjr7vh8WRruFTLHFN5RD2+svsFQwUihUdOSNY7iBm
+# 4FLVVoRGB6JnbueJJkmLDqfjx9h+FjUoVgRVNLXCmUJDe6PZJKpx4WyAlH2eLjtG
+# S/xu/R9eXN/fk5YJl3eNhRMQ05j+7XFk8YpJKAkpX24Zitf8LPDZlIiEbl2RSAom
+# 23ib878A+MhkT5zvIFAXQglL4ydbkRDow5BNJYk2QNODgVm5KadMH2kQnZHAVNx+
+# d72G1Q5OEdGi1A2D+nhWB36P66FFKUlNvZ5zNdDxewSeWnNczGQoOrxykYckymdh
+# w/Po58mkeGeyKxd4ofvkurfhVJocrRg3/ytLk+jXLTXUCy5hgXb9cb7eybhSC7Rt
+# v83aXsk5ZpSCKnZ6KNRSJXo6u8UWLPrbqR4M4diIHBv6szF4XYynCiV+vqgYn1tf
+# R8PWV/zHIz92zHXqyd0dZVF6numJlaJS7dl7/L0jMIIGwDCCBKigAwIBAgITMwAE
+# uNOW2Kr1jp1DbAAAAAS40zANBgkqhkiG9w0BAQwFADBaMQswCQYDVQQGEwJVUzEe
+# MBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSswKQYDVQQDEyJNaWNyb3Nv
+# ZnQgSUQgVmVyaWZpZWQgQ1MgQU9DIENBIDA0MB4XDTI2MDgxMjIwMDcwNFoXDTI2
+# MDgxNTIwMDcwNFowgYMxCzAJBgNVBAYTAk5MMRYwFAYDVQQIEw1Ob29yZC1CcmFi
+# YW50MRIwEAYDVQQHEwlTY2hpam5kZWwxIzAhBgNVBAoTGkpvaG4gQmlsbGVrZW5z
+# IENvbnN1bHRhbmN5MSMwIQYDVQQDExpKb2huIEJpbGxla2VucyBDb25zdWx0YW5j
+# eTCCAaIwDQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBAIuehQX8M3+b0ocz4zaQ
+# BQ5SMaz/ljcJB5j9Qmu9GVX78vij+/kiYOtRtKAwLONNc70POEkPr6VPPwywgOuj
+# KYaE2tJcp8G1MuyOIF/xIvsdT5xWuzvl5ZJAJFP0vAEvPjA+0mTdufPrdK/Xb/um
+# g4iGYrHvNur/nYO6pNs4VlAu+4C2k8WMVFD9GibAnepmulpNO9x5a6N9/vpYGXvc
+# BbP1r48rzou4XW7zVaGK25m7psKseFVxYanqMxpGYqbMO6t0xOc4bIimjY7JzH6E
+# XolXvV3IAVdc6ciwddGrWFypwOfI86yawX9aZafSRZZkUXcjy3XSvkADw3aHe+Dg
+# Llcros2QIMSRDol6YsFIokeMLeSyGVga5x5ASF95+mr5zKDyFH1gBzaM9yQe7Z2F
+# HrqUD+ChaCgyY6gJw/oJ6RJKk+aSrtbFQ1ObToU6aQeThrVCxMFE6I93N08Ka5ej
+# +PLtsQT7x3W0TX2UpBBI6jiFAGUc4EwVtrwHauUySkAPIwIDAQABo4IB0zCCAc8w
+# DAYDVR0TAQH/BAIwADAOBgNVHQ8BAf8EBAMCB4AwOgYDVR0lBDMwMQYKKwYBBAGC
+# N2EBAAYIKwYBBQUHAwMGGSsGAQQBgjdhyvTxC4Kx0oMR99yjTpbrujEwHQYDVR0O
+# BBYEFIhuwsAVwlHa24PovbzM6E26u/IOMB8GA1UdIwQYMBaAFGslQd77a3z9GIAK
+# LX+Pdl2qcz24MGcGA1UdHwRgMF4wXKBaoFiGVmh0dHA6Ly93d3cubWljcm9zb2Z0
+# LmNvbS9wa2lvcHMvY3JsL01pY3Jvc29mdCUyMElEJTIwVmVyaWZpZWQlMjBDUyUy
+# MEFPQyUyMENBJTIwMDQuY3JsMHQGCCsGAQUFBwEBBGgwZjBkBggrBgEFBQcwAoZY
+# aHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9jZXJ0cy9NaWNyb3NvZnQl
+# MjBJRCUyMFZlcmlmaWVkJTIwQ1MlMjBBT0MlMjBDQSUyMDA0LmNydDBUBgNVHSAE
+# TTBLMEkGBFUdIAAwQTA/BggrBgEFBQcCARYzaHR0cDovL3d3dy5taWNyb3NvZnQu
+# Y29tL3BraW9wcy9Eb2NzL1JlcG9zaXRvcnkuaHRtMA0GCSqGSIb3DQEBDAUAA4IC
+# AQCoziwDRG71XF51WK8eDY0Jpcv/Y+HzULyAQtzsXJzkdoqFQq0362hjxXFQWK9M
+# peRv5gI+2pw3z1YITHE3zJKm3flmdEbdPfYjrsmQRCx+U+CtpTj093x6/4wD02Zx
+# ecdHqHn7TNnSZXaOJ9YWrsLnZi6wvbL+iveZaJVvmTQtfS/ev8SQb1x4xUCni7PF
+# 4jDgczgjs09oNE4lLreSOl28Bg8vSY6+74fFka7hUyxxTeUQ9vrL7BUMFIoVHTkj
+# WO4gZuBS1VaERgeiZ27niSZJiw6n48fYfhY1KFYEVTS1wplCQ3uj2SSqceFsgJR9
+# ni47Rkv8bv0fXlzf35OWCZd3jYUTENOY/u1xZPGKSSgJKV9uGYrX/Czw2ZSIhG5d
+# kUgKJtt4m/O/APjIZE+c7yBQF0IJS+MnW5EQ6MOQTSWJNkDTg4FZuSmnTB9pEJ2R
+# wFTcfne9htUOThHRotQNg/p4Vgd+j+uhRSlJTb2eczXQ8XsEnlpzXMxkKDq8cpGH
+# JMpnYcPz6OfJpHhnsisXeKH75Lq34VSaHK0YN/8rS5Po1y011AsuYYF2/XG+3sm4
+# Ugu0bb/N2l7JOWaUgip2eijUUiV6OrvFFiz626keDOHYiBwb+rMxeF2Mpwolfr6o
+# GJ9bX0fD1lf8xyM/dsx16sndHWVRep7piZWiUu3Ze/y9IzCCBygwggUQoAMCAQIC
+# EzMAAAAWMZKNkgJle5oAAAAAABYwDQYJKoZIhvcNAQEMBQAwYzELMAkGA1UEBhMC
+# VVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjE0MDIGA1UEAxMrTWlj
+# cm9zb2Z0IElEIFZlcmlmaWVkIENvZGUgU2lnbmluZyBQQ0EgMjAyMTAeFw0yNjAz
+# MjYxODExMjlaFw0zMTAzMjYxODExMjlaMFoxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
+# ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzApBgNVBAMTIk1pY3Jvc29mdCBJRCBW
+# ZXJpZmllZCBDUyBBT0MgQ0EgMDQwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIK
+# AoICAQDKVfrI2+gJMM/0bQ5OVKNdvOASzLbUUMvXuf+Vl7YGuofPaZHVo3gMHF5i
+# nT+GMSpIcfIZ9qtXU1UG68ry8vNbQtOL4Nm30ifXpqI1+ByiAWLO1YT0WnzG7XPO
+# uoTeeWsNZv5FmjxCsReBZvyzyzCyXZbu1EQfJxWTH4ebUwtAiW9rqMf9eDj/wYhi
+# EfNteJV3ZFeibD2ztCHr9JhFdd97XbnCHgQoTIqc02X5xlRKtUGBa++OtHBBjiJ/
+# uwBnzTkqu4FjpZjQeJtrmda+ur1CT2jflWIB/ypn7u7V9tvW9wJbJYt/H2EtJ0GO
+# NWxJZ7TEu8jWPindOO3lzPP7UtzS/mVDV94HucWaltmsra6zSG8BoEJ87IM8QSb7
+# vfm/O41FhYkUv89WIj5ES2O4kxyiMSfe95CMivCuYrRP2hKvx7egPMrWgDDBkxML
+# grKZO9hRNUMm8vk3w5b9SogHOyJVhxyFm8aFXfIxgqDF4S0g4bhbhnzljmSlCLlu
+# mMZcXFGDjpF2tNoAu3VGFGYtHtTSNVKvZpgB3b4ynaoDkbPf+Wg4523jt4VneasB
+# gZhC1srZI2NCnCBBfgjLq04pqEKAWEohyW2K29KSkkHvt5VaE1ac3Yt+oyiOzMS5
+# 7tXwQDJLGvLg/OXFO0VNvczDndfIfXYExB/ab2PuMSwd5VIBOwIDAQABo4IB3DCC
+# AdgwDgYDVR0PAQH/BAQDAgGGMBAGCSsGAQQBgjcVAQQDAgEAMB0GA1UdDgQWBBRr
+# JUHe+2t8/RiACi1/j3ZdqnM9uDBUBgNVHSAETTBLMEkGBFUdIAAwQTA/BggrBgEF
+# BQcCARYzaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9Eb2NzL1JlcG9z
+# aXRvcnkuaHRtMBkGCSsGAQQBgjcUAgQMHgoAUwB1AGIAQwBBMBIGA1UdEwEB/wQI
+# MAYBAf8CAQAwHwYDVR0jBBgwFoAU2UEpsA8PY2zvadf1zSmepEhqMOYwcAYDVR0f
+# BGkwZzBloGOgYYZfaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9jcmwv
+# TWljcm9zb2Z0JTIwSUQlMjBWZXJpZmllZCUyMENvZGUlMjBTaWduaW5nJTIwUENB
+# JTIwMjAyMS5jcmwwfQYIKwYBBQUHAQEEcTBvMG0GCCsGAQUFBzAChmFodHRwOi8v
+# d3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2NlcnRzL01pY3Jvc29mdCUyMElEJTIw
+# VmVyaWZpZWQlMjBDb2RlJTIwU2lnbmluZyUyMFBDQSUyMDIwMjEuY3J0MA0GCSqG
+# SIb3DQEBDAUAA4ICAQAG1VBeVHTVRBljlcZD3IiMxwPyMjQyLNaEnVu5mODm2hRB
+# JfH8GsBLATmrHAc8F47jmk5CnpUPiIguCbw6Z/KVj4Dsoiq228NSLMLewFfGMri7
+# uwNGLISC5ccp8vUdADDEIsS2dE+QI9OwkDpv3XuUD7d+hAgcLVcMOl1AsfEZtsZe
+# nhGvSYUrm/FuLq0BqEGL9GXM5c+Ho9q8o+Vn/S+GWQN2y+gkRO15s0kI05nUpq/d
+# OD4ri9rgVs6tipEd0YZqGgD+CZNiaZWrDTOQbNPncd2F9qOsUa20miYruoT5PwJA
+# aI+QQiTE2ZJeMJOkOpzhTUgqVMZwZidEUZKCqudaeQA08WwnkQMfKyHzaU8j48UL
+# cU4hUwvMsv7fSurOe9GAdRQCPvF8WcSK5oDHe8VVJM4tv6KKCm91HqLx9JamBgRI
+# 6R2SfY3nu26EGznu0rCg/769z8xWm4PVcC2ZaL6VlKVqFp1NsN8YqMyf5t+bbGVb
+# 09noFKcJG/UwyGlxRmQBlfeBUQx5/ytlzZzsEnhrJF9fTAfje8j3OdX5lEnePTFQ
+# LRlvzZFBqUXnIeQKv3fHQjC9m2fo/Z01DII/qp3d8LhGVUW0BCG04fRwHJNH8iqq
+# CG/qofMv+kym2AxBDnHzNgRjL60JOFiBgiurvLhYQNhB95KWojFA6shQnggkMTCC
+# B54wggWGoAMCAQICEzMAAAAHh6M0o3uljhwAAAAAAAcwDQYJKoZIhvcNAQEMBQAw
+# dzELMAkGA1UEBhMCVVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjFI
+# MEYGA1UEAxM/TWljcm9zb2Z0IElkZW50aXR5IFZlcmlmaWNhdGlvbiBSb290IENl
+# cnRpZmljYXRlIEF1dGhvcml0eSAyMDIwMB4XDTIxMDQwMTIwMDUyMFoXDTM2MDQw
+# MTIwMTUyMFowYzELMAkGA1UEBhMCVVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jw
+# b3JhdGlvbjE0MDIGA1UEAxMrTWljcm9zb2Z0IElEIFZlcmlmaWVkIENvZGUgU2ln
+# bmluZyBQQ0EgMjAyMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALLw
+# wK8ZiCji3VR6TElsaQhVCbRS/3pK+MHrJSj3Zxd3KU3rlfL3qrZilYKJNqztA9OQ
+# acr1AwoNcHbKBLbsQAhBnIB34zxf52bDpIO3NJlfIaTE/xrweLoQ71lzCHkD7A4A
+# s1Bs076Iu+mA6cQzsYYH/Cbl1icwQ6C65rU4V9NQhNUwgrx9rGQ//h890Q8JdjLL
+# w0nV+ayQ2Fbkd242o9kH82RZsH3HEyqjAB5a8+Ae2nPIPc8sZU6ZE7iRrRZywRmr
+# KDp5+TcmJX9MRff241UaOBs4NmHOyke8oU1TYrkxh+YeHgfWo5tTgkoSMoayqoDp
+# HOLJs+qG8Tvh8SnifW2Jj3+ii11TS8/FGngEaNAWrbyfNrC69oKpRQXY9bGH6jn9
+# NEJv9weFxhTwyvx9OJLXmRGbAUXN1U9nf4lXezky6Uh/cgjkVd6CGUAf0K+Jw+GE
+# /5VpIVbcNr9rNE50Sbmy/4RTCEGvOq3GhjITbCa4crCzTTHgYYjHs1NbOc6brH+e
+# KpWLtr+bGecy9CrwQyx7S/BfYJ+ozst7+yZtG2wR461uckFu0t+gCwLdN0A6cFtS
+# RtR8bvxVFyWwTtgMMFRuBa3vmUOTnfKLsLefRaQcVTgRnzeLzdpt32cdYKp+dhr2
+# ogc+qM6K4CBI5/j4VFyC4QFeUP2YAidLtvpXRRo3AgMBAAGjggI1MIICMTAOBgNV
+# HQ8BAf8EBAMCAYYwEAYJKwYBBAGCNxUBBAMCAQAwHQYDVR0OBBYEFNlBKbAPD2Ns
+# 72nX9c0pnqRIajDmMFQGA1UdIARNMEswSQYEVR0gADBBMD8GCCsGAQUFBwIBFjNo
+# dHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5o
+# dG0wGQYJKwYBBAGCNxQCBAweCgBTAHUAYgBDAEEwDwYDVR0TAQH/BAUwAwEB/zAf
+# BgNVHSMEGDAWgBTIftJqhSobyhmYBAcnz1AQT2ioojCBhAYDVR0fBH0wezB5oHeg
+# dYZzaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9jcmwvTWljcm9zb2Z0
+# JTIwSWRlbnRpdHklMjBWZXJpZmljYXRpb24lMjBSb290JTIwQ2VydGlmaWNhdGUl
+# MjBBdXRob3JpdHklMjAyMDIwLmNybDCBwwYIKwYBBQUHAQEEgbYwgbMwgYEGCCsG
+# AQUFBzAChnVodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2NlcnRzL01p
+# Y3Jvc29mdCUyMElkZW50aXR5JTIwVmVyaWZpY2F0aW9uJTIwUm9vdCUyMENlcnRp
+# ZmljYXRlJTIwQXV0aG9yaXR5JTIwMjAyMC5jcnQwLQYIKwYBBQUHMAGGIWh0dHA6
+# Ly9vbmVvY3NwLm1pY3Jvc29mdC5jb20vb2NzcDANBgkqhkiG9w0BAQwFAAOCAgEA
+# fyUqnv7Uq+rdZgrbVyNMul5skONbhls5fccPlmIbzi+OwVdPQ4H55v7VOInnmezQ
+# EeW4LqK0wja+fBznANbXLB0KrdMCbHQpbLvG6UA/Xv2pfpVIE1CRFfNF4XKO8XYE
+# a3oW8oVH+KZHgIQRIwAbyFKQ9iyj4aOWeAzwk+f9E5StNp5T8FG7/VEURIVWArbA
+# zPt9ThVN3w1fAZkF7+YU9kbq1bCR2YD+MtunSQ1Rft6XG7b4e0ejRA7mB2IoX5hN
+# h3UEauY0byxNRG+fT2MCEhQl9g2i2fs6VOG19CNep7SquKaBjhWmirYyANb0RJSL
+# WjinMLXNOAga10n8i9jqeprzSMU5ODmrMCJE12xS/NWShg/tuLjAsKP6SzYZ+1Ry
+# 358ZTFcx0FS/mx2vSoU8s8HRvy+rnXqyUJ9HBqS0DErVLjQwK8VtsBdekBmdTbQV
+# oCgPCqr+PDPB3xajYnzevs7eidBsM71PINK2BoE2UfMwxCCX3mccFgx6UsQeRSdV
+# VVNSyALQe6PT12418xon2iDGE81OGCreLzDcMAZnrUAx4XQLUz6ZTl65yPUiOh3k
+# 7Yww94lDf+8oG2oZmDh5O1Qe38E+M3vhKwmzIeoB1dVLlz4i3IpaDcR+iuGjH2Td
+# aC1ZOmBXiCRKJLj4DT2uhJ04ji+tHD6n58vhavFIrmcxghcyMIIXLgIBATBxMFox
+# CzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzAp
+# BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDQCEzMABLjT
+# ltiq9Y6dQ2wAAAAEuNMwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
+# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgrwte
+# cCPxtHl6hJn1Acc9i/qLzTHC9QKVcO000Qien9cwDQYJKoZIhvcNAQEBBQAEggGA
+# JDqvZf6QXgROP4Mmkf3lTaceKPtrm4yoM23BvnH3sUAoB4acUv4TrRrzwHLRLM6T
+# tk68YIQrJf8nBKnvHpX2rD/jtQKOyUbSlaFLWtMymfguYmhRjcautWwJqUHZW3Hf
+# o6IaxYepwsF/w+33b9zMVz1VaD7U8srgyXbB5wq3fP/Y/9f4qZXs0AeTS1aA6Un0
+# 48kmy1QFKcs99lpcd8X/nXN7fCM9w7SBdooduOtrXlYIWMzwX/mo+rWDU/4xhvYv
+# X9FRRzyUPMMesxVN4lnq3ZI6YwQd+irfFGM/gBgV9vyGrg3LRHOOR0qA1J1W8WXA
+# YOFKecQT9BBiIOUgjGHGy13oh4Y7geMH4l54497ifdYEqZDXFRFNJjTsUj141g6I
+# QFuIs3S7tOxdZ3eqwEZis36B1bB97lDzAbOliNL2JkdM/6CzNZ0c1N3mtcL+2fRj
+# 4K1mJDNYy8yUlIc5b6XovtViN6QCuSTnlAO/sZDGxuZIU9Jb6oWcoAK+De8Sagyj
+# oYIUsjCCFK4GCisGAQQBgjcDAwExghSeMIIUmgYJKoZIhvcNAQcCoIIUizCCFIcC
+# AQMxDzANBglghkgBZQMEAgEFADCCAWoGCyqGSIb3DQEJEAEEoIIBWQSCAVUwggFR
+# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIAvJHdD9Bo/yhXePnyy/
+# mutFzr9+aPeYjVO95Nl5jl3FAgZqddItjw8YEzIwMjYwODEzMjA1MzI4LjcyNFow
+# BIACAfSggemkgeYwgeMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
+# MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
+# b24xLTArBgNVBAsTJE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRl
+# ZDEnMCUGA1UECxMeblNoaWVsZCBUU1MgRVNOOjdBMUEtMDVFMC1EOTQ3MTUwMwYD
+# VQQDEyxNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lIFN0YW1waW5nIEF1dGhvcml0
+# eaCCDykwggeCMIIFaqADAgECAhMzAAAABeXPD/9mLsmHAAAAAAAFMA0GCSqGSIb3
+# DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9y
+# YXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVudGl0eSBWZXJpZmljYXRpb24g
+# Um9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAyMDAeFw0yMDExMTkyMDMyMzFa
+# Fw0zNTExMTkyMDQyMzFaMGExCzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3Nv
+# ZnQgQ29ycG9yYXRpb24xMjAwBgNVBAMTKU1pY3Jvc29mdCBQdWJsaWMgUlNBIFRp
+# bWVzdGFtcGluZyBDQSAyMDIwMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKC
+# AgEAnnznUmP94MWfBX1jtQYioxwe1+eXM9ETBb1lRkd3kcFdcG9/sqtDlwxKoVIc
+# aqDb+omFio5DHC4RBcbyQHjXCwMk/l3TOYtgoBjxnG/eViS4sOx8y4gSq8Zg49RE
+# Af5huXhIkQRKe3Qxs8Sgp02KHAznEa/Ssah8nWo5hJM1xznkRsFPu6rfDHeZeG1W
+# a1wISvlkpOQooTULFm809Z0ZYlQ8Lp7i5F9YciFlyAKwn6yjN/kR4fkquUWfGmMo
+# pNq/B8U/pdoZkZZQbxNlqJOiBGgCWpx69uKqKhTPVi3gVErnc/qi+dR8A2MiAz0k
+# N0nh7SqINGbmw5OIRC0EsZ31WF3Uxp3GgZwetEKxLms73KG/Z+MkeuaVDQQheang
+# OEMGJ4pQZH55ngI0Tdy1bi69INBV5Kn2HVJo9XxRYR/JPGAaM6xGl57Ei95HUw9N
+# V/uC3yFjrhc087qLJQawSC3xzY/EXzsT4I7sDbxOmM2rl4uKK6eEpurRduOQ2hTk
+# mG1hSuWYBunFGNv21Kt4N20AKmbeuSnGnsBCd2cjRKG79+TX+sTehawOoxfeOO/j
+# R7wo3liwkGdzPJYHgnJ54UxbckF914AqHOiEV7xTnD1a69w/UTxwjEugpIPMIIE6
+# 7SFZ2PMo27xjlLAHWW3l1CEAFjLNHd3EQ79PUr8FUXetXr0CAwEAAaOCAhswggIX
+# MA4GA1UdDwEB/wQEAwIBhjAQBgkrBgEEAYI3FQEEAwIBADAdBgNVHQ4EFgQUa2ko
+# OjUvSGNAz3vYr0npPtk92yEwVAYDVR0gBE0wSzBJBgRVHSAAMEEwPwYIKwYBBQUH
+# AgEWM2h0dHA6Ly93d3cubWljcm9zb2Z0LmNvbS9wa2lvcHMvRG9jcy9SZXBvc2l0
+# b3J5Lmh0bTATBgNVHSUEDDAKBggrBgEFBQcDCDAZBgkrBgEEAYI3FAIEDB4KAFMA
+# dQBiAEMAQTAPBgNVHRMBAf8EBTADAQH/MB8GA1UdIwQYMBaAFMh+0mqFKhvKGZgE
+# ByfPUBBPaKiiMIGEBgNVHR8EfTB7MHmgd6B1hnNodHRwOi8vd3d3Lm1pY3Jvc29m
+# dC5jb20vcGtpb3BzL2NybC9NaWNyb3NvZnQlMjBJZGVudGl0eSUyMFZlcmlmaWNh
+# dGlvbiUyMFJvb3QlMjBDZXJ0aWZpY2F0ZSUyMEF1dGhvcml0eSUyMDIwMjAuY3Js
+# MIGUBggrBgEFBQcBAQSBhzCBhDCBgQYIKwYBBQUHMAKGdWh0dHA6Ly93d3cubWlj
+# cm9zb2Z0LmNvbS9wa2lvcHMvY2VydHMvTWljcm9zb2Z0JTIwSWRlbnRpdHklMjBW
+# ZXJpZmljYXRpb24lMjBSb290JTIwQ2VydGlmaWNhdGUlMjBBdXRob3JpdHklMjAy
+# MDIwLmNydDANBgkqhkiG9w0BAQwFAAOCAgEAX4h2x35ttVoVdedMeGj6TuHYRJkl
+# FaW4sTQ5r+k77iB79cSLNe+GzRjv4pVjJviceW6AF6ycWoEYR0LYhaa0ozJLU5Yi
+# +LCmcrdovkl53DNt4EXs87KDogYb9eGEndSpZ5ZM74LNvVzY0/nPISHz0Xva71Qj
+# D4h+8z2XMOZzY7YQ0Psw+etyNZ1CesufU211rLslLKsO8F2aBs2cIo1k+aHOhrw9
+# xw6JCWONNboZ497mwYW5EfN0W3zL5s3ad4Xtm7yFM7Ujrhc0aqy3xL7D5FR2J7x9
+# cLWMq7eb0oYioXhqV2tgFqbKHeDick+P8tHYIFovIP7YG4ZkJWag1H91KlELGWi3
+# SLv10o4KGag42pswjybTi4toQcC/irAodDW8HNtX+cbz0sMptFJK+KObAnDFHEsu
+# kxD+7jFfEV9Hh/+CSxKRsmnuiovCWIOb+H7DRon9TlxydiFhvu88o0w35JkNbJxT
+# k4MhF/KgaXn0GxdH8elEa2Imq45gaa8D+mTm8LWVydt4ytxYP/bqjN49D9NZ81co
+# E6aQWm88TwIf4R4YZbOpMKN0CyejaPNN41LGXHeCUMYmBx3PkP8ADHD1J2Cr/6tj
+# uOOCztfp+o9Nc+ZoIAkpUcA/X2gSMkgHAPUvIdtoSAHEUKiBhI6JQivRepyvWcl+
+# JYbYbBh7pmgAXVswggefMIIFh6ADAgECAhMzAAAAW0q1jUEybdx0AAAAAABbMA0G
+# CSqGSIb3DQEBDAUAMGExCzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQg
+# Q29ycG9yYXRpb24xMjAwBgNVBAMTKU1pY3Jvc29mdCBQdWJsaWMgUlNBIFRpbWVz
+# dGFtcGluZyBDQSAyMDIwMB4XDTI2MDEwODE4NTkwNVoXDTI3MDEwNzE4NTkwNVow
+# geMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdS
+# ZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xLTArBgNVBAsT
+# JE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRlZDEnMCUGA1UECxMe
+# blNoaWVsZCBUU1MgRVNOOjdBMUEtMDVFMC1EOTQ3MTUwMwYDVQQDEyxNaWNyb3Nv
+# ZnQgUHVibGljIFJTQSBUaW1lIFN0YW1waW5nIEF1dGhvcml0eTCCAiIwDQYJKoZI
+# hvcNAQEBBQADggIPADCCAgoCggIBAJBUzBbbnlDXee0B0KD5G4/475thFyfctCyu
+# ESTWQXvlLi4Wx/td2qUdeq4ideeg6VWhiOHfu3wJV4TUGSRtqh9Ccr1BmiBKv9iu
+# FpgHyIBu5Qx38ZsxwlFeXVS+ZqJJKnXRbDNQdcYSoC/6c0hQJ/PH50DBRDQkPXVw
+# yFizLrRH9AlrJeUg7BKeT23zftS8/KOJLvEEbHOF6pSOY3ZVprZUWbWjWwRTmoHa
+# Q/E8vrWtLNyEJ+b089VW1Ikra3t4GTB5Wby3CL1K2zYnAxBIvafsKMFyj9OuXHcT
+# PKMDoFSMeamG9MKOMb6uoG1PjdnDgsLP6EOMRSzrLL7jED1mbB9RSd9fhty+HQr6
+# vZgsBn6oUy+YTpNVLskwdtUM82WYAkPztlOt3AiL0qyV7/U3j/uq3vHMjPM0w034
+# 0M57Nei0g4BCcMt0dbqoc91VgCb3/36sHQANontn1HOF2oLk8190QRS43isHVra8
+# H8sf5+GlqIYsYiCKX04HZiOzZW826nVI6d++8lyTeWmpj90Ua9uPbJhVjwE3oh6t
+# O510ySqmSMSLEN07p3Ibe3E6BAb2w93rWzb26+dpSthbKF4kApofqBsWPX4MEtHK
+# SOftPmVTCQ47tghrVuHia9jY+Hsj01m4KW4WtkmVm3L6hMZECMa4sjMxAXz+bX/A
+# JhWTe6TZAgMBAAGjggHLMIIBxzAdBgNVHQ4EFgQU7/LqUlWWYhXJdXwgYKx4b8Gv
+# 0rYwHwYDVR0jBBgwFoAUa2koOjUvSGNAz3vYr0npPtk92yEwbAYDVR0fBGUwYzBh
+# oF+gXYZbaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9jcmwvTWljcm9z
+# b2Z0JTIwUHVibGljJTIwUlNBJTIwVGltZXN0YW1waW5nJTIwQ0ElMjAyMDIwLmNy
+# bDB5BggrBgEFBQcBAQRtMGswaQYIKwYBBQUHMAKGXWh0dHA6Ly93d3cubWljcm9z
+# b2Z0LmNvbS9wa2lvcHMvY2VydHMvTWljcm9zb2Z0JTIwUHVibGljJTIwUlNBJTIw
+# VGltZXN0YW1waW5nJTIwQ0ElMjAyMDIwLmNydDAMBgNVHRMBAf8EAjAAMBYGA1Ud
+# JQEB/wQMMAoGCCsGAQUFBwMIMA4GA1UdDwEB/wQEAwIHgDBmBgNVHSAEXzBdMFEG
+# DCsGAQQBgjdMg30BATBBMD8GCCsGAQUFBwIBFjNodHRwOi8vd3d3Lm1pY3Jvc29m
+# dC5jb20vcGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wCAYGZ4EMAQQCMA0GCSqG
+# SIb3DQEBDAUAA4ICAQAAH+zd+XKh4OxXYMWFmtgilXAQGctOjCUB1w/uBiC/OXcH
+# 3Ia4/XbdUhKzFbaiTbIE6vYZKd1p4u7nKOLkawymAMVyuO7LSl6rLKttZIyLhWjT
+# K0zXOz0u4xLq9+bRtBEKJvA6sD5nJwH1IO6z1YizyuIRoalMCnbrUixfWxQn4TAm
+# N7t9uk+X2FUThEa3ewzRwhtG+xwaAbLMkxRmR24JnfXd1VxKo90+m7Wzuov96Uug
+# x5wZdewiIIm1ZWTj4lCJHup679LcOa7tAxJMipVaSltQH9fm9TOKczlfxtWuBcLU
+# 4duZfqwgsILsH7PMkcX1zwQzQD0yAtPhnYz9KNG125bX+iilOe1S8RHqv2bbBpMp
+# ao4kcUvQI6dMgKRvFmm1eLbhSNOQplDMTGD1tNVdNGkI96jUu+troUjWMMi46TQf
+# BAHxtDTpRhIu/87vAVQ8Z6RHhFxesz4Ed5JThaIQRAy6GcO/Jk+QzDzoZ0arRIkI
+# sGJ7rZgOVAjx9ctfw8lH9RfjcwB3wdGBYNMNVJqQpUai2Taddf5pXzTZEHIqLEF5
+# 3SrBjIeInoQrP7U5VlXiMQsxewLdINrAE2l2TR3KBikb+RQRygbTp8jj2yiC0NCU
+# wG+K+ndglN5RMbXjFW6aKa59Xq+b8XzK/DK+AJtgOpHgJv8Qrk62A+twOVLOpjGC
+# A9QwggPQAgEBMHgwYTELMAkGA1UEBhMCVVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBD
+# b3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGltZXN0
+# YW1waW5nIENBIDIwMjACEzMAAABbSrWNQTJt3HQAAAAAAFswDQYJYIZIAWUDBAIB
+# BQCgggEtMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQx
+# IgQgtJqAsEDpPxDvrDXc6nNOXzjG+g2jNn0LwNsT3wlpCVEwgd0GCyqGSIb3DQEJ
+# EAIvMYHNMIHKMIHHMIGgBCAvMQNVXZ0b0xxlGw8X/3IEybObuT6a5W1d61CW+cGD
+# 7zB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
+# cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3RhbXBp
+# bmcgQ0EgMjAyMAITMwAAAFtKtY1BMm3cdAAAAAAAWzAiBCD2xg963Mm0i+2EHfps
+# 4RhfW7votUNZkuBT1wg8WH/HmDANBgkqhkiG9w0BAQsFAASCAgBaUbENj6G3IPUB
+# k14qyswQAk5ZQbKXZ6aETGEnrbIhB9zmwXYwmjvhCOYiJ4lmbNTTs7cex0YH0qOL
+# PuOZfXI4F2fiZyzw8+CG5FW7S5asazjZFr8jTJmXAsIVPmiadb4gxW2EGk+g7GKh
+# meimyuRnoGSWKWx8T4jW08TuHPeZhcoey4LDJ828w6lu/A0/byEXcrnDfsYGSNF6
+# NZpjnTI/id2hkBp+0ZJx/QIhxgQdf40arOWkptp+NGOI4NOvKWN1CX87Eo5Uged+
+# X6+Gse6YyBR0BAg1MzRTLpWdmym+wUNRbnwW1qjpl6RTBzSGm8mgLZfh/S0bS61+
+# 8guIL4hEitkfsd9nvdHDHnp7eEW7vaVTvJb2atjHI35Y870kR6DZoZmUfU8LaQSj
+# yfjpLBP2qBlKiv7VOY2/ail4YYejKLUYO20wH4a1sE5MRsTqeHHRt7Y4LqtRMHmW
+# 83ygm5IbJqmUVihbOXPAZiPEStjILdCY57+vZ+e9DaYNU+s4rT2ECX1/Y4gOrBuu
+# cfbMTQR6dVlytp/ZqAnzqGTmw3PIcIEkucp8xLj48ul9nw3WAY/kY6BGNpsXjNyw
+# sE3VRI0jxmsTv7WmyUA1PLAUq/43T6z8wY3pDD51KMUedrMNWSGE1hjVJzb25Mp3
+# 7uC7GNFjzdaauRR1Vj0Mt2ykU7nuNQ==
 # SIG # End signature block

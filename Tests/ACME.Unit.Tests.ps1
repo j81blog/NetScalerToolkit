@@ -1,6 +1,23 @@
 $modulePath = Join-Path -Path $PSScriptRoot -ChildPath '..\NetScalerToolkit\NetScalerToolkit.psd1'
 Import-Module $modulePath -Force
 
+# Exception types whose Data dictionary is unusable, mirroring third-party exceptions
+# that break the inner-exception walk in Write-NSACMECertificateErrorDetail.
+class NullDataTestException : System.Exception {
+    NullDataTestException([string]$message) : base($message) {}
+    [System.Collections.IDictionary] get_Data() { return $null }
+}
+
+class NullKeysTestException : System.Exception {
+    NullKeysTestException([string]$message) : base($message) {}
+    [System.Collections.IDictionary] get_Data() { return [NullKeysTestDictionary]::new() }
+}
+
+# Dictionary whose Keys collection is null.
+class NullKeysTestDictionary : System.Collections.Hashtable {
+    [System.Collections.ICollection] get_Keys() { return $null }
+}
+
 Describe 'ACME helper functions' {
     InModuleScope NetScalerToolkit {
         BeforeAll {
@@ -481,6 +498,65 @@ Describe 'ACME helper functions' {
                 }
             }
 
+            It 'keeps running when the log file is locked by another process' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                $stream = $null
+                try {
+                    $logPath = Join-Path $dir 'acme.log'
+                    $script:NSACMECertificateLogFile = $logPath
+                    $script:NSACMECertificateLogLevel = 'Info'
+                    $script:NSACMECertificateLogType = 'txt'
+                    $script:NSACMECertificateNoConsoleOutput = $true
+                    $script:NSACMECertificateSensitiveValues = [System.Collections.Generic.List[object]]::new()
+
+                    Initialize-NSACMECertificateLog -Path $logPath -LogType txt
+                    $stream = [System.IO.File]::Open($logPath, 'Open', 'Read', 'None')
+
+                    { Write-NSACMECertificateLog Info 'Unit' 'Write while locked' -ErrorAction Stop } | Should -Not -Throw
+                } finally {
+                    if ($stream) { $stream.Dispose() }
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                    $script:NSACMECertificateLogFile = $null
+                    $script:NSACMECertificateNoConsoleOutput = $false
+                }
+            }
+
+            It 'releases the attached log file when the completion mail fails' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    $logPath = Join-Path $dir 'acme.log'
+                    $script:NSACMECertificateLogFile = $logPath
+                    $script:NSACMECertificateLogLevel = 'Info'
+                    $script:NSACMECertificateLogType = 'txt'
+                    $script:NSACMECertificateNoConsoleOutput = $true
+                    $script:NSACMECertificateSensitiveValues = [System.Collections.Generic.List[object]]::new()
+                    Initialize-NSACMECertificateLog -Path $logPath -LogType txt
+
+                    # Port 9 on loopback refuses immediately, so the send fails with the log attached.
+                    $settings = [pscustomobject]@{
+                        SendMail        = $true
+                        SMTPTo          = 'hostmaster@example.com'
+                        SMTPFrom        = 'acme@example.com'
+                        SMTPServer      = '127.0.0.1'
+                        SMTPPort        = 9
+                        SMTPUseSSL      = $false
+                        SMTPCredential  = [pscredential]::Empty
+                        LogAsAttachment = $true
+                    }
+
+                    Send-NSACMECertificateMail -Settings $settings -Subject 'Unit' -Body 'Unit' -LogFile $logPath
+
+                    { Add-Content -LiteralPath $logPath -Value 'after mail' -ErrorAction Stop } | Should -Not -Throw
+                    (Get-Content -LiteralPath $logPath) | Should -Contain 'after mail'
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                    $script:NSACMECertificateLogFile = $null
+                    $script:NSACMECertificateNoConsoleOutput = $false
+                }
+            }
+
             It 'writes a readable result summary without returning objects' {
                 $script:NSACMECertificateLogFile = $null
                 $script:NSACMECertificateLogLevel = 'Info'
@@ -499,6 +575,47 @@ Describe 'ACME helper functions' {
                     })
 
                 $output | Should -BeNullOrEmpty
+            }
+
+            It 'reports the certificate details in the result summary' {
+                $script:SummaryMessages = @()
+                Mock Write-NSACMECertificateLog { $script:SummaryMessages += $Message }
+
+                Write-NSACMECertificateResultSummary -Results @([pscustomobject]@{
+                        CN                      = 'example.com'
+                        Domains                 = @('example.com', 'www.example.com')
+                        Status                  = 'Success'
+                        Production              = $false
+                        CertKeyName             = 'TST-example-cert'
+                        NotAfter                = (Get-Date).AddDays(90).AddMinutes(1)
+                        RenewAfter              = (Get-Date).AddDays(59).AddMinutes(1)
+                        PublicKeySize           = 2048
+                        Thumbprint              = 'ABC123'
+                        CertDir                 = 'C:\Certs\LECRT-20260813-215559-example.com'
+                        CertFile                = 'C:\Certs\LECRT-20260813-215559-example.com\cert.cer'
+                        KeyFile                 = 'C:\Certs\LECRT-20260813-215559-example.com\cert.key'
+                        # PfxPath is the uploaded file, which is the full chain whenever one exists.
+                        PfxPath                 = 'C:\Certs\LECRT-20260813-215559-example.com\fullchain.pfx'
+                        PfxFilePath             = 'C:\Certs\LECRT-20260813-215559-example.com\cert.pfx'
+                        PfxFullChainPath        = 'C:\Certs\LECRT-20260813-215559-example.com\fullchain.pfx'
+                        IntermediateName        = 'STAGING Unit Intermediate'
+                        IntermediateNotAfter    = [datetime]'2028-09-03'
+                        IntermediateCertKeyName = @('STAGING Unit Intermediate')
+                        LogFile                 = 'acme.log'
+                    })
+
+                $summary = $script:SummaryMessages -join "`n"
+                $summary | Should -Match 'Certificate usage\s+test \(staging\)'
+                $summary | Should -Match 'Expires\s+\S+ \S+ \(90 days\)'
+                $summary | Should -Match 'Renew after\s+\S+ \S+ \(59 days\)'
+                $summary | Should -Match 'Public key size\s+2048'
+                $summary | Should -Match 'Intermediate\s+STAGING Unit Intermediate \[2028-09-03\]'
+                $summary | Should -Match 'Intermediate certkey\s+STAGING Unit Intermediate'
+                $summary | Should -Match 'Cert dir\s+C:\\Certs\\LECRT-20260813-215559-example\.com'
+                $summary | Should -Match 'CRT file\s+cert\.cer'
+                $summary | Should -Match 'KEY file\s+cert\.key'
+                $summary | Should -Match 'PFX file\s+cert\.pfx'
+                $summary | Should -Match 'PFX with chain\s+fullchain\.pfx'
             }
 
             It 'copies generated ACME certificate artifacts to the configured CertDir' {
@@ -662,7 +779,7 @@ Describe 'ACME helper functions' {
                 }
             }
 
-            It 'stops deployment when chain validation fails in Fail mode' {
+            It 'throws when chain validation fails in Fail mode' {
                 $leaf = New-TestCertificate -Subject 'untrusted.example.com'
                 $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
                 New-Item -ItemType Directory -Path $dir | Out-Null
@@ -676,6 +793,310 @@ Describe 'ACME helper functions' {
                 } finally {
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                     $script:NSACMECertificateNoConsoleOutput = $false
+                }
+            }
+
+            It 'stops before install when chain validation fails in Fail mode' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    # Shadow the Posh-ACME cmdlets: their KeyLength validation calls module-private
+                    # helpers that are unreachable from here, and mocks keep the real parameter metadata.
+                    function Get-PAServer { param($DirectoryUrl) [pscustomobject]@{ renewalInfo = $null; DisableARI = $true } }
+                    function Get-PAOrder { param($MainDomain, [switch]$Refresh) [pscustomobject]@{ MainDomain = 'example.com'; status = 'valid' } }
+                    function Get-PACertificate { param($MainDomain) [pscustomobject]@{ CertFile = $null; Thumbprint = 'ABC123' } }
+                    function Get-PAAccount { param($ID, $Contact, $KeyLength, $Status, [switch]$List, [switch]$Refresh) [pscustomobject]@{ ID = '1'; contact = @('mailto:hostmaster@example.com') } }
+                    function Set-PAAccount { param($ID, [switch]$Force) }
+                    function New-PAOrder { param($Domain, $KeyLength, $FriendlyName, $PfxPassSecure, $PreferredChain, $LifetimeDays, $ValidationTimeout, [switch]$AlwaysNewKey, [switch]$Force, [switch]$UseModernPfxEncryption) [pscustomobject]@{ MainDomain = 'example.com' } }
+                    function Submit-OrderFinalize { param($Order) }
+                    function Complete-PAOrder { param($Order) }
+
+                    Mock Import-Module {} -ParameterFilter { $Name -eq 'Posh-ACME' }
+                    Mock Set-NSACMEPoshACMEServer {}
+                    Mock Connect-NSNode { [pscustomobject]@{ IsHA = $false; IsPrimary = $true } }
+                    Mock Invoke-NSGetSSLCertKey { $null }
+                    Mock Test-NSACMECertificateRenewalRequired {
+                        [pscustomobject]@{ ShouldRenew = $true; Reason = 'unit test renew'; Summary = 'unit test renew'; CertExpires = $null; RenewAfter = $null; Source = 'unit'; Strategy = 'unit test'; ExpireDays = 0; RenewAfterDays = $null }
+                    }
+                    Mock Initialize-NSACMECertificateHttpValidationConfig {}
+                    Mock Get-NSACMECertificateVServerState {
+                        [pscustomobject]@{ Name = 'cs_example_http'; Type = 'CS'; State = 'ENABLED'; CurState = 'UP'; Endpoint = '10.0.0.1:80'; Text = 'UP'; IsServing = $true; Found = $true }
+                    }
+                    Mock Publish-NSACMECertificateHttpChallenge { @() }
+                    Mock Wait-NSACMECertificateAuthorization {}
+                    Mock Submit-OrderFinalize {}
+                    Mock Wait-NSACMECertificateOrderFinal {}
+                    Mock Complete-PAOrder {}
+                    Mock Copy-NSACMECertificateArtifactsToCertDir { [pscustomobject]@{ CertFile = $null; Thumbprint = 'ABC123' } }
+                    Mock Test-NSACMECertificateChainValidation { throw 'Certificate chain validation failed in Fail mode.' }
+                    Mock Install-NSACMECertificateNetScalerCertificate { [pscustomobject]@{ CertKeyName = 'san_example_com'; PfxFileName = 'unit.pfx'; PfxPath = 'C:\Certs\unit.pfx' } }
+                    Mock Remove-NSACMECertificateHttpChallengeBinding {}
+                    Mock Remove-NSACMECertificateHttpValidationConfig {}
+
+                    $requestResult = Request-NSACMECertificate `
+                        -ManagementURL 'https://ns-01.domain.local' `
+                        -Username 'nsroot' `
+                        -Password 'Sup3rS3cretP@ssw0rd' `
+                        -CN 'example.com' `
+                        -ValidationMethod http `
+                        -CsVipName 'cs_example_http' `
+                        -CertKeyNameToUpdate 'san_example_com' `
+                        -CertDir $dir `
+                        -EmailAddress 'hostmaster@example.com' `
+                        -CertificateChainValidation Fail `
+                        -Production `
+                        -SkipCertificateCheck `
+                        -DisableLogging `
+                        -NoConsoleOutput
+
+                    Should -Invoke Test-NSACMECertificateChainValidation -Times 1
+                    Should -Invoke Install-NSACMECertificateNetScalerCertificate -Times 0
+                    @($requestResult)[0].Status | Should -Be 'Failed'
+                    @($requestResult)[0].Reason | Should -Match 'chain validation'
+                    Should -Invoke Remove-NSACMECertificateHttpValidationConfig -Times 1
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            It 'fails the request before publishing the challenge when the CS vServer is not serving' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    # See the chain validation wiring test above for why these are stubs, not mocks.
+                    function Get-PAServer { param($DirectoryUrl) [pscustomobject]@{ renewalInfo = $null; DisableARI = $true } }
+                    function Get-PAOrder { param($MainDomain, [switch]$Refresh) [pscustomobject]@{ MainDomain = 'example.com'; status = 'valid' } }
+                    function Get-PACertificate { param($MainDomain) [pscustomobject]@{ CertFile = $null; Thumbprint = 'ABC123' } }
+                    function Get-PAAccount { param($ID, $Contact, $KeyLength, $Status, [switch]$List, [switch]$Refresh) [pscustomobject]@{ ID = '1'; contact = @('mailto:hostmaster@example.com') } }
+                    function Set-PAAccount { param($ID, [switch]$Force) }
+                    function New-PAOrder { param($Domain, $KeyLength, $FriendlyName, $PfxPassSecure, $PreferredChain, $LifetimeDays, $ValidationTimeout, [switch]$AlwaysNewKey, [switch]$Force, [switch]$UseModernPfxEncryption) [pscustomobject]@{ MainDomain = 'example.com' } }
+
+                    Mock Import-Module {} -ParameterFilter { $Name -eq 'Posh-ACME' }
+                    Mock Set-NSACMEPoshACMEServer {}
+                    Mock Connect-NSNode { [pscustomobject]@{ IsHA = $false; IsPrimary = $true } }
+                    Mock Invoke-NSGetSSLCertKey { $null }
+                    Mock Test-NSACMECertificateRenewalRequired {
+                        [pscustomobject]@{ ShouldRenew = $true; Reason = 'unit test renew'; Summary = 'unit test renew'; CertExpires = $null; RenewAfter = $null; Source = 'unit'; Strategy = 'unit test'; ExpireDays = 0; RenewAfterDays = $null }
+                    }
+                    Mock Initialize-NSACMECertificateHttpValidationConfig {}
+                    Mock Get-NSACMECertificateVServerState {
+                        [pscustomobject]@{ Name = 'cs_example_http'; Type = 'CS'; State = 'ENABLED'; CurState = 'OUT OF SERVICE'; Endpoint = '10.0.0.1:80'; Text = 'OUT OF SERVICE, ENABLED'; IsServing = $false; Found = $true }
+                    }
+                    Mock Publish-NSACMECertificateHttpChallenge { @() }
+                    Mock Install-NSACMECertificateNetScalerCertificate { [pscustomobject]@{ CertKeyName = 'san_example_com' } }
+                    Mock Remove-NSACMECertificateHttpChallengeBinding {}
+                    Mock Remove-NSACMECertificateHttpValidationConfig {}
+
+                    $requestResult = Request-NSACMECertificate `
+                        -ManagementURL 'https://ns-01.domain.local' `
+                        -Username 'nsroot' `
+                        -Password 'Sup3rS3cretP@ssw0rd' `
+                        -CN 'example.com' `
+                        -ValidationMethod http `
+                        -CsVipName 'cs_example_http' `
+                        -CertKeyNameToUpdate 'san_example_com' `
+                        -CertDir $dir `
+                        -EmailAddress 'hostmaster@example.com' `
+                        -Production `
+                        -SkipCertificateCheck `
+                        -DisableLogging `
+                        -NoConsoleOutput
+
+                    Should -Invoke Publish-NSACMECertificateHttpChallenge -Times 0
+                    Should -Invoke Install-NSACMECertificateNetScalerCertificate -Times 0
+                    @($requestResult)[0].Status | Should -Be 'Failed'
+                    @($requestResult)[0].Reason | Should -Match 'cannot reach the HTTP-01 challenge'
+                    # Down plus no EnableVipBefore is the state DisableVipAfter leaves behind.
+                    @($requestResult)[0].Reason | Should -Match 'EnableVipBefore'
+                    Should -Invoke Remove-NSACMECertificateHttpValidationConfig -Times 1
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            It 'names the VPN global binding and the parameter when a certkey update is refused' {
+                $settings = [pscustomobject]@{ SaveADCConfig = $false }
+                $request = [pscustomobject]@{ CN = 'example.com'; CertKeyNameToUpdate = 'vpn-bound-cert' }
+                $pfxDir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $pfxDir | Out-Null
+                $pfxPath = Join-Path $pfxDir 'fullchain.pfx'
+                Set-Content -LiteralPath $pfxPath -Value 'unit-test-pfx' -Encoding ASCII
+                $certificate = [pscustomobject]@{ PfxFullChain = $pfxPath; NotAfter = (Get-Date).AddDays(90) }
+
+                Mock ConvertFrom-NSACMECertificateLegacySecret { 'pfx-pass' }
+                Mock Copy-NSACMECertificateNetScalerFile {}
+                Mock Invoke-NSGetSSLCertKey { [pscustomobject]@{ certkey = 'vpn-bound-cert' } }
+                Mock Invoke-NSUnlinkSSLCertKey { throw 'ErrorCode: 1545; Message: Certificate does not have any CA link' }
+                Mock Invoke-NSUpdateSSLCertKey { throw 'ErrorCode: 1541; Message: Certificate is referenced by a CRL, OCSP responder, vserver, service, monitor, SSL profile, CA Cert Group, another certificate' }
+                Mock Invoke-NSGetVPNGlobalSSLCertKeyBinding { [pscustomobject]@{ certkeyname = 'vpn-bound-cert' } }
+                Mock Invoke-NSGetSSLCertLink { $null }
+                Mock Invoke-NSGetSSLCertKeySSLVServerBinding { $null }
+                Mock Invoke-NSGetSSLCertKeyServiceBinding { $null }
+                Mock Invoke-NSGetSSLCertKeySSLProfileBinding { $null }
+                Mock Invoke-NSGetSSLCertKeyCrldistributionBinding { $null }
+                Mock Invoke-NSGetSSLCertKeySSLOCSPResponderBinding { $null }
+                Mock Invoke-NSDeleteVPNGlobalSSLCertKeyBinding {}
+
+                $installError = $null
+                try {
+                    Install-NSACMECertificateNetScalerCertificate -Session ([pscustomobject]@{}) -Settings $settings `
+                        -Request $request -Certificate $certificate -PfxSecret (ConvertTo-SecureString 'pfx-pass' -AsPlainText -Force) -IsProduction
+                } catch {
+                    $installError = $_
+                }
+
+                $installError | Should -Not -BeNullOrEmpty
+                $installError.Exception.Message | Should -Match "refused to update SSL certkey 'vpn-bound-cert'"
+                $installError.Exception.Message | Should -Match 'bind vpn global -certkeyName vpn-bound-cert'
+                $installError.Exception.Message | Should -Match '-UnbindGlobalVPNCertOnUpdate'
+                $installError.Exception.Message | Should -Match 'ErrorCode: 1541'
+                # Without the switch the binding is left exactly as it was.
+                Should -Invoke Invoke-NSDeleteVPNGlobalSSLCertKeyBinding -Times 0
+            }
+
+            It 'unbinds from VPN global, updates and rebinds when UnbindGlobalVPNCertOnUpdate is set' {
+                $settings = [pscustomobject]@{ SaveADCConfig = $false }
+                $request = [pscustomobject]@{ CN = 'example.com'; CertKeyNameToUpdate = 'vpn-bound-cert'; UnbindGlobalVPNCertOnUpdate = $true }
+                $pfxDir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $pfxDir | Out-Null
+                $pfxPath = Join-Path $pfxDir 'fullchain.pfx'
+                Set-Content -LiteralPath $pfxPath -Value 'unit-test-pfx' -Encoding ASCII
+                $certificate = [pscustomobject]@{ PfxFullChain = $pfxPath; NotAfter = (Get-Date).AddDays(90) }
+
+                $script:VpnUpdateAttempts = 0
+                Mock ConvertFrom-NSACMECertificateLegacySecret { 'pfx-pass' }
+                Mock Copy-NSACMECertificateNetScalerFile {}
+                Mock Invoke-NSGetSSLCertKey { [pscustomobject]@{ certkey = 'vpn-bound-cert' } }
+                Mock Invoke-NSUnlinkSSLCertKey { throw 'ErrorCode: 1545; Message: Certificate does not have any CA link' }
+                Mock Invoke-NSUpdateSSLCertKey {
+                    $script:VpnUpdateAttempts++
+                    # Refused while bound; the third attempt runs after the unbind.
+                    if ($script:VpnUpdateAttempts -lt 3) { throw 'ErrorCode: 1541; Message: Certificate is referenced by a CRL, OCSP responder, vserver' }
+                }
+                Mock Invoke-NSGetVPNGlobalSSLCertKeyBinding { [pscustomobject]@{ certkeyname = 'vpn-bound-cert' } }
+                Mock Invoke-NSGetSSLCertLink { $null }
+                Mock Invoke-NSGetSSLCertKeySSLVServerBinding { $null }
+                Mock Invoke-NSGetSSLCertKeyServiceBinding { $null }
+                Mock Invoke-NSGetSSLCertKeySSLProfileBinding { $null }
+                Mock Invoke-NSGetSSLCertKeyCrldistributionBinding { $null }
+                Mock Invoke-NSGetSSLCertKeySSLOCSPResponderBinding { $null }
+                Mock Invoke-NSDeleteVPNGlobalSSLCertKeyBinding {}
+                Mock Invoke-NSAddVPNGlobalSSLCertKeyBinding {}
+                Mock Set-NSACMECertificateChainLink { @() }
+
+                $result = Install-NSACMECertificateNetScalerCertificate -Session ([pscustomobject]@{}) -Settings $settings `
+                    -Request $request -Certificate $certificate -PfxSecret (ConvertTo-SecureString 'pfx-pass' -AsPlainText -Force) -IsProduction
+
+                $script:VpnUpdateAttempts | Should -Be 3
+                Should -Invoke Invoke-NSDeleteVPNGlobalSSLCertKeyBinding -Times 1
+                Should -Invoke Invoke-NSAddVPNGlobalSSLCertKeyBinding -Times 1
+                $result.CertKeyName | Should -Be 'vpn-bound-cert'
+            }
+
+            It 'restores the VPN global binding when the update fails while unbound' {
+                $settings = [pscustomobject]@{ SaveADCConfig = $false }
+                $request = [pscustomobject]@{ CN = 'example.com'; CertKeyNameToUpdate = 'vpn-bound-cert'; UnbindGlobalVPNCertOnUpdate = $true }
+                $pfxDir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $pfxDir | Out-Null
+                $pfxPath = Join-Path $pfxDir 'fullchain.pfx'
+                Set-Content -LiteralPath $pfxPath -Value 'unit-test-pfx' -Encoding ASCII
+                $certificate = [pscustomobject]@{ PfxFullChain = $pfxPath; NotAfter = (Get-Date).AddDays(90) }
+
+                Mock ConvertFrom-NSACMECertificateLegacySecret { 'pfx-pass' }
+                Mock Copy-NSACMECertificateNetScalerFile {}
+                Mock Invoke-NSGetSSLCertKey { [pscustomobject]@{ certkey = 'vpn-bound-cert' } }
+                Mock Invoke-NSUnlinkSSLCertKey { throw 'ErrorCode: 1545; Message: Certificate does not have any CA link' }
+                Mock Invoke-NSUpdateSSLCertKey { throw 'ErrorCode: 1541; Message: Certificate is referenced by a CRL, OCSP responder, vserver' }
+                Mock Invoke-NSGetVPNGlobalSSLCertKeyBinding { [pscustomobject]@{ certkeyname = 'vpn-bound-cert' } }
+                Mock Invoke-NSGetSSLCertLink { $null }
+                Mock Invoke-NSGetSSLCertKeySSLVServerBinding { $null }
+                Mock Invoke-NSGetSSLCertKeyServiceBinding { $null }
+                Mock Invoke-NSGetSSLCertKeySSLProfileBinding { $null }
+                Mock Invoke-NSGetSSLCertKeyCrldistributionBinding { $null }
+                Mock Invoke-NSGetSSLCertKeySSLOCSPResponderBinding { $null }
+                Mock Invoke-NSDeleteVPNGlobalSSLCertKeyBinding {}
+                Mock Invoke-NSAddVPNGlobalSSLCertKeyBinding {}
+
+                {
+                    Install-NSACMECertificateNetScalerCertificate -Session ([pscustomobject]@{}) -Settings $settings `
+                        -Request $request -Certificate $certificate -PfxSecret (ConvertTo-SecureString 'pfx-pass' -AsPlainText -Force) -IsProduction
+                } | Should -Throw
+
+                Should -Invoke Invoke-NSAddVPNGlobalSSLCertKeyBinding -Times 1
+            }
+
+            It 'enables a CS vServer left down by DisableVipAfter and disables it again' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    # See the chain validation wiring test above for why these are stubs, not mocks.
+                    function Get-PAServer { param($DirectoryUrl) [pscustomobject]@{ renewalInfo = $null; DisableARI = $true } }
+                    function Get-PAOrder { param($MainDomain, [switch]$Refresh) [pscustomobject]@{ MainDomain = 'example.com'; status = 'valid' } }
+                    function Get-PACertificate { param($MainDomain) [pscustomobject]@{ CertFile = $null; Thumbprint = 'ABC123' } }
+                    function Get-PAAccount { param($ID, $Contact, $KeyLength, $Status, [switch]$List, [switch]$Refresh) [pscustomobject]@{ ID = '1'; contact = @('mailto:hostmaster@example.com') } }
+                    function Set-PAAccount { param($ID, [switch]$Force) }
+                    function New-PAOrder { param($Domain, $KeyLength, $FriendlyName, $PfxPassSecure, $PreferredChain, $LifetimeDays, $ValidationTimeout, [switch]$AlwaysNewKey, [switch]$Force, [switch]$UseModernPfxEncryption) [pscustomobject]@{ MainDomain = 'example.com' } }
+                    function Submit-OrderFinalize { param($Order) }
+                    function Complete-PAOrder { param($Order) }
+
+                    Mock Import-Module {} -ParameterFilter { $Name -eq 'Posh-ACME' }
+                    Mock Set-NSACMEPoshACMEServer {}
+                    Mock Connect-NSNode { [pscustomobject]@{ IsHA = $false; IsPrimary = $true } }
+                    Mock Invoke-NSGetSSLCertKey { $null }
+                    Mock Test-NSACMECertificateRenewalRequired {
+                        [pscustomobject]@{ ShouldRenew = $true; Reason = 'unit test renew'; Summary = 'unit test renew'; CertExpires = $null; RenewAfter = $null; Source = 'unit'; Strategy = 'unit test'; ExpireDays = 0; RenewAfterDays = $null }
+                    }
+                    Mock Initialize-NSACMECertificateHttpValidationConfig {}
+                    # Down on the first read (the state DisableVipAfter left behind), up once enabled.
+                    $script:VServerStateReads = 0
+                    Mock Get-NSACMECertificateVServerState {
+                        $script:VServerStateReads++
+                        $serving = $script:VServerStateReads -gt 1
+                        [pscustomobject]@{
+                            Name      = $Name
+                            Type      = $Type
+                            State     = 'ENABLED'
+                            CurState  = if ($serving) { 'UP' } else { 'OUT OF SERVICE' }
+                            Endpoint  = '10.0.0.1:80'
+                            Text      = if ($serving) { 'UP' } else { 'OUT OF SERVICE' }
+                            IsServing = $serving
+                            Found     = $true
+                        }
+                    }
+                    Mock Invoke-NSEnableCSVServer {}
+                    Mock Invoke-NSDisableCSVServer {}
+                    Mock Publish-NSACMECertificateHttpChallenge { @() }
+                    Mock Wait-NSACMECertificateAuthorization {}
+                    Mock Wait-NSACMECertificateOrderFinal {}
+                    Mock Copy-NSACMECertificateArtifactsToCertDir { [pscustomobject]@{ CertFile = $null; Thumbprint = 'ABC123' } }
+                    Mock Test-NSACMECertificateChainValidation { [pscustomobject]@{ Mode = 'Warn'; Validated = $true; IsValid = $true; Status = @(); Leaf = $null; Chain = @() } }
+                    Mock Install-NSACMECertificateNetScalerCertificate { [pscustomobject]@{ CertKeyName = 'san_example_com'; PfxFileName = 'unit.pfx'; PfxPath = 'C:\Certs\unit.pfx'; ChainCertKeyName = @() } }
+                    Mock Remove-NSACMECertificateHttpChallengeBinding {}
+                    Mock Remove-NSACMECertificateHttpValidationConfig {}
+
+                    $requestResult = Request-NSACMECertificate `
+                        -ManagementURL 'https://ns-01.domain.local' `
+                        -Username 'nsroot' `
+                        -Password 'Sup3rS3cretP@ssw0rd' `
+                        -CN 'example.com' `
+                        -ValidationMethod http `
+                        -CsVipName 'cs_example_http' `
+                        -CertKeyNameToUpdate 'san_example_com' `
+                        -CertDir $dir `
+                        -EmailAddress 'hostmaster@example.com' `
+                        -EnableVipBefore `
+                        -DisableVipAfter `
+                        -Production `
+                        -SkipCertificateCheck `
+                        -DisableLogging `
+                        -NoConsoleOutput
+
+                    Should -Invoke Invoke-NSEnableCSVServer -Times 1
+                    Should -Invoke Publish-NSACMECertificateHttpChallenge -Times 1
+                    Should -Invoke Invoke-NSDisableCSVServer -Times 1
+                    @($requestResult)[0].Status | Should -Be 'Success'
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                 }
             }
 
@@ -754,6 +1175,46 @@ Describe 'ACME helper functions' {
                     $script:UploadedFiles.Count | Should -Be 1
                     $script:UploadedFiles[0] | Should -Be 'custom-cert-key-202701020304.pfx'
                     $result.PfxFileName | Should -Be 'custom-cert-key-202701020304.pfx'
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            It 'retries the certkey update with nodomaincheck after a rejected first attempt' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    $pfxPath = Join-Path $dir 'fullchain.pfx'
+                    Set-Content -LiteralPath $pfxPath -Value 'unit-test-pfx' -Encoding ASCII
+                    $request = [pscustomobject]@{ CN = 'leaf.example.com'; CertKeyNameToUpdate = 'custom-cert-key' }
+                    $settings = [pscustomobject]@{ SaveADCConfig = $false }
+                    $certificate = [pscustomobject]@{ PfxFullChain = $pfxPath; NotAfter = [datetime]'2027-01-02T03:04:00' }
+                    $script:UpdateAttempts = @()
+
+                    Mock ConvertFrom-NSACMECertificateLegacySecret { 'pfx-pass' }
+                    Mock Copy-NSACMECertificateNetScalerFile {}
+                    Mock Invoke-NSGetSSLCertKey { [pscustomobject]@{ certkey = 'custom-cert-key' } }
+                    Mock Invoke-NSUnlinkSSLCertKey { throw 'ErrorCode: 1545; Message: Certificate does not have any CA link' }
+                    Mock Invoke-NSUpdateSSLCertKey {
+                        $script:UpdateAttempts += [pscustomobject]@{ Nodomaincheck = [bool]$Nodomaincheck }
+                        if ($script:UpdateAttempts.Count -eq 1) {
+                            throw 'ErrorCode: 1541; Message: Certificate is referenced by a CRL, OCSP responder, vserver, service, monitor, SSL profile, CA Cert Group, another certificate'
+                        }
+                    }
+                    Mock Set-NSACMECertificateChainLink { @() }
+
+                    $result = Install-NSACMECertificateNetScalerCertificate `
+                        -Session ([pscustomobject]@{}) `
+                        -Settings $settings `
+                        -Request $request `
+                        -Certificate $certificate `
+                        -PfxSecret (ConvertTo-SecureString 'pfx-pass' -AsPlainText -Force) `
+                        -IsProduction
+
+                    $script:UpdateAttempts.Count | Should -Be 2
+                    $script:UpdateAttempts[0].Nodomaincheck | Should -BeFalse
+                    $script:UpdateAttempts[1].Nodomaincheck | Should -BeTrue
+                    $result.CertKeyName | Should -Be 'custom-cert-key'
                 } finally {
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                 }
@@ -953,6 +1414,259 @@ Describe 'ACME helper functions' {
                 }
             }
 
+        }
+
+        Context 'ACME account resolution' {
+            BeforeEach {
+                $script:NewAccountCalls = @()
+                $script:AccountListFilters = @()
+                $script:AccountStore = @()
+
+                # Plain stubs so mocks bind without Posh-ACME's private ValidateScript helpers.
+                function Get-PAAccount { param($ID, [switch]$List, $Status, $Contact, $KeyLength, [switch]$Refresh) }
+                function New-PAAccount { param($Contact, $KeyLength, [switch]$AcceptTOS, [switch]$Force, $ExtAcctKID, $ExtAcctHMACKey, $ExtAcctAlgorithm) }
+                function Set-PAAccount { param($ID, [switch]$Force) }
+
+                Mock Get-PAAccount {
+                    $script:AccountListFilters += [pscustomobject]@{ Contact = $Contact; KeyLength = $KeyLength; Status = $Status }
+                    @($script:AccountStore | Where-Object {
+                        $_.contact -contains "mailto:$Contact" -and $_.KeyLength -eq $KeyLength -and $_.status -eq 'valid'
+                    })
+                }
+                Mock New-PAAccount {
+                    $created = [pscustomobject]@{
+                        ID        = "acct-$($script:NewAccountCalls.Count + 1)"
+                        contact   = @("mailto:$Contact")
+                        KeyLength = $KeyLength
+                        status    = 'valid'
+                    }
+                    $script:NewAccountCalls += [pscustomobject]@{ Contact = $Contact; KeyLength = $KeyLength; Force = $Force }
+                    $script:AccountStore += $created
+                    $created
+                }
+                Mock Set-PAAccount {}
+
+                # Mirrors the account resolution block in Request-NSACMECertificate so the reuse
+                # contract is covered without standing up a full certificate request.
+                function Resolve-TestAcmeAccount {
+                    param([object[]]$Requests)
+
+                    $resolvedAcmeAccounts = @{}
+                    foreach ($request in $Requests) {
+                        $accountKeyLength = [string]$request.KeyLength
+                        if ($accountKeyLength -notmatch '^(ec-(256|384|521)|\d+)$') { $accountKeyLength = '2048' }
+                        $accountCacheKey = "$($request.EmailAddress)|$accountKeyLength"
+                        $account = $resolvedAcmeAccounts[$accountCacheKey]
+                        if (-not $account) {
+                            $existingAccounts = @()
+                            try {
+                                $existingAccounts = @(Get-PAAccount -List -Refresh -Contact $request.EmailAddress -KeyLength $accountKeyLength -Status 'valid' -ErrorAction Stop)
+                            } catch {
+                                $existingAccounts = @()
+                            }
+                            if ($existingAccounts.Count -gt 0) {
+                                $account = $existingAccounts[0]
+                            } else {
+                                $account = New-PAAccount -Contact $request.EmailAddress -KeyLength $accountKeyLength -AcceptTOS -ErrorAction Stop
+                            }
+                            $resolvedAcmeAccounts[$accountCacheKey] = $account
+                        }
+                        Set-PAAccount -ID $account.ID -Force | Out-Null
+                    }
+                }
+            }
+
+            It 'creates one account for many requests sharing a contact' {
+                $requests = 1..18 | ForEach-Object {
+                    [pscustomobject]@{ CN = "host$_.example.com"; EmailAddress = 'hostmaster@example.com'; KeyLength = '2048' }
+                }
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                Should -Invoke New-PAAccount -Times 1 -Exactly
+                $script:AccountListFilters.Count | Should -Be 1
+            }
+
+            It 'reuses an account that already exists on disk without creating one' {
+                $script:AccountStore = @(
+                    [pscustomobject]@{ ID = 'acct-existing'; contact = @('mailto:hostmaster@example.com'); KeyLength = '2048'; status = 'valid' }
+                )
+                $requests = 1..3 | ForEach-Object {
+                    [pscustomobject]@{ CN = "host$_.example.com"; EmailAddress = 'hostmaster@example.com'; KeyLength = '2048' }
+                }
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                Should -Invoke New-PAAccount -Times 0
+                Should -Invoke Set-PAAccount -Times 3
+            }
+
+            It 'creates separate accounts for distinct contacts' {
+                $requests = @(
+                    [pscustomobject]@{ CN = 'a.example.com'; EmailAddress = 'first@example.com'; KeyLength = '2048' }
+                    [pscustomobject]@{ CN = 'b.example.com'; EmailAddress = 'second@example.com'; KeyLength = '2048' }
+                    [pscustomobject]@{ CN = 'c.example.com'; EmailAddress = 'first@example.com'; KeyLength = '2048' }
+                )
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                Should -Invoke New-PAAccount -Times 2 -Exactly
+                $script:NewAccountCalls.Contact | Should -Be @('first@example.com', 'second@example.com')
+            }
+
+            It 'does not pass Force to New-PAAccount' {
+                $requests = @([pscustomobject]@{ CN = 'a.example.com'; EmailAddress = 'hostmaster@example.com'; KeyLength = '2048' })
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                $script:NewAccountCalls[0].Force | Should -Not -BeTrue
+            }
+
+            It 'keeps RSA key lengths as strings when filtering accounts' {
+                $requests = @([pscustomobject]@{ CN = 'a.example.com'; EmailAddress = 'hostmaster@example.com'; KeyLength = '4096' })
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                $script:AccountListFilters[0].KeyLength | Should -Be '4096'
+                $script:AccountListFilters[0].KeyLength | Should -BeOfType [string]
+                $script:NewAccountCalls[0].KeyLength | Should -Be '4096'
+            }
+
+            It 'preserves EC key lengths instead of falling back to RSA 2048' {
+                $requests = @([pscustomobject]@{ CN = 'a.example.com'; EmailAddress = 'hostmaster@example.com'; KeyLength = 'ec-384' })
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                $script:NewAccountCalls[0].KeyLength | Should -Be 'ec-384'
+            }
+
+            It 'falls back to RSA 2048 for missing or invalid key lengths' {
+                $requests = @(
+                    [pscustomobject]@{ CN = 'a.example.com'; EmailAddress = 'a@example.com'; KeyLength = $null }
+                    [pscustomobject]@{ CN = 'b.example.com'; EmailAddress = 'b@example.com'; KeyLength = 'not-a-key' }
+                )
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                $script:NewAccountCalls.KeyLength | Should -Be @('2048', '2048')
+            }
+
+            It 'treats different key lengths for one contact as separate accounts' {
+                $requests = @(
+                    [pscustomobject]@{ CN = 'a.example.com'; EmailAddress = 'hostmaster@example.com'; KeyLength = '2048' }
+                    [pscustomobject]@{ CN = 'b.example.com'; EmailAddress = 'hostmaster@example.com'; KeyLength = '4096' }
+                )
+
+                Resolve-TestAcmeAccount -Requests $requests
+
+                Should -Invoke New-PAAccount -Times 2 -Exactly
+                $script:NewAccountCalls.KeyLength | Should -Be @('2048', '4096')
+            }
+
+            It 'creates an account when listing existing accounts fails' {
+                Mock Get-PAAccount { throw 'account refresh failed' }
+                $requests = @([pscustomobject]@{ CN = 'a.example.com'; EmailAddress = 'hostmaster@example.com'; KeyLength = '2048' })
+
+                { Resolve-TestAcmeAccount -Requests $requests } | Should -Not -Throw
+                Should -Invoke New-PAAccount -Times 1 -Exactly
+            }
+        }
+
+        Context 'exception detail logging' {
+            It 'logs exception data entries when the Data dictionary is populated' {
+                Mock Write-NSACMECertificateLog {}
+
+                $exception = [System.Exception]::new('populated')
+                $exception.Data.Add('StatusCode', 400)
+                $exception.Data.Add('Detail', 'account not found')
+                $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'TestId', 'InvalidOperation', $null)
+
+                { Write-NSACMECertificateErrorDetail -ErrorRecord $errorRecord -Component 'Result' } | Should -Not -Throw
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -ParameterFilter {
+                    $Message -eq 'Exception data.' -and $Data.Name -eq 'StatusCode' -and $Data.Value -eq 400
+                }
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -ParameterFilter {
+                    $Message -eq 'Exception data.' -and $Data.Name -eq 'Detail' -and $Data.Value -eq 'account not found'
+                }
+            }
+
+            It 'walks a web exception inner chain without throwing' {
+                Mock Write-NSACMECertificateLog {}
+
+                $inner = [System.Net.WebException]::new('The remote server returned an error: (400) Bad Request.')
+                $exception = [System.Exception]::new('Unable to validate JWS :: Account not found', $inner)
+                $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'TestId', 'OperationStopped', $null)
+
+                { Write-NSACMECertificateErrorDetail -ErrorRecord $errorRecord -Component 'Result' } | Should -Not -Throw
+                Should -Invoke Write-NSACMECertificateLog -Times 0 -ParameterFilter {
+                    $Message -eq 'Exception data unavailable.'
+                }
+            }
+
+            It 'reports the exception shape instead of throwing when Data is null' {
+                Mock Write-NSACMECertificateLog {}
+
+                $exception = [NullDataTestException]::new('no data')
+                $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'TestId', 'InvalidOperation', $null)
+
+                { Write-NSACMECertificateErrorDetail -ErrorRecord $errorRecord -Component 'Result' } | Should -Not -Throw
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -ParameterFilter {
+                    $Message -eq 'Exception data unavailable.' -and $Data.DataIsNull -eq $true -and $Data.KeysIsNull -eq $true
+                }
+            }
+
+            It 'reports the exception shape instead of throwing when Data keys are null' {
+                Mock Write-NSACMECertificateLog {}
+
+                $exception = [NullKeysTestException]::new('unusable data')
+                $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'TestId', 'InvalidOperation', $null)
+
+                { Write-NSACMECertificateErrorDetail -ErrorRecord $errorRecord -Component 'Result' } | Should -Not -Throw
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -ParameterFilter {
+                    $Message -eq 'Exception data unavailable.' -and $Data.DataIsNull -eq $false -and $Data.KeysIsNull -eq $true
+                }
+            }
+        }
+
+        Context 'HTTP-01 challenge binding cleanup' {
+            It 'does nothing when there are no challenge bindings to clean up' {
+                Mock Invoke-NSDeleteLBVServerResponderPolicyBinding {}
+                Mock Invoke-NSDeleteResponderPolicy {}
+                Mock Invoke-NSDeleteResponderAction {}
+                Mock Write-NSACMECertificateLog {}
+
+                $settings = [pscustomobject]@{ LbName = 'lb_letsencrypt_cert' }
+
+                # $ChallengeBindings is $null when Publish-NSACMECertificateHttpChallenge published
+                # no new challenges, e.g. because the ACME authorization was already valid.
+                { Remove-NSACMECertificateHttpChallengeBinding -Session ([pscustomobject]@{}) -ChallengeBindings $null -Settings $settings } | Should -Not -Throw
+
+                Should -Invoke Invoke-NSDeleteLBVServerResponderPolicyBinding -Times 0
+                Should -Invoke Invoke-NSDeleteResponderPolicy -Times 0
+                Should -Invoke Invoke-NSDeleteResponderAction -Times 0
+                Should -Invoke Write-NSACMECertificateLog -Times 0 -ParameterFilter { $Level -eq 'Warning' }
+            }
+
+            It 'removes bindings, policies, and actions for each published challenge' {
+                $script:UnboundPolicies = @()
+                $script:RemovedPolicies = @()
+                $script:RemovedActions = @()
+                Mock Invoke-NSDeleteLBVServerResponderPolicyBinding { $script:UnboundPolicies += $Policyname }
+                Mock Invoke-NSDeleteResponderPolicy { $script:RemovedPolicies += $Name }
+                Mock Invoke-NSDeleteResponderAction { $script:RemovedActions += $Name }
+                Mock Write-NSACMECertificateLog {}
+
+                $settings = [pscustomobject]@{ LbName = 'lb_letsencrypt_cert' }
+                $bindings = @(
+                    [pscustomobject]@{ PolicyName = 'rsp_le_101'; ActionName = 'rsa_le_101'; Priority = 101 }
+                )
+
+                Remove-NSACMECertificateHttpChallengeBinding -Session ([pscustomobject]@{}) -ChallengeBindings $bindings -Settings $settings
+
+                $script:UnboundPolicies | Should -Be @('rsp_le_101')
+                $script:RemovedPolicies | Should -Be @('rsp_le_101')
+                $script:RemovedActions | Should -Be @('rsa_le_101')
+            }
         }
     }
 }

@@ -1,35 +1,521 @@
 ﻿function Request-NSACMECertificate {
     <#
     .SYNOPSIS
-        Request an ACME certificate and deploy it to a NetScaler.
+        Requests ACME certificates and deploys them to a NetScaler.
+
     .DESCRIPTION
-        Compatibility-focused module version of GenLeCertForNS. This first converted path supports HTTP-01 validation through a NetScaler and deploys the resulting certificate to /nsconfig/ssl. The public parameter surface intentionally mirrors the legacy script so existing config files and wrappers keep binding.
+        Module replacement for the legacy GenLeCertForNS script. Requests certificates
+        from an ACME provider, validates them through the NetScaler, and deploys the
+        result to /nsconfig/ssl with the certificate chain linked.
+
+        Validation is done over HTTP-01 (using a temporary responder policy on a content
+        switch or load balancing vServer) or DNS-01 (using a Posh-ACME DNS plugin).
+        Let's Encrypt, ZeroSSL, Google, SSLCom, Actalis and custom ACME directories are
+        supported, against production or staging endpoints.
+
+        A single run can process many certificates from a config file with -AutoRun.
+        Renewal is skipped for certificates that are still outside their renewal window
+        unless -ForceCertRenew is used, and one ACME account is reused for all requests
+        that share a contact address and account key length.
+
+        Besides requesting certificates, the function also creates the NetScaler command
+        policies and API user used for automation, cleans up NetScaler validation
+        objects and test certificates, and removes expired certificates from disk.
+
+        The public parameter surface intentionally mirrors the legacy script so existing
+        config files and wrappers keep binding.
+
+    .PARAMETER Help
+        Shows the built-in usage information and exits without contacting a NetScaler.
+
+    .PARAMETER CleanADC
+        Removes the temporary NetScaler objects used for HTTP-01 validation (responder
+        policy and action, content switch policy and action, load balancing vServer and
+        service) and exits.
+
+    .PARAMETER RemoveTestCertificates
+        Removes previously deployed staging or test certificates from the NetScaler and
+        exits. Test certificates are the ones created with a non-production ACME server.
+
+    .PARAMETER CleanPoshACMEStorage
+        Deletes the local Posh-ACME storage directory before the run. This discards
+        cached ACME accounts and orders, so the next request registers a new account.
+
+    .PARAMETER ManagementURL
+        Management address of the NetScaler, for example https://192.168.1.10. When the
+        NetScaler runs an HA pair, connect to the address of the primary node.
+
+    .PARAMETER Username
+        NetScaler user name used for the NITRO connection. Use New-NSACMECertificateUser
+        to create an account with only the permissions this function needs.
+
+    .PARAMETER Password
+        Password for the NetScaler user. Accepts a plain string, a SecureString or the
+        encrypted secret object used in the config file.
+
+    .PARAMETER Credential
+        NetScaler credential object. Use this instead of Username and Password.
+
+    .PARAMETER CN
+        Common name of the certificate, for example www.example.com. This is also the
+        first domain in the certificate request.
+
+    .PARAMETER SAN
+        Additional Subject Alternative Names for the certificate. The common name does
+        not need to be repeated here.
+
+    .PARAMETER FriendlyName
+        Friendly name stored in the PFX file. Defaults to the common name.
+
+    .PARAMETER ValidationMethod
+        ACME challenge type. Use 'http' for HTTP-01 validation through the NetScaler, or
+        'dns' for DNS-01 validation through a Posh-ACME DNS plugin. Default is 'http'.
+
+    .PARAMETER DNSPlugin
+        Posh-ACME DNS plugin used for DNS-01 validation, for example Cloudflare or Azure.
+        Use 'Manual' to be prompted for the TXT records. Default is 'Manual'.
+
+    .PARAMETER DNSParams
+        Hashtable of plugin arguments passed to the Posh-ACME DNS plugin, such as API
+        tokens or zone identifiers. See the Posh-ACME plugin documentation for the keys
+        each plugin expects.
+
+    .PARAMETER DNSWaitTime
+        Seconds to wait after publishing DNS records before asking the ACME provider to
+        validate them. Increase this for slow-propagating zones. Default is 120.
+
+    .PARAMETER CertKeyNameToUpdate
+        Name of the existing NetScaler certkey to replace with the new certificate. When
+        omitted, a certkey name is derived from the common name.
+
+    .PARAMETER RemovePrevious
+        Removes the previous certkey after the new certificate is bound. The old certkey
+        is kept when it is still part of the new chain or bound to the VPN global
+        configuration.
+
+    .PARAMETER CertDir
+        Directory where certificate artifacts (PFX, chain and key files) are written.
+
+    .PARAMETER PfxPassword
+        Password for the generated PFX file. A random password is generated when this is
+        not supplied.
+
+    .PARAMETER EmailAddress
+        Contact address registered with the ACME account. The provider uses it for
+        expiry notifications. Requests that share this address and account key length
+        reuse the same ACME account.
+
+    .PARAMETER KeyLength
+        Certificate and account key size. Accepts an RSA size between 2048 and 4096 that
+        is divisible by 128, or an EC curve name: 'ec-256', 'ec-384' or 'ec-521'.
+        Default is 2048.
+
+    .PARAMETER Production
+        Requests a certificate from the production ACME endpoint. Without this switch the
+        staging endpoint is used, which issues untrusted certificates but does not consume
+        production rate limits.
+
+    .PARAMETER DisableLogging
+        Disables writing the log file for this run.
+
+    .PARAMETER LogFile
+        Path of the log file. The default resolves to GenLE-Log.txt in the certificate
+        directory.
+
+    .PARAMETER LogLevel
+        Minimum severity written to the log: Error, Warning, Info, Debug or None. Default
+        is 'Info'. Use 'Debug' when troubleshooting validation or deployment problems.
+
+    .PARAMETER LogType
+        Log file format: 'txt' for readable text or 'jsonl' for one JSON object per line.
+        Default is 'txt'.
+
+    .PARAMETER SaveADCConfig
+        Saves the NetScaler running configuration after changes are applied.
+
+    .PARAMETER SendMail
+        Sends a summary mail when the run finishes. Requires the SMTP parameters.
+
+    .PARAMETER SMTPTo
+        One or more recipient addresses for the summary mail.
+
+    .PARAMETER SMTPFrom
+        Sender address for the summary mail.
+
+    .PARAMETER SMTPCredential
+        Credential used to authenticate to the SMTP server. Omit for anonymous relays.
+
+    .PARAMETER SMTPServer
+        Host name or address of the SMTP server.
+
+    .PARAMETER SMTPPort
+        TCP port of the SMTP server. Default is 25.
+
+    .PARAMETER SMTPUseSSL
+        Uses TLS for the SMTP connection.
+
+    .PARAMETER LogAsAttachment
+        Attaches the log file to the summary mail instead of only linking to it.
+
+    .PARAMETER DisableIPCheck
+        Skips the public DNS check that verifies each domain resolves to a reachable
+        address before validation starts.
+
+    .PARAMETER IPv6
+        Treats the validation addresses as IPv6.
+
+    .PARAMETER UpdateIIS
+        Binds the new certificate to a local IIS site after deployment.
+
+    .PARAMETER IISSiteToUpdate
+        Name of the IIS site to bind the certificate to. Default is 'Default Web Site'.
+
+    .PARAMETER UpdateGlobalVPNCertBinding
+        Replaces the certificate bound to the NetScaler VPN global configuration.
+
+    .PARAMETER UnbindGlobalVPNCertOnUpdate
+        Allows the certkey update to unbind the certificate from the VPN global configuration
+        and bind it back afterwards. NetScaler refuses to update a certkey while it is bound
+        there. Without this switch such a request fails and reports the binding.
+
+    .PARAMETER GlobalVPNCertBindingIncludeCA
+        Also binds the issuing CA certificate to the VPN global configuration.
+
+    .PARAMETER GlobalVPNCertBindingCrlCheck
+        CRL checking for the VPN global CA binding: 'Mandatory' or 'Optional'.
+
+    .PARAMETER GlobalVPNCertBindingOcspCheck
+        OCSP checking for the VPN global CA binding: 'Mandatory' or 'Optional'.
+
+    .PARAMETER PostPoSHScriptFilename
+        Path to a PowerShell script executed after a certificate is deployed, for
+        distributing the certificate to other systems.
+
+    .PARAMETER PostPoSHScriptExtraParameters
+        Hashtable of additional parameters splatted into the post-run script.
+
+    .PARAMETER CsVipName
+        Name of the content switch vServer that already serves the domains being
+        validated. The HTTP-01 challenge is bound to it for the duration of the run.
+
+    .PARAMETER UseLbVip
+        Validates through a dedicated load balancing vServer instead of an existing
+        content switch vServer. Use this when no content switch fronts the domains.
+
+    .PARAMETER CspName
+        Name of the content switch policy created for validation. Default is
+        'csp_letsencrypt'.
+
+    .PARAMETER CsaName
+        Name of the content switch action created for validation. Default is
+        'csa_letsencrypt'.
+
+    .PARAMETER CsVipBinding
+        Binding priority used when the validation policy is bound to the content switch
+        vServer. Default is '11'.
+
+    .PARAMETER SvcName
+        Name of the dummy service created for validation. Default is
+        'svc_letsencrypt_cert_dummy'.
+
+    .PARAMETER SvcDestination
+        Destination address of the dummy validation service. This address is never
+        contacted. Default is '1.2.3.4'.
+
+    .PARAMETER LbName
+        Name of the load balancing vServer created for validation. Default is
+        'lb_letsencrypt_cert'.
+
+    .PARAMETER TrafficDomain
+        NetScaler traffic domain used for the validation objects. Default is 0.
+
+    .PARAMETER RspName
+        Name of the responder policy created for validation. Default is
+        'rsp_letsencrypt'.
+
+    .PARAMETER RsaName
+        Name of the responder action created for validation. Default is
+        'rsa_letsencrypt'.
+
+    .PARAMETER Partitions
+        NetScaler admin partitions to search when locating existing certkeys. Default is
+        the default partition.
+
+    .PARAMETER EnableVipBefore
+        Enables the content switch vServer before validation starts. Use this when the
+        vServer is normally kept disabled.
+
+    .PARAMETER DisableVipAfter
+        Disables the content switch vServer again after validation finishes.
+
+    .PARAMETER AlternateDNSValidationDomain
+        Domain holding the _acme-challenge records when DNS-01 validation is delegated
+        to another zone through a CNAME.
+
+    .PARAMETER AlternateDNSValidationDomainSkipCheck
+        Skips verification that the delegating CNAME records exist.
+
+    .PARAMETER UseNetScalerDNS
+        Publishes DNS-01 challenge records on the NetScaler itself instead of an external
+        DNS provider. Requires a NetScaler session.
+
+    .PARAMETER CreateUserPermissions
+        Creates or updates the NetScaler command policy used for certificate automation
+        and exits.
+
+    .PARAMETER NSCPName
+        Name of the command policy created by CreateUserPermissions. Default is
+        'script-GenLeCertForNS'.
+
+    .PARAMETER CreateApiUser
+        Creates or updates a NetScaler system user for automation and binds the command
+        policy to it.
+
+    .PARAMETER ApiUsername
+        User name of the NetScaler API account to create or update.
+
+    .PARAMETER ApiPassword
+        Password for the NetScaler API account.
+
+    .PARAMETER ConfigFile
+        Path to the JSON configuration file. Settings and certificate requests are read
+        from it in AutoRun mode, and command line settings are written back to it.
+
+    .PARAMETER AutoRun
+        Processes every enabled certificate request in the configuration file. Requests
+        outside their renewal window are skipped.
+
+    .PARAMETER ForceCertRenew
+        Renews certificates even when they are still outside their renewal window.
+
+    .PARAMETER StopOnError
+        Stops the run at the first failed certificate request. By default the remaining
+        requests are still processed.
+
+    .PARAMETER CleanExpiredCertsOnDisk
+        Removes expired certificate directories from the certificate directory after a
+        successful run.
+
+    .PARAMETER CleanAllExpiredCertsOnDisk
+        Removes expired certificate directories from the certificate directory and exits.
+
+    .PARAMETER CleanExpiredCertsOnDiskDays
+        Age in days after expiry before a certificate directory is removed from disk.
+        Default is 100.
+
+    .PARAMETER NoConsoleOutput
+        Suppresses console output. The log file is still written.
+
+    .PARAMETER AutoUpdate
+        Checks for and installs a newer NetScalerToolkit module before running.
+
+    .PARAMETER SkipCertificateCheck
+        Skips TLS validation of the NetScaler management certificate. Use this for
+        self-signed or private CA management certificates.
+
+    .PARAMETER CertificateProvider
+        ACME provider to request the certificate from: LetsEncrypt, ZeroSSL, Google,
+        SSLCom, Actalis or CustomAcme. Providers other than LetsEncrypt generally require
+        external account binding. Default is 'LetsEncrypt'.
+
+    .PARAMETER AcmeDirectoryUrl
+        Directory URL of the ACME server. Required when CertificateProvider is
+        'CustomAcme', and overrides the built-in URL for the other providers.
+
+    .PARAMETER ExternalAccountBindingKeyId
+        External account binding key identifier (EAB KID) supplied by the ACME provider.
+
+    .PARAMETER ExternalAccountBindingHmacKey
+        External account binding HMAC key supplied by the ACME provider.
+
+    .PARAMETER ExternalAccountBindingAlgorithm
+        Algorithm used for the external account binding: HS256, HS384 or HS512. Default
+        is 'HS256'.
+
+    .PARAMETER UseModernPfxEncryption
+        Writes the PFX with AES encryption instead of the legacy RC2 format. Older
+        NetScaler firmware may not read these files.
+
+    .PARAMETER CertificateChainValidation
+        Behavior when the issued chain fails validation: 'None' to skip the check,
+        'Warn' to log and continue, or 'Fail' to stop the request. Default is 'Warn'.
+
+    .PARAMETER PreferredChain
+        Issuer common name of the preferred certificate chain when the provider offers
+        alternates, for example 'ISRG Root X1'.
+
+    .PARAMETER Profile
+        Certificate profile requested from the ACME provider, when the provider supports
+        profile selection.
+
+    .PARAMETER DnsAlias
+        DNS challenge alias domains used when validation is delegated through CNAME
+        records.
+
+    .PARAMETER ValidationTimeout
+        Seconds to wait for the ACME provider to complete validation before the request
+        fails. Default is 240.
+
+    .PARAMETER LifetimeDays
+        Requested certificate lifetime in days, when the provider supports short-lived
+        certificates.
+
+    .PARAMETER AlwaysNewKey
+        Generates a new private key for every renewal instead of reusing the existing
+        key.
+
+    .PARAMETER RemoveUploadedPfx
+        Deletes the uploaded PFX file from the NetScaler after the certkey is created.
+
+    .PARAMETER SkipPoshACMEInstall
+        Fails instead of installing the Posh-ACME module automatically when it is
+        missing.
+
+    .EXAMPLE
+        Request-NSACMECertificate -ManagementURL https://192.168.1.10 -Username nsroot -Password 'password' -CN www.example.com -CertDir C:\Certs -EmailAddress hostmaster@example.com -CsVipName cs_https -Production
+
+        Requests a production certificate for www.example.com using HTTP-01 validation
+        through the existing cs_https content switch vServer, and deploys it.
+
+    .EXAMPLE
+        Request-NSACMECertificate -ManagementURL https://192.168.1.10 -Username nsroot -Password 'password' -CN www.example.com -SAN mail.example.com,portal.example.com -CertDir C:\Certs -EmailAddress hostmaster@example.com -CsVipName cs_https
+
+        Requests a staging SAN certificate for three domains. Without -Production the
+        certificate is untrusted, which is the safe way to test a new configuration.
+
+    .EXAMPLE
+        Request-NSACMECertificate -ManagementURL https://192.168.1.10 -Credential $cred -CN example.com -SAN *.example.com -ValidationMethod dns -DNSPlugin Cloudflare -DNSParams @{ CFToken = $token } -CertDir C:\Certs -EmailAddress hostmaster@example.com -Production
+
+        Requests a wildcard certificate using DNS-01 validation through the Cloudflare
+        plugin. Wildcard names require DNS validation.
+
+    .EXAMPLE
+        Request-NSACMECertificate -ConfigFile C:\Certs\config.json -AutoRun -Production
+
+        Processes every enabled request in the configuration file, skipping certificates
+        that are still outside their renewal window. This is the usual scheduled task.
+
+    .EXAMPLE
+        Request-NSACMECertificate -ManagementURL https://192.168.1.10 -Username nsroot -Password 'password' -CreateUserPermissions -CreateApiUser -ApiUsername svc_acme -ApiPassword 'password'
+
+        Creates the limited NetScaler command policy and an API user bound to it, so
+        later runs do not need a full administrator account.
+
+    .LINK
+        https://netscalertoolkit.j81.nl/module/reference/common/nsacmecertificate/request/
+
+    .LINK
+        https://netscalertoolkit.j81.nl/
     #>
     [CmdletBinding(DefaultParameterSetName = 'LECertificatesHTTP')]
     [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', '')]
     [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingUserNameAndPasswordParams', '')]
     param(
-        [Parameter(ParameterSetName = 'Help', Mandatory = $true)][Alias('h')][Switch]$Help,
-        [Parameter(ParameterSetName = 'CleanADC', Mandatory = $true)][Alias('CleanNS')][Switch]$CleanADC,
-        [Parameter(ParameterSetName = 'CleanTestCertificate', Mandatory = $true)][Switch]$RemoveTestCertificates,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanTestCertificate')][Alias('CleanVault')][Switch]$CleanPoshACMEStorage,
-        [Parameter(ParameterSetName = 'CommandPolicy', Mandatory = $true)][Parameter(ParameterSetName = 'CommandPolicyUser', Mandatory = $true)][Parameter(ParameterSetName = 'LECertificatesHTTP', Mandatory = $true)][Parameter(ParameterSetName = 'LECertificatesDNS', Mandatory = $true)][Parameter(ParameterSetName = 'CleanADC', Mandatory = $true)][Parameter(ParameterSetName = 'CleanTestCertificate', Mandatory = $true)][Alias('URL', 'NSManagementURL')][String]$ManagementURL,
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Parameter(ParameterSetName = 'CleanTestCertificate')][Alias('User', 'NSUsername', 'ADCUsername')][String]$Username,
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Parameter(ParameterSetName = 'CleanTestCertificate')][Alias('NSPassword', 'ADCPassword')][Object]$Password,
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Parameter(ParameterSetName = 'CleanTestCertificate')][Alias('NSCredential', 'ADCCredential')][System.Management.Automation.PSCredential]$Credential = [System.Management.Automation.PSCredential]::Empty,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP', Mandatory = $true)][Parameter(ParameterSetName = 'LECertificatesDNS', Mandatory = $true)][String]$CN,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][String[]]$SAN = @(),
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][String]$FriendlyName,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][ValidateSet('http', 'dns')][String]$ValidationMethod = 'http',
-        [Parameter(ParameterSetName = 'LECertificatesDNS')][String]$DNSPlugin = 'Manual',
-        [Parameter(ParameterSetName = 'LECertificatesDNS')][Object]$DNSParams = @{},
-        [Parameter(ParameterSetName = 'LECertificatesDNS')][Int]$DNSWaitTime = 120,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Alias('NSCertNameToUpdate')][String]$CertKeyNameToUpdate,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$RemovePrevious,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP', Mandatory = $true)][Parameter(ParameterSetName = 'LECertificatesDNS', Mandatory = $true)][Parameter(ParameterSetName = 'CleanExpiredCerts', Mandatory = $true)][Parameter(ParameterSetName = 'AutoRun')][String]$CertDir,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Object]$PfxPassword = $null,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][String]$EmailAddress,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][ValidateScript({
+        [Parameter(ParameterSetName = 'Help', Mandatory = $true)]
+        [Alias('h')]
+        [Switch]$Help,
+
+        [Parameter(ParameterSetName = 'CleanADC', Mandatory = $true)]
+        [Alias('CleanNS')]
+        [Switch]$CleanADC,
+
+        [Parameter(ParameterSetName = 'CleanTestCertificate', Mandatory = $true)]
+        [Switch]$RemoveTestCertificates,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanTestCertificate')]
+        [Alias('CleanVault')]
+        [Switch]$CleanPoshACMEStorage,
+
+        [Parameter(ParameterSetName = 'CommandPolicy', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'CommandPolicyUser', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'LECertificatesDNS', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'CleanADC', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'CleanTestCertificate', Mandatory = $true)]
+        [Alias('URL', 'NSManagementURL')]
+        [String]$ManagementURL,
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Parameter(ParameterSetName = 'CleanTestCertificate')]
+        [Alias('User', 'NSUsername', 'ADCUsername')]
+        [String]$Username,
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Parameter(ParameterSetName = 'CleanTestCertificate')]
+        [Alias('NSPassword', 'ADCPassword')]
+        [Object]$Password,
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Parameter(ParameterSetName = 'CleanTestCertificate')]
+        [Alias('NSCredential', 'ADCCredential')]
+        [System.Management.Automation.PSCredential]$Credential = [System.Management.Automation.PSCredential]::Empty,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'LECertificatesDNS', Mandatory = $true)]
+        [String]$CN,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [String[]]$SAN = @(),
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [String]$FriendlyName,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [ValidateSet('http', 'dns')]
+        [String]$ValidationMethod = 'http',
+
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [String]$DNSPlugin = 'Manual',
+
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Object]$DNSParams = @{},
+
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Int]$DNSWaitTime = 120,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Alias('NSCertNameToUpdate')]
+        [String]$CertKeyNameToUpdate,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$RemovePrevious,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'LECertificatesDNS', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'CleanExpiredCerts', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'AutoRun')]
+        [String]$CertDir,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Object]$PfxPassword = $null,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [String]$EmailAddress,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [ValidateScript({
                 if ($_ -is [int] -or $_ -as [int]) {
                     $size = [int]$_
                     if ($size -lt 2048 -or $size -gt 4096 -or ($size % 128) -ne 0) { throw 'Unsupported RSA key size. Must be 2048-4096 and divisible by 128.' }
@@ -37,63 +523,305 @@
                 }
                 if ([string]$_ -notin @('ec-256', 'ec-384', 'ec-521')) { throw 'Unsupported key size. Use RSA 2048-4096 or ec-256, ec-384, ec-521.' }
                 return $true
-            })][Object]$KeyLength = 2048,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'AutoRun')][Switch]$Production,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Parameter(ParameterSetName = 'CleanTestCertificate')][Switch]$DisableLogging,
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Parameter(ParameterSetName = 'CleanTestCertificate')][Alias('LogLocation')][String]$LogFile = '<DEFAULT>',
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Parameter(ParameterSetName = 'CleanTestCertificate')][ValidateSet('Error', 'Warning', 'Info', 'Debug', 'None')][String]$LogLevel = 'Info',
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Parameter(ParameterSetName = 'CleanTestCertificate')][ValidateSet('txt', 'jsonl')][String]$LogType = 'txt',
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Alias('SaveNSConfig')][Switch]$SaveADCConfig,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$SendMail,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][String[]]$SMTPTo,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][String]$SMTPFrom,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][System.Management.Automation.PSCredential]$SMTPCredential = [System.Management.Automation.PSCredential]::Empty,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][String]$SMTPServer,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Int]$SMTPPort = 25,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$SMTPUseSSL,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$LogAsAttachment,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$DisableIPCheck,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$IPv6,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$UpdateIIS,
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$UpdateGlobalVPNCertBinding,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$GlobalVPNCertBindingIncludeCA,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][ValidateSet('Mandatory', 'Optional')][String]$GlobalVPNCertBindingCrlCheck,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][ValidateSet('Mandatory', 'Optional')][String]$GlobalVPNCertBindingOcspCheck,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][String]$IISSiteToUpdate = 'Default Web Site',
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][String]$PostPoSHScriptFilename,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Hashtable]$PostPoSHScriptExtraParameters = @{},
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Alias('NSCsVipName')][String[]]$CsVipName,
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$UseLbVip,
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Alias('NSCspName')][String]$CspName = 'csp_letsencrypt',
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][String]$CsaName = 'csa_letsencrypt',
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Alias('NSCsVipBinding')][String]$CsVipBinding = '11',
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Alias('NSSvcName')][String]$SvcName = 'svc_letsencrypt_cert_dummy',
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Alias('NSSvcDestination')][String]$SvcDestination = '1.2.3.4',
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Alias('NSLbName')][String]$LbName = 'lb_letsencrypt_cert',
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Alias('TD')][Int]$TrafficDomain = 0,
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Alias('NSRspName')][String]$RspName = 'rsp_letsencrypt',
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'CleanADC')][Alias('NSRsaName')][String]$RsaName = 'rsa_letsencrypt',
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP', DontShow)][Parameter(ParameterSetName = 'LECertificatesDNS', DontShow)][Parameter(ParameterSetName = 'CleanADC', DontShow)][String[]]$Partitions = @('default'),
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$EnableVipBefore,
-        [Parameter(ParameterSetName = 'LECertificatesDNS')][String]$AlternateDNSValidationDomain,
-        [Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$AlternateDNSValidationDomainSkipCheck,
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$UseNetScalerDNS,
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$DisableVipAfter,
-        [Parameter(ParameterSetName = 'CommandPolicy', Mandatory = $true)][Parameter(ParameterSetName = 'CommandPolicyUser', Mandatory = $true)][Switch]$CreateUserPermissions,
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][String]$NSCPName = 'script-GenLeCertForNS',
-        [Parameter(ParameterSetName = 'CommandPolicyUser', Mandatory = $true)][Switch]$CreateApiUser,
-        [Parameter(ParameterSetName = 'CommandPolicyUser', Mandatory = $true)][String]$ApiUsername,
-        [Parameter(ParameterSetName = 'CommandPolicyUser', Mandatory = $true)][Object]$ApiPassword,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'AutoRun', Mandatory = $true)][String]$ConfigFile = $null,
-        [Parameter(ParameterSetName = 'AutoRun', Mandatory = $true)][Switch]$AutoRun,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'AutoRun')][Alias('Force')][Switch]$ForceCertRenew,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'AutoRun')][Switch]$StopOnError,
-        [Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Switch]$CleanExpiredCertsOnDisk,
-        [Parameter(ParameterSetName = 'CleanExpiredCerts', Mandatory = $true)][Switch]$CleanAllExpiredCertsOnDisk,
-        [Parameter(ParameterSetName = 'CleanExpiredCerts')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Int16]$CleanExpiredCertsOnDiskDays = 100,
+            })]
+        [Object]$KeyLength = 2048,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
+        [Switch]$Production,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Parameter(ParameterSetName = 'CleanTestCertificate')]
+        [Switch]$DisableLogging,
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Parameter(ParameterSetName = 'CleanTestCertificate')]
+        [Alias('LogLocation')]
+        [String]$LogFile = '<DEFAULT>',
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Parameter(ParameterSetName = 'CleanTestCertificate')]
+        [ValidateSet('Error', 'Warning', 'Info', 'Debug', 'None')]
+        [String]$LogLevel = 'Info',
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Parameter(ParameterSetName = 'CleanTestCertificate')]
+        [ValidateSet('txt', 'jsonl')]
+        [String]$LogType = 'txt',
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Alias('SaveNSConfig')]
+        [Switch]$SaveADCConfig,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$SendMail,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [String[]]$SMTPTo,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [String]$SMTPFrom,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [System.Management.Automation.PSCredential]$SMTPCredential = [System.Management.Automation.PSCredential]::Empty,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [String]$SMTPServer,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Int]$SMTPPort = 25,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$SMTPUseSSL,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$LogAsAttachment,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$DisableIPCheck,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$IPv6,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$UpdateIIS,
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$UpdateGlobalVPNCertBinding,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$UnbindGlobalVPNCertOnUpdate,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$GlobalVPNCertBindingIncludeCA,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [ValidateSet('Mandatory', 'Optional')]
+        [String]$GlobalVPNCertBindingCrlCheck,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [ValidateSet('Mandatory', 'Optional')]
+        [String]$GlobalVPNCertBindingOcspCheck,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [String]$IISSiteToUpdate = 'Default Web Site',
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [String]$PostPoSHScriptFilename,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Hashtable]$PostPoSHScriptExtraParameters = @{},
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Alias('NSCsVipName')]
+        [String[]]$CsVipName,
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$UseLbVip,
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Alias('NSCspName')]
+        [String]$CspName = 'csp_letsencrypt',
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [String]$CsaName = 'csa_letsencrypt',
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Alias('NSCsVipBinding')]
+        [String]$CsVipBinding = '11',
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Alias('NSSvcName')]
+        [String]$SvcName = 'svc_letsencrypt_cert_dummy',
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Alias('NSSvcDestination')]
+        [String]$SvcDestination = '1.2.3.4',
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Alias('NSLbName')]
+        [String]$LbName = 'lb_letsencrypt_cert',
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Alias('TD')]
+        [Int]$TrafficDomain = 0,
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Alias('NSRspName')]
+        [String]$RspName = 'rsp_letsencrypt',
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Alias('NSRsaName')]
+        [String]$RsaName = 'rsa_letsencrypt',
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP', DontShow)]
+        [Parameter(ParameterSetName = 'LECertificatesDNS', DontShow)]
+        [Parameter(ParameterSetName = 'CleanADC', DontShow)]
+        [String[]]$Partitions = @('default'),
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$EnableVipBefore,
+
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [String]$AlternateDNSValidationDomain,
+
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$AlternateDNSValidationDomainSkipCheck,
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$UseNetScalerDNS,
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$DisableVipAfter,
+
+        [Parameter(ParameterSetName = 'CommandPolicy', Mandatory = $true)]
+        [Parameter(ParameterSetName = 'CommandPolicyUser', Mandatory = $true)]
+        [Switch]$CreateUserPermissions,
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [String]$NSCPName = 'script-GenLeCertForNS',
+
+        [Parameter(ParameterSetName = 'CommandPolicyUser', Mandatory = $true)]
+        [Switch]$CreateApiUser,
+
+        [Parameter(ParameterSetName = 'CommandPolicyUser', Mandatory = $true)]
+        [String]$ApiUsername,
+
+        [Parameter(ParameterSetName = 'CommandPolicyUser', Mandatory = $true)]
+        [Object]$ApiPassword,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun', Mandatory = $true)]
+        [String]$ConfigFile = $null,
+
+        [Parameter(ParameterSetName = 'AutoRun', Mandatory = $true)]
+        [Switch]$AutoRun,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
+        [Alias('Force')]
+        [Switch]$ForceCertRenew,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
+        [Switch]$StopOnError,
+
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Switch]$CleanExpiredCertsOnDisk,
+
+        [Parameter(ParameterSetName = 'CleanExpiredCerts', Mandatory = $true)]
+        [Switch]$CleanAllExpiredCertsOnDisk,
+
+        [Parameter(ParameterSetName = 'CleanExpiredCerts')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Int16]$CleanExpiredCertsOnDiskDays = 100,
+
         [Switch]$NoConsoleOutput,
+
         [Switch]$AutoUpdate,
-        [Parameter(ParameterSetName = 'CommandPolicy')][Parameter(ParameterSetName = 'CommandPolicyUser')][Parameter(ParameterSetName = 'LECertificatesHTTP')][Parameter(ParameterSetName = 'LECertificatesDNS')][Parameter(ParameterSetName = 'AutoRun')][Parameter(ParameterSetName = 'CleanADC')][Parameter(ParameterSetName = 'CleanTestCertificate')][Switch]$SkipCertificateCheck,
+
+        [Parameter(ParameterSetName = 'CommandPolicy')]
+        [Parameter(ParameterSetName = 'CommandPolicyUser')]
+        [Parameter(ParameterSetName = 'LECertificatesHTTP')]
+        [Parameter(ParameterSetName = 'LECertificatesDNS')]
+        [Parameter(ParameterSetName = 'AutoRun')]
+        [Parameter(ParameterSetName = 'CleanADC')]
+        [Parameter(ParameterSetName = 'CleanTestCertificate')]
+        [Switch]$SkipCertificateCheck,
+
         [Parameter(ParameterSetName = 'LECertificatesHTTP')]
         [Parameter(ParameterSetName = 'LECertificatesDNS')]
         [Parameter(ParameterSetName = 'AutoRun')]
@@ -212,7 +940,7 @@
         }
 
         $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
-        $settings = [pscustomobject]@{}
+        $settings = [PSCustomObject]@{}
         $requests = @()
         if ($AutoRun) {
             if (-not (Test-Path -LiteralPath $ConfigFile)) { throw "Config file not found: $ConfigFile" }
@@ -229,8 +957,8 @@
             if ($settings.LogLevel) { $LogLevel = $settings.LogLevel; $script:NSACMECertificateLogLevel = $LogLevel }
             if ($settings.LogType) { $LogType = $settings.LogType; $script:NSACMECertificateLogType = $LogType }
         } else {
-            $requests = @([pscustomobject]@{ Enabled = $true; CN = $CN; SANs = ($SAN -join ','); FriendlyName = $FriendlyName; CsVipName = $CsVipName; UseLbVip = [bool]$UseLbVip; EnableVipBefore = [bool]$EnableVipBefore; DisableVipAfter = [bool]$DisableVipAfter; CertKeyNameToUpdate = $CertKeyNameToUpdate; RemovePrevious = [bool]$RemovePrevious; CertDir = $CertDir; EmailAddress = $EmailAddress; KeyLength = $KeyLength; ValidationMethod = $ValidationMethod; DNSPlugin = $DNSPlugin; DNSParams = $DNSParams; DNSWaitTime = $DNSWaitTime; AlternateDNSValidationDomain = $AlternateDNSValidationDomain; AlternateDNSValidationDomainSkipCheck = [bool]$AlternateDNSValidationDomainSkipCheck; UseNetScalerDNS = [bool]$UseNetScalerDNS; ForceCertRenew = [bool]$ForceCertRenew; DisableIPCheck = [bool]$DisableIPCheck; PfxPassword = $PfxPassword; UpdateIIS = [bool]$UpdateIIS; IISSiteToUpdate = $IISSiteToUpdate; UpdateGlobalVPNCertBinding = [bool]$UpdateGlobalVPNCertBinding; GlobalVPNCertBindingIncludeCA = [bool]$GlobalVPNCertBindingIncludeCA; GlobalVPNCertBindingCrlCheck = $GlobalVPNCertBindingCrlCheck; GlobalVPNCertBindingOcspCheck = $GlobalVPNCertBindingOcspCheck; PostPoSHScriptFilename = $PostPoSHScriptFilename; PostPoSHScriptExtraParameters = $PostPoSHScriptExtraParameters; CleanExpiredCertsOnDisk = [bool]$CleanExpiredCertsOnDisk; CleanExpiredCertsOnDiskDays = $CleanExpiredCertsOnDiskDays })
-            $settings = [pscustomobject]@{ ManagementURL = $ManagementURL; SvcName = $SvcName; SvcDestination = $SvcDestination; LbName = $LbName; RspName = $RspName; RsaName = $RsaName; CspName = $CspName; CsaName = $CsaName; CsVipBinding = $CsVipBinding; TrafficDomain = $TrafficDomain; SaveADCConfig = [bool]$SaveADCConfig; DisableIPCheck = [bool]$DisableIPCheck; SendMail = [bool]$SendMail; SMTPTo = $SMTPTo; SMTPFrom = $SMTPFrom; SMTPCredential = $SMTPCredential; SMTPServer = $SMTPServer; SMTPPort = $SMTPPort; SMTPUseSSL = [bool]$SMTPUseSSL; LogAsAttachment = [bool]$LogAsAttachment; ExternalAccountBindingKeyId = $ExternalAccountBindingKeyId; ExternalAccountBindingHmacKey = $ExternalAccountBindingHmacKey; ExternalAccountBindingAlgorithm = $ExternalAccountBindingAlgorithm; CertificateChainValidation = $CertificateChainValidation }
+            $requests = @([PSCustomObject]@{ Enabled = $true; CN = $CN; SANs = ($SAN -join ','); FriendlyName = $FriendlyName; CsVipName = $CsVipName; UseLbVip = [bool]$UseLbVip; EnableVipBefore = [bool]$EnableVipBefore; DisableVipAfter = [bool]$DisableVipAfter; CertKeyNameToUpdate = $CertKeyNameToUpdate; RemovePrevious = [bool]$RemovePrevious; CertDir = $CertDir; EmailAddress = $EmailAddress; KeyLength = $KeyLength; ValidationMethod = $ValidationMethod; DNSPlugin = $DNSPlugin; DNSParams = $DNSParams; DNSWaitTime = $DNSWaitTime; AlternateDNSValidationDomain = $AlternateDNSValidationDomain; AlternateDNSValidationDomainSkipCheck = [bool]$AlternateDNSValidationDomainSkipCheck; UseNetScalerDNS = [bool]$UseNetScalerDNS; ForceCertRenew = [bool]$ForceCertRenew; DisableIPCheck = [bool]$DisableIPCheck; PfxPassword = $PfxPassword; UpdateIIS = [bool]$UpdateIIS; IISSiteToUpdate = $IISSiteToUpdate; UpdateGlobalVPNCertBinding = [bool]$UpdateGlobalVPNCertBinding; UnbindGlobalVPNCertOnUpdate = [bool]$UnbindGlobalVPNCertOnUpdate; GlobalVPNCertBindingIncludeCA = [bool]$GlobalVPNCertBindingIncludeCA; GlobalVPNCertBindingCrlCheck = $GlobalVPNCertBindingCrlCheck; GlobalVPNCertBindingOcspCheck = $GlobalVPNCertBindingOcspCheck; PostPoSHScriptFilename = $PostPoSHScriptFilename; PostPoSHScriptExtraParameters = $PostPoSHScriptExtraParameters; CleanExpiredCertsOnDisk = [bool]$CleanExpiredCertsOnDisk; CleanExpiredCertsOnDiskDays = $CleanExpiredCertsOnDiskDays })
+            $settings = [PSCustomObject]@{ ManagementURL = $ManagementURL; SvcName = $SvcName; SvcDestination = $SvcDestination; LbName = $LbName; RspName = $RspName; RsaName = $RsaName; CspName = $CspName; CsaName = $CsaName; CsVipBinding = $CsVipBinding; TrafficDomain = $TrafficDomain; SaveADCConfig = [bool]$SaveADCConfig; DisableIPCheck = [bool]$DisableIPCheck; SendMail = [bool]$SendMail; SMTPTo = $SMTPTo; SMTPFrom = $SMTPFrom; SMTPCredential = $SMTPCredential; SMTPServer = $SMTPServer; SMTPPort = $SMTPPort; SMTPUseSSL = [bool]$SMTPUseSSL; LogAsAttachment = [bool]$LogAsAttachment; ExternalAccountBindingKeyId = $ExternalAccountBindingKeyId; ExternalAccountBindingHmacKey = $ExternalAccountBindingHmacKey; ExternalAccountBindingAlgorithm = $ExternalAccountBindingAlgorithm; CertificateChainValidation = $CertificateChainValidation }
         }
         foreach ($name in 'SvcName', 'SvcDestination', 'LbName', 'RspName', 'RsaName', 'CspName', 'CsaName', 'CsVipBinding', 'TrafficDomain', 'SaveADCConfig', 'SendMail', 'SMTPTo', 'SMTPFrom', 'SMTPServer', 'SMTPPort', 'SMTPUseSSL', 'LogAsAttachment', 'CertificateChainValidation') {
             if (-not ($settings.PSObject.Properties.Name -contains $name)) { $settings | Add-Member -NotePropertyName $name -NotePropertyValue (Get-Variable $name -ValueOnly) }
@@ -246,6 +974,19 @@
         if (-not $DisableLogging) {
             $script:NSACMECertificateLogFile = $LogFile
             Initialize-NSACMECertificateLog -Path $LogFile -LogType $LogType
+        }
+        if (-not $NoConsoleOutput) {
+            # Debug level, so the default Info level does not duplicate the call site lines.
+            $null = Import-NSConsoleStatus -LogAction {
+                param($Record)
+                # The text formatter prints every key it is given.
+                $statusData = [ordered]@{}
+                foreach ($field in 'Section', 'Value', 'Detail', 'Error') {
+                    if (-not [string]::IsNullOrWhiteSpace([string]$Record.$field)) { $statusData[$field] = $Record.$field }
+                }
+                $statusData['DurationMs'] = $Record.DurationMs
+                Write-NSACMECertificateLog Debug 'Status' "$($Record.Label): $($Record.Status)" -Data $statusData
+            }
         }
         if (-not $DisableLogging -and $AutoUpdate) {
             if ([string]$env:NETSCALERTOOLKIT_WRAPPER_AUTOUPDATE_DONE -eq '1') {
@@ -274,7 +1015,7 @@
         $ManagementURL = ([string]$ManagementURL).TrimEnd('/') + '/'
         $settings.ManagementURL = $ManagementURL
         $configChanged = $false
-        $config = if ($AutoRun) { $config } else { [pscustomobject]@{ settings = $settings; certrequests = $requests } }
+        $config = if ($AutoRun) { $config } else { [PSCustomObject]@{ settings = $settings; certrequests = $requests } }
 
         if ($AutoRun) {
             foreach ($propertyName in 'ADCCredentialPassword', 'SMTPCredentialPassword', 'ExternalAccountBindingHmacKey') {
@@ -323,7 +1064,27 @@
             throw $message
         }
 
-        Import-NSACMECertificatePoshACME -SkipInstall:$SkipPoshACMEInstall
+        # Starts the run timer for the closing summary. A bare if adds no line when it does not match.
+        $titleSubtitle = @(
+            'NetScaler    : {0}' -f $ManagementURL
+            'Provider     : {0} ({1}), {2} request(s)' -f $CertificateProvider, $(if ($Production) { 'production' } else { 'staging' }), @($requests).Count
+            'ACME storage : {0}' -f (Join-Path $env:LOCALAPPDATA 'Posh-ACME')
+            if ($AutoRun) { 'Config       : {0}' -f $ConfigFile }
+            'Log          : {0}' -f $(if ($script:NSACMECertificateLogFile) { $script:NSACMECertificateLogFile } else { 'disabled' })
+        )
+        Write-NSStatusTitle -Title 'Request-NSACMECertificate' -Subtitle $titleSubtitle
+
+        Write-NSStatusSection -Title 'Setup'
+
+        Write-NSStatusItem -Label 'Load Posh-ACME'
+        try {
+            Import-NSACMECertificatePoshACME -SkipInstall:$SkipPoshACMEInstall
+            $poshACMEModule = Get-Module -Name Posh-ACME | Select-Object -First 1
+            Write-NSStatusResult -Status OK -Detail "v$($poshACMEModule.Version)"
+        } catch {
+            Write-NSStatusResult -Status FAIL -ErrorRecord $_
+            throw
+        }
 
         # Resolve the Posh-ACME server alias before account or order operations.
         $serverName = if ($AcmeDirectoryUrl) {
@@ -342,20 +1103,35 @@
                 default { 'LE_STAGE' }
             }
         }
+        Write-NSStatusItem -Label 'ACME server' -Value $serverName
         Write-NSACMECertificateLog Info 'ACME' "Using ACME server '$serverName'. Production=$([bool]$Production)."
-        Set-NSACMEPoshACMEServer -DirectoryUrl $serverName
-        if ($CleanPoshACMEStorage) {
-            $acmeStorage = Join-Path $env:LOCALAPPDATA 'Posh-ACME'
-            Remove-Item -LiteralPath $acmeStorage -Recurse -Force -ErrorAction SilentlyContinue
-            New-Item -Path $acmeStorage -ItemType Directory -Force | Out-Null
+        try {
             Set-NSACMEPoshACMEServer -DirectoryUrl $serverName
+            if ($CleanPoshACMEStorage) {
+                $acmeStorage = Join-Path $env:LOCALAPPDATA 'Posh-ACME'
+                Remove-Item -LiteralPath $acmeStorage -Recurse -Force -ErrorAction SilentlyContinue
+                New-Item -Path $acmeStorage -ItemType Directory -Force | Out-Null
+                Set-NSACMEPoshACMEServer -DirectoryUrl $serverName
+            }
+            if ($Production) {
+                Write-NSStatusResult -Status OK -Detail 'production'
+            } else {
+                Write-NSStatusResult -Status WARN -Detail 'staging' -Note 'Staging certificates are not publicly trusted. Use -Production for a usable certificate.'
+            }
+        } catch {
+            Write-NSStatusResult -Status FAIL -ErrorRecord $_
+            throw
         }
 
+        Write-NSStatusItem -Label 'Connect to NetScaler' -Value $ManagementURL
         Write-NSACMECertificateLog Info 'NetScaler' "Connecting to $ManagementURL as $($Credential.UserName)."
         try {
             $nsSession = Connect-NSNode -ManagementURL $ManagementURL -Credential $Credential -SkipCertificateCheck:$SkipCertificateCheck -HA -PassThru -ErrorAction Stop
             Write-NSACMECertificateLog Debug 'NetScaler' "Connected node state: $($nsSession.ConnectedNodeState); HA=$([bool]$nsSession.IsHA); Version=$($nsSession.Version)."
+            $connectDetail = @($nsSession.ConnectedNodeState, $(if ($nsSession.Version) { "v$($nsSession.Version)" })) | Where-Object { $_ }
+            Write-NSStatusResult -Status OK -Detail ($connectDetail -join ', ')
         } catch {
+            Write-NSStatusResult -Status FAIL -ErrorRecord $_
             if (-not $SkipCertificateCheck -and $_.Exception.Message -match 'trust relationship|certificate|SSL/TLS|remote certificate') {
                 Write-NSACMECertificateLog Error 'NetScaler' "TLS trust validation failed for '$ManagementURL'. If this NetScaler uses a self-signed or private CA management certificate, rerun with -SkipCertificateCheck or install the issuing CA certificate in the Windows trust store."
                 Write-NSACMECertificateErrorDetail -ErrorRecord $_ -Component 'NetScaler'
@@ -406,10 +1182,13 @@
         $allErrors = @()
         $httpValidationConfigInitialized = $false
         $httpValidationCleanupCsVipNames = @()
+        $cleanupSectionWritten = $false
+        $resolvedAcmeAccounts = @{}
         try {
         foreach ($request in $requests) {
             $challengeBindings = @()
             $requestVipEnabled = $false
+            Write-NSStatusSection -Title "Certificate $($request.CN)"
             try {
             # Normalize one request at a time so AutoRun can continue after a later request fails.
             $normalizedRequest = Normalize-NSACMECertificateRequest -Request $request -DefaultCertDir $CertDir
@@ -419,6 +1198,7 @@
             if ($request.ValidationMethod -eq 'http' -and -not $request.CsVipName -and -not $request.UseLbVip) { throw "CsVipName is required for HTTP validation unless UseLbVip is set. CN=$($request.CN)" }
             if ([string]::IsNullOrWhiteSpace([string]$request.CertDir)) { throw "CertDir is required. Provide -CertDir on the command line or set CertDir in the config for CN=$($request.CN)." }
             if (-not (Test-Path -LiteralPath $request.CertDir)) { New-Item -ItemType Directory -Path $request.CertDir -Force | Out-Null }
+            Write-NSStatusItem -Label 'Renewal check' -Value ($domains -join ', ')
             $existingAcmeOrder = $null
             $existingAcmeCertificate = $null
             $existingNetScalerCertificate = $null
@@ -492,39 +1272,73 @@
             }
             Write-NSACMECertificateLog Debug 'CheckCertRenewal' 'Renewal decision.' -Data $renewalDecisionData -ConsoleDataKeys @('Decision', 'Source', 'RenewAfter', 'CertExpires')
             if (-not $renewalDecision.ShouldRenew) {
+                Write-NSStatusResult -Status SKIP -Detail $renewalDecision.Reason
                 Write-NSACMECertificateLog Info 'CheckCertRenewal' "$($request.CN) skipped. $($renewalDecision.Summary)"
-                $results += [pscustomobject]@{ CN = $request.CN; Domains = $domains; AcmeServer = $serverName; Production = [bool]$Production; ValidationMethod = $request.ValidationMethod; CertKeyName = $request.CertKeyNameToUpdate; PfxPath = $null; Thumbprint = $null; NotAfter = $renewalDecision.CertExpires; Status = 'Skipped'; Reason = $renewalDecision.Reason; LogFile = $script:NSACMECertificateLogFile }
+                $results += [PSCustomObject]@{ CN = $request.CN; Domains = $domains; AcmeServer = $serverName; Production = [bool]$Production; ValidationMethod = $request.ValidationMethod; CertKeyName = $request.CertKeyNameToUpdate; PfxPath = $null; Thumbprint = $null; NotAfter = $renewalDecision.CertExpires; Status = 'Skipped'; Reason = $renewalDecision.Reason; LogFile = $script:NSACMECertificateLogFile }
                 continue
             }
+            Write-NSStatusResult -Status OK -Detail 'renewal required'
             Write-NSACMECertificateLog Info 'CheckCertRenewal' "$($request.CN) renewal required. $($renewalDecision.Summary)"
             if ($request.ValidationMethod -eq 'http' -and $request.EnableVipBefore) {
-                foreach ($csVip in @($request.CsVipName)) { try { Invoke-NSEnableCSVServer -Session $nsSession -Name $csVip | Out-Null } catch { Write-NSACMECertificateLog Warning 'NetScaler' "Could not enable CS VIP $csVip`: $($_.Exception.Message)" } }
+                foreach ($csVip in @($request.CsVipName | Where-Object { $_ })) {
+                    $stateBefore = Get-NSACMECertificateVServerState -Session $nsSession -Name $csVip -Type 'CS'
+                    Write-NSStatusItem -Label 'Enable CS vServer' -Value $csVip
+                    try { Invoke-NSEnableCSVServer -Session $nsSession -Name $csVip | Out-Null } catch { Write-NSACMECertificateLog Warning 'NetScaler' "Could not enable CS VIP $csVip`: $($_.Exception.Message)" }
+                    $stateAfter = Get-NSACMECertificateVServerState -Session $nsSession -Name $csVip -Type 'CS'
+                    Write-NSStatusResult -Status OK -Detail ('{0} -> {1}' -f $stateBefore.Text, $stateAfter.Text)
+                }
                 $requestVipEnabled = $true
             }
             $pfxSecret = if ($request.PfxPassword) { ConvertFrom-NSACMECertificateLegacySecret -Object $request.PfxPassword } elseif ($PfxPassword) { ConvertFrom-NSACMECertificateLegacySecret -Object $PfxPassword } else { ConvertTo-SecureString (New-NSACMECertificatePassword) -AsPlainText -Force }
             Add-NSACMECertificateSensitiveValue -Value $pfxSecret -Placeholder '<PfxPassword>'
+            Write-NSStatusItem -Label 'ACME account' -Value $request.EmailAddress
             Write-NSACMECertificateLog Info 'ACME' "Ensuring ACME account for $($request.EmailAddress)."
-            try { $account = Get-PAAccount -List -Refresh -ErrorAction Stop | Where-Object { $_.Contact -contains "mailto:$($request.EmailAddress)" -or $_.Contact -contains $request.EmailAddress } | Select-Object -First 1 } catch { $account = $null }
-            $accountKeyLength = if ([string]$request.KeyLength -match '^\d+$') { [int]$request.KeyLength } else { 2048 }
+            $accountAction = 'reused'
+            # Posh-ACME treats KeyLength as a string: RSA sizes ('2048'-'4096', divisible by 128) or
+            # EC curves ('ec-256', 'ec-384', 'ec-521'). Keep it a string so account lookup matches.
+            $accountKeyLength = [string]$request.KeyLength
+            if ($accountKeyLength -notmatch '^(ec-(256|384|521)|\d+)$') { $accountKeyLength = '2048' }
+            # Reuse a resolved account for the same contact and key length so a multi-request run
+            # registers once instead of once per certificate.
+            $accountCacheKey = "$($request.EmailAddress)|$accountKeyLength"
+            $account = $resolvedAcmeAccounts[$accountCacheKey]
             if (-not $account) {
-                Write-NSACMECertificateLog Debug 'ACME' "Creating ACME account for $($request.EmailAddress) with account key length $accountKeyLength."
-                $newAccountParams = @{
-                    Contact     = $request.EmailAddress
-                    KeyLength   = $accountKeyLength
-                    AcceptTOS   = $true
-                    Force       = $true
-                    ErrorAction = 'Stop'
+                # Match Posh-ACME's own account resolution (New-PACertificate): let Get-PAAccount do the
+                # contact/key filtering, and only create when nothing valid matches.
+                $existingAccounts = @()
+                try {
+                    $existingAccounts = @(Get-PAAccount -List -Refresh -Contact $request.EmailAddress -KeyLength $accountKeyLength -Status 'valid' -ErrorAction Stop)
+                } catch {
+                    Write-NSACMECertificateLog Warning 'ACME' "Could not list existing ACME accounts for $($request.EmailAddress): $($_.Exception.Message)"
+                    Write-NSACMECertificateErrorDetail -ErrorRecord $_ -Component 'ACME'
                 }
-                if ($ExternalAccountBindingKeyId -and $externalAccountBindingHmacClearText) {
-                    $newAccountParams.ExtAcctKID = $ExternalAccountBindingKeyId
-                    $newAccountParams.ExtAcctHMACKey = $externalAccountBindingHmacClearText
-                    $newAccountParams.ExtAcctAlgorithm = $ExternalAccountBindingAlgorithm
+                if ($existingAccounts.Count -gt 0) {
+                    $account = $existingAccounts[0]
+                    Write-NSACMECertificateLog Debug 'ACME' "Reusing existing ACME account $($account.ID) for $($request.EmailAddress)."
+                } else {
+                    Write-NSACMECertificateLog Debug 'ACME' "Creating ACME account for $($request.EmailAddress) with account key length $accountKeyLength."
+                    $newAccountParams = @{
+                        Contact     = $request.EmailAddress
+                        KeyLength   = $accountKeyLength
+                        AcceptTOS   = $true
+                        ErrorAction = 'Stop'
+                    }
+                    if ($ExternalAccountBindingKeyId -and $externalAccountBindingHmacClearText) {
+                        $newAccountParams.ExtAcctKID = $ExternalAccountBindingKeyId
+                        $newAccountParams.ExtAcctHMACKey = $externalAccountBindingHmacClearText
+                        $newAccountParams.ExtAcctAlgorithm = $ExternalAccountBindingAlgorithm
+                    }
+                    $account = New-PAAccount @newAccountParams
+                    $accountAction = 'created'
+                    Write-NSACMECertificateLog Info 'ACME' "Created ACME account $($account.ID) for $($request.EmailAddress)."
                 }
-                $account = New-PAAccount @newAccountParams
+                $resolvedAcmeAccounts[$accountCacheKey] = $account
             }
             Set-PAAccount -ID $account.ID -Force | Out-Null
+            Write-NSStatusResult -Status OK -Detail "$accountAction, ID $($account.ID)"
                 $cert = $null
                 if ($request.ValidationMethod -eq 'dns') {
+                    Write-NSStatusItem -Label 'DNS validation' -Value $DNSPlugin
                     Write-NSACMECertificateLog Debug 'ACME' "Requesting DNS order for $($request.CN) with plugin '$DNSPlugin'."
                     $acmeOptions = @{
                         DNSPlugin              = $DNSPlugin
@@ -543,7 +1357,9 @@
                     }
                     $cert = Request-NSACMECertificateDnsOrder -Request $request -Domains $domains -PfxSecret $pfxSecret -AcmeOptions $acmeOptions -Session $nsSession -Account $account -Force:$effectiveForceCertRenew
                     if (-not $cert) { $cert = Get-PACertificate -MainDomain $request.CN -ErrorAction Stop }
+                    Write-NSStatusResult -Status OK -Detail "$(@($domains).Count) domain(s)" -ShowDuration
                 } else {
+                    Write-NSStatusItem -Label 'Create ACME order' -Value ($domains -join ', ')
                     Write-NSACMECertificateLog Info 'ACME' "Creating ACME HTTP order for $($domains -join ', ')."
                     Write-NSACMECertificateLog Debug 'ACME' "HTTP validation uses CS VIP(s): $(@($request.CsVipName) -join ', '); UseLbVip=$([bool]$request.UseLbVip)."
                     $orderParams = @{ Domain = $domains; AlwaysNewKey = ([bool]$AlwaysNewKey -or $effectiveForceCertRenew); KeyLength = [string]$request.KeyLength; Force = $true; FriendlyName = $request.FriendlyName; PfxPassSecure = $pfxSecret }
@@ -557,23 +1373,95 @@
                         try { Remove-PAOrder -MainDomain $request.CN -Force -ErrorAction SilentlyContinue | Out-Null } catch {}
                     }
                     $order = New-PAOrder @orderParams -ErrorAction Stop
+                    Write-NSStatusResult -Status OK -Detail "$(@($domains).Count) domain(s)"
+
+                    Write-NSStatusItem -Label 'Configure validation' -Value $(if ($request.UseLbVip) { $settings.LbName } else { @($request.CsVipName) -join ', ' })
                     Initialize-NSACMECertificateHttpValidationConfig -Session $nsSession -Settings $settings -Request $request
                     if (-not $request.UseLbVip) {
                         $httpValidationConfigInitialized = $true
                         $httpValidationCleanupCsVipNames = @($httpValidationCleanupCsVipNames + @($request.CsVipName) | Where-Object { $_ } | Select-Object -Unique)
                     }
-                    $challengeBindings = Publish-NSACMECertificateHttpChallenge -Session $nsSession -Settings $settings -Order $order -Account $account
+                    Write-NSStatusResult -Status OK
+
+                    # The validation LB vServer is non-addressable (0.0.0.0) behind a dummy service with health
+                    # monitoring off, so its state says nothing about reachability. Reported, never acted on.
+                    $vServerChecks = @()
+                    if ($request.UseLbVip) {
+                        $vServerChecks += [PSCustomObject]@{ Name = $settings.LbName; Type = 'LB'; Required = $true }
+                    } else {
+                        foreach ($csVip in @($request.CsVipName | Where-Object { $_ })) {
+                            $vServerChecks += [PSCustomObject]@{ Name = $csVip; Type = 'CS'; Required = $true }
+                        }
+                        $vServerChecks += [PSCustomObject]@{ Name = $settings.LbName; Type = 'LB'; Required = $false }
+                    }
+                    foreach ($check in $vServerChecks) {
+                        $vServerState = Get-NSACMECertificateVServerState -Session $nsSession -Name $check.Name -Type $check.Type
+                        Write-NSStatusItem -Label ('{0} vServer' -f $check.Type) -Value $check.Name
+                        $stateDetail = (@($vServerState.Text, $vServerState.Endpoint) | Where-Object { $_ }) -join ' '
+                        if ($vServerState.IsServing -or -not $check.Required) {
+                            Write-NSStatusResult -Status OK -Detail $stateDetail
+                        } else {
+                            # The CA reaches the HTTP-01 challenge over this vServer. Continuing can only
+                            # end in a validation timeout, so fail now and move on to the next request.
+                            $vServerReason = if (-not $vServerState.Found) {
+                                "$($check.Type) vServer '$($check.Name)' does not exist on the NetScaler. HTTP-01 validation needs it to serve the challenge."
+                            } elseif (-not $request.EnableVipBefore -and $vServerState.Text -match 'DISABLED|OUT OF SERVICE') {
+                                # DisableVipAfter leaves the vServer down for the next run, which is only
+                                # a working setup when EnableVipBefore brings it back up.
+                                "$($check.Type) vServer '$($check.Name)' is $($vServerState.Text). The CA cannot reach the HTTP-01 challenge. Use EnableVipBefore to enable it for the request, which is what DisableVipAfter pairs with."
+                            } else {
+                                "$($check.Type) vServer '$($check.Name)' is not serving traffic ($($vServerState.Text)). The CA cannot reach the HTTP-01 challenge, so validation would time out."
+                            }
+                            Write-NSStatusResult -Status FAIL -Detail $stateDetail -Note $vServerReason
+                            Write-NSACMECertificateLog Error 'NetScaler' $vServerReason
+                            throw $vServerReason
+                        }
+                    }
+
+                    Write-NSStatusItem -Label 'Publish HTTP challenge' -Value $request.CN -TotalSteps @($domains).Count
+                    $challengeBindings = @(Publish-NSACMECertificateHttpChallenge -Session $nsSession -Settings $settings -Order $order -Account $account)
+                    Write-NSStatusResult -Status OK -Detail "$(@($challengeBindings).Count) binding(s)"
+
+                    Write-NSStatusItem -Label 'Await authorization' -Value $request.CN
                     Wait-NSACMECertificateAuthorization -MainDomain $request.CN -TimeoutSeconds $ValidationTimeout | Out-Null
+                    Write-NSStatusResult -Status OK -ShowDuration
+
+                    Write-NSStatusItem -Label 'Finalize order' -Value $request.CN
                     Write-NSACMECertificateLog Info 'ACME' "Finalizing ACME order for $($request.CN)."
                     $null = Submit-OrderFinalize -Order (Get-PAOrder -MainDomain $request.CN -Refresh) -ErrorAction Stop
                     Wait-NSACMECertificateOrderFinal -MainDomain $request.CN -TimeoutSeconds $ValidationTimeout | Out-Null
+                    Write-NSStatusResult -Status OK -ShowDuration
+
+                    Write-NSStatusItem -Label 'Download certificate' -Value $request.CN
                     Write-NSACMECertificateLog Info 'ACME' "Downloading ACME certificate artifacts for $($request.CN)."
                     $null = Complete-PAOrder -Order (Get-PAOrder -MainDomain $request.CN -Refresh) -ErrorAction Stop
                     $cert = Get-PACertificate -MainDomain $request.CN -ErrorAction Stop
+                    Write-NSStatusResult -Status OK
                 }
                 $cert = Copy-NSACMECertificateArtifactsToCertDir -Certificate $cert -CertDir $request.CertDir -CommonName $request.CN
-                $deploy = Install-NSACMECertificateNetScalerCertificate -Session $nsSession -Settings $settings -Request $request -Certificate $cert -PfxSecret $pfxSecret -CertificateChainValidation $settings.CertificateChainValidation -IsProduction:$Production
+
+                Write-NSStatusItem -Label 'Chain validation' -Value $request.CN
+                $chainResult = Test-NSACMECertificateChainValidation -Certificate $cert -PfxSecret $pfxSecret -Mode $settings.CertificateChainValidation -IsProduction:$Production
+                if (-not $chainResult.Validated) {
+                    $chainSkipReason = if ($settings.CertificateChainValidation -eq 'None') { 'validation disabled' } else { @($chainResult.Status) -join '; ' }
+                    Write-NSStatusResult -Status SKIP -Detail $chainSkipReason
+                } elseif ($chainResult.IsValid) {
+                    Write-NSStatusResult -Status OK -Detail ('{0} chain certificate(s)' -f @($chainResult.Chain).Count)
+                } else {
+                    # An untrusted root, and the revocation statuses that follow from it, are expected
+                    # against a staging CA.
+                    $chainDetail = if (-not $Production -and (@($chainResult.Status) -join ' ') -match 'UntrustedRoot') {
+                        'staging root untrusted, expected'
+                    } else {
+                        '{0} issue(s)' -f @($chainResult.Status).Count
+                    }
+                    Write-NSStatusResult -Status WARN -Detail $chainDetail
+                }
+
+                Write-NSStatusItem -Label 'Install on NetScaler' -Value $request.CertKeyNameToUpdate
+                $deploy = Install-NSACMECertificateNetScalerCertificate -Session $nsSession -Settings $settings -Request $request -Certificate $cert -PfxSecret $pfxSecret -IsProduction:$Production
                 Write-NSACMECertificateLog Debug 'Deploy' "Installed NetScaler certkey '$($deploy.CertKeyName)' from PFX '$($deploy.PfxFileName)'."
+                Write-NSStatusResult -Status OK -Detail "certkey $($deploy.CertKeyName)" -ShowDuration
                 $x509 = if ($cert.CertFile -and (Test-Path $cert.CertFile)) { [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.CertFile) } else { $null }
                 try {
                     # Store Posh-ACME renewal metadata back into generated config files.
@@ -597,23 +1485,42 @@
                     Write-NSACMECertificateLog Debug 'CheckCertRenewal' "Could not update renewal metadata for $($request.CN): $($_.Exception.Message)"
                 }
                 if ($request.UpdateGlobalVPNCertBinding) {
+                    Write-NSStatusItem -Label 'VPN global binding' -Value $deploy.CertKeyName
                     Update-NSACMECertificateGlobalVpnBinding -Session $nsSession -OldCertKeyName $request.CertKeyNameToUpdate -NewCertKeyName $deploy.CertKeyName -IncludeCA:$request.GlobalVPNCertBindingIncludeCA -CaCertKeyName @($deploy.ChainCertKeyName)[0] -CrlCheck $request.GlobalVPNCertBindingCrlCheck -OcspCheck $request.GlobalVPNCertBindingOcspCheck | Out-Null
+                    Write-NSStatusResult -Status OK
                 }
                 if ($request.UpdateIIS) {
-                    try { Update-NSACMECertificateIisBinding -PfxPath $deploy.PfxPath -PfxSecret $pfxSecret -SiteName $request.IISSiteToUpdate | Out-Null }
-                    catch { Write-NSACMECertificateLog Warning 'IIS' "UpdateIIS failed: $($_.Exception.Message)" }
+                    Write-NSStatusItem -Label 'IIS binding' -Value $request.IISSiteToUpdate
+                    try {
+                        Update-NSACMECertificateIisBinding -PfxPath $deploy.PfxPath -PfxSecret $pfxSecret -SiteName $request.IISSiteToUpdate | Out-Null
+                        Write-NSStatusResult -Status OK
+                    } catch {
+                        Write-NSACMECertificateLog Warning 'IIS' "UpdateIIS failed: $($_.Exception.Message)"
+                        Write-NSStatusResult -Status WARN -Detail $_.Exception.Message
+                    }
                 }
                 if ($request.PostPoSHScriptFilename) {
+                    Write-NSStatusItem -Label 'Post script' -Value (Split-Path -Path $request.PostPoSHScriptFilename -Leaf)
                     Request-NSACMECertificatePostScript -ScriptPath $request.PostPoSHScriptFilename -ScriptRoot $scriptRoot -Thumbprint $(if ($x509) { $x509.Thumbprint } else { $cert.Thumbprint }) -PfxPath $deploy.PfxPath -PfxPassword (ConvertFrom-NSACMECertificateLegacySecret -Object $pfxSecret -AsClearText) -ExtraParameters $request.PostPoSHScriptExtraParameters | Out-Null
+                    Write-NSStatusResult -Status OK -ShowDuration
                 }
                 if ($request.CleanExpiredCertsOnDisk) {
+                    Write-NSStatusItem -Label 'Clean expired on disk' -Value $request.CertDir
                     Remove-NSACMECertificateExpiredDiskCertificate -CertDir $request.CertDir -Days $request.CleanExpiredCertsOnDiskDays -CN $request.CN | Out-Null
+                    Write-NSStatusResult -Status OK
                 }
                 if ($RemoveUploadedPfx) {
-                    try { Invoke-NSDeleteSystemFile -Session $nsSession -FileName $deploy.PfxFileName -FileLocation '/nsconfig/ssl/' -IgnoreNotFound -Confirm:$false | Out-Null }
-                    catch { Write-NSACMECertificateLog Debug 'Deploy' "Uploaded PFX cleanup skipped: $($_.Exception.Message)" }
+                    Write-NSStatusItem -Label 'Remove uploaded PFX' -Value $deploy.PfxFileName
+                    try {
+                        Invoke-NSDeleteSystemFile -Session $nsSession -FileName $deploy.PfxFileName -FileLocation '/nsconfig/ssl/' -IgnoreNotFound -Confirm:$false | Out-Null
+                        Write-NSStatusResult -Status OK
+                    } catch {
+                        Write-NSACMECertificateLog Debug 'Deploy' "Uploaded PFX cleanup skipped: $($_.Exception.Message)"
+                        Write-NSStatusResult -Status SKIP -Detail $_.Exception.Message
+                    }
                 }
                 if ($request.RemovePrevious -and $Production -and $request.CertKeyNameToUpdate) {
+                    Write-NSStatusItem -Label 'Remove previous certkey' -Value $request.CertKeyNameToUpdate
                     try {
                         $removePreviousResult = Remove-NSACMECertificatePreviousCertKey `
                             -Session $nsSession `
@@ -627,37 +1534,71 @@
                             "RemovePrevious: $($removePreviousResult.Status)."
                         }
                         Write-NSACMECertificateLog Info 'Deploy' $removePreviousMessage
+                        Write-NSStatusResult -Status OK -Detail $removePreviousResult.Status
                     } catch {
                         Write-NSACMECertificateLog Warning 'Deploy' "RemovePrevious failed for '$($request.CertKeyNameToUpdate)': $($_.Exception.Message)"
+                        Write-NSStatusResult -Status WARN -Detail $_.Exception.Message
                     }
                 }
-                $result = [pscustomobject]@{ CN = $request.CN; Domains = $domains; AcmeServer = $serverName; Production = [bool]$Production; ValidationMethod = $request.ValidationMethod; CertKeyName = $deploy.CertKeyName; PfxPath = $deploy.PfxPath; Thumbprint = if ($x509) { $x509.Thumbprint } else { $cert.Thumbprint }; NotAfter = if ($x509) { $x509.NotAfter } else { $null }; Status = 'Success'; LogFile = $script:NSACMECertificateLogFile }
+                # ECC certificates throw on PublicKey.Key under .NET Framework.
+                $publicKeySize = if ($x509) { try { $x509.PublicKey.Key.KeySize } catch { $null } } else { $null }
+                $renewAfter = $null
+                if ($request.RenewAfter) { try { $renewAfter = [datetime]$request.RenewAfter } catch { $renewAfter = $null } }
+                $intermediate = @($chainResult.Chain) | Where-Object { $_ } | Select-Object -First 1
+                $result = [PSCustomObject]@{ CN = $request.CN; Domains = $domains; AcmeServer = $serverName; Production = [bool]$Production; ValidationMethod = $request.ValidationMethod; CertKeyName = $deploy.CertKeyName; PfxPath = $deploy.PfxPath; Thumbprint = if ($x509) { $x509.Thumbprint } else { $cert.Thumbprint }; NotAfter = if ($x509) { $x509.NotAfter } else { $null }; RenewAfter = $renewAfter; PublicKeySize = $publicKeySize; CertDir = if ($cert.CertFile) { Split-Path -Parent $cert.CertFile } else { $request.CertDir }; CertFile = $cert.CertFile; KeyFile = $cert.KeyFile; PfxFilePath = $cert.PfxFile; PfxFullChainPath = $cert.PfxFullChain; IntermediateName = if ($intermediate) { if ($intermediate.Subject -match 'CN=([^,]+)') { $Matches[1] } else { $intermediate.Subject } } else { $null }; IntermediateNotAfter = if ($intermediate) { $intermediate.NotAfter } else { $null }; IntermediateCertKeyName = @($deploy.ChainCertKeyName | Where-Object { $_ }); Status = 'Success'; LogFile = $script:NSACMECertificateLogFile }
                 $results += $result
                 Write-NSACMECertificateLog Info 'Result' "Finished certificate request for $($request.CN); NetScaler certkey: $($deploy.CertKeyName)."
             } catch {
+                # No-op when the last item already got its status.
+                Write-NSStatusResult -Status FAIL -ErrorRecord $_
                 Write-NSACMECertificateLog Error 'Result' "Failed certificate request for $($request.CN): $($_.Exception.Message)"
                 Write-NSACMECertificateErrorDetail -ErrorRecord $_ -Component 'Result'
                 $allErrors += $_
-                $results += [pscustomobject]@{ CN = $request.CN; Domains = $domains; AcmeServer = $serverName; Production = [bool]$Production; ValidationMethod = $request.ValidationMethod; CertKeyName = $request.CertKeyNameToUpdate; PfxPath = $null; Thumbprint = $null; NotAfter = $null; Status = 'Failed'; Reason = $_.Exception.Message; LogFile = $script:NSACMECertificateLogFile }
+                $results += [PSCustomObject]@{ CN = $request.CN; Domains = $domains; AcmeServer = $serverName; Production = [bool]$Production; ValidationMethod = $request.ValidationMethod; CertKeyName = $request.CertKeyNameToUpdate; PfxPath = $null; Thumbprint = $null; NotAfter = $null; Status = 'Failed'; Reason = $_.Exception.Message; LogFile = $script:NSACMECertificateLogFile }
                 if ($StopOnError) { throw }
             } finally {
                 # Per-order challenge bindings are short-lived; reusable HTTP objects are cleaned after all requests.
-                Remove-NSACMECertificateHttpChallengeBinding -Session $nsSession -ChallengeBindings $challengeBindings -Settings $settings
-                if ($requestVipEnabled -and $request.ValidationMethod -eq 'http' -and $request.DisableVipAfter) { foreach ($csVip in @($request.CsVipName)) { try { Invoke-NSDisableCSVServer -Session $nsSession -Name $csVip | Out-Null } catch { Write-NSACMECertificateLog Warning 'NetScaler' "Could not disable CS VIP $csVip`: $($_.Exception.Message)" } } }
+                if (@($challengeBindings).Count -gt 0) {
+                    Write-NSStatusItem -Label 'Remove challenge bindings' -Value "$(@($challengeBindings).Count) binding(s)"
+                    Remove-NSACMECertificateHttpChallengeBinding -Session $nsSession -ChallengeBindings $challengeBindings -Settings $settings
+                    Write-NSStatusResult -Status OK
+                } else {
+                    Remove-NSACMECertificateHttpChallengeBinding -Session $nsSession -ChallengeBindings $challengeBindings -Settings $settings
+                }
+                if ($requestVipEnabled -and $request.ValidationMethod -eq 'http' -and $request.DisableVipAfter) {
+                    foreach ($csVip in @($request.CsVipName | Where-Object { $_ })) {
+                        $stateBefore = Get-NSACMECertificateVServerState -Session $nsSession -Name $csVip -Type 'CS'
+                        Write-NSStatusItem -Label 'Disable CS vServer' -Value $csVip
+                        try { Invoke-NSDisableCSVServer -Session $nsSession -Name $csVip | Out-Null } catch { Write-NSACMECertificateLog Warning 'NetScaler' "Could not disable CS VIP $csVip`: $($_.Exception.Message)" }
+                        $stateAfter = Get-NSACMECertificateVServerState -Session $nsSession -Name $csVip -Type 'CS'
+                        Write-NSStatusResult -Status OK -Detail ('{0} -> {1}' -f $stateBefore.Text, $stateAfter.Text)
+                    }
+                }
             }
         }
         } finally {
             if ($httpValidationConfigInitialized) {
+                Write-NSStatusSection -Title 'Cleanup'
+                $cleanupSectionWritten = $true
+                Write-NSStatusItem -Label 'Remove validation objects' -Value ($httpValidationCleanupCsVipNames -join ', ')
                 Write-NSACMECertificateLog Info 'Cleanup' 'Removing reusable NetScaler HTTP validation objects.'
                 Remove-NSACMECertificateHttpValidationConfig -Session $nsSession -Settings $settings -CsVipName $httpValidationCleanupCsVipNames | Out-Null
+                Write-NSStatusResult -Status OK
             }
         }
+        if (-not $cleanupSectionWritten -and ($settings.SendMail -or ($ConfigFile -and $configChanged))) {
+            Write-NSStatusSection -Title 'Cleanup'
+            $cleanupSectionWritten = $true
+        }
         if ($settings.SendMail) {
+            Write-NSStatusItem -Label 'Send mail' -Value ($settings.SMTPTo -join ', ')
             $subjectStatus = if ($allErrors.Count -gt 0) { 'failed' } else { 'completed' }
             $body = ($results | Format-List | Out-String)
             Send-NSACMECertificateMail -Settings $settings -Subject "Request-NSACMECertificate $subjectStatus" -Body $body -LogFile $script:NSACMECertificateLogFile
+            Write-NSStatusResult -Status OK
         }
         if ($ConfigFile -and $configChanged) {
+            Write-NSStatusItem -Label 'Save config file' -Value (Split-Path -Path $ConfigFile -Leaf)
             try {
                 $configAction = if ($AutoRun) { 'updated renewal metadata' } else { 'request configuration' }
                 Write-NSACMECertificateLog Info 'ConfigFile' "Saving $configAction to '$ConfigFile'."
@@ -669,228 +1610,330 @@
                     New-Item -ItemType Directory -Path $configDirectory -Force | Out-Null
                 }
                 $config | ConvertTo-Json -Depth 20 | Out-File -LiteralPath $ConfigFile -Encoding Unicode -Force
+                Write-NSStatusResult -Status OK -Detail $configAction
             } catch {
                 Write-NSACMECertificateLog Warning 'ConfigFile' "Could not save config file '$ConfigFile': $($_.Exception.Message)"
+                Write-NSStatusResult -Status WARN -Detail $_.Exception.Message
             }
         }
         if ($NoConsoleOutput) {
             $results
         } else {
             Write-NSACMECertificateResultSummary -Results $results
+            Write-NSStatusSummary -Title 'Run summary'
         }
     }
 }
 
 # SIG # Begin signature block
-# MIInigYJKoZIhvcNAQcCoIInezCCJ3cCAQExDzANBglghkgBZQMEAgEFADB5Bgor
+# MII6AQYJKoZIhvcNAQcCoII58jCCOe4CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAGJkdP16OmSzIy
-# yt9NeRatIV6M5hpIMHQopq70/K2Pw6CCIR0wggZFMIIELaADAgECAhAIMk+dt9qR
-# b2Pk8qM8Xl1RMA0GCSqGSIb3DQEBCwUAMFYxCzAJBgNVBAYTAlBMMSEwHwYDVQQK
-# ExhBc3NlY28gRGF0YSBTeXN0ZW1zIFMuQS4xJDAiBgNVBAMTG0NlcnR1bSBDb2Rl
-# IFNpZ25pbmcgMjAyMSBDQTAeFw0yNDA0MDQxNDA0MjRaFw0yNzA0MDQxNDA0MjNa
-# MGsxCzAJBgNVBAYTAk5MMRIwEAYDVQQHDAlTY2hpam5kZWwxIzAhBgNVBAoMGkpv
-# aG4gQmlsbGVrZW5zIENvbnN1bHRhbmN5MSMwIQYDVQQDDBpKb2huIEJpbGxla2Vu
-# cyBDb25zdWx0YW5jeTCCAaIwDQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBAMsl
-# ntDbSQwHZXwFhmibivbnd0Qfn6sqe/6fos3pKzKxEsR907RkDMet2x6RRg3eJkiI
-# r3TFPwqBooyXXgK3zxxpyhGOcuIqyM9J28DVf4kUyZHsjGO/8HFjrr3K1hABNUsz
-# P0o7H3o6J31eqV1UmCXYhQlNoW9FOmRC1amlquBmh7w4EKYEytqdmdOBavAD5Xq4
-# vLPxNP6kyA+B2YTtk/xM27TghtbwFGKnu9Vwnm7dFcpLxans4ONt2OxDQOMA5Nwg
-# cUv/YTpjhq9qoz6ivG55NRJGNvUXsM3w2o7dR6Xh4MuEGrTSrOWGg2A5EcLH1XqQ
-# tkF5cZnAPM8W/9HUp8ggornWnFVQ9/6Mga+ermy5wy5XrmQpN+x3u6tit7xlHk1H
-# c+4XY4a4ie3BPXG2PhJhmZAn4ebNSBwNHh8z7WTT9X9OFERepGSytZVeEP7hgypt
-# SLcuhpwWeR4QdBb7dV++4p3PsAUQVHFpwkSbrRTv4EiJ0Lcz9P1HPGFoHiFAQQID
-# AQABo4IBeDCCAXQwDAYDVR0TAQH/BAIwADA9BgNVHR8ENjA0MDKgMKAuhixodHRw
-# Oi8vY2NzY2EyMDIxLmNybC5jZXJ0dW0ucGwvY2NzY2EyMDIxLmNybDBzBggrBgEF
-# BQcBAQRnMGUwLAYIKwYBBQUHMAGGIGh0dHA6Ly9jY3NjYTIwMjEub2NzcC1jZXJ0
-# dW0uY29tMDUGCCsGAQUFBzAChilodHRwOi8vcmVwb3NpdG9yeS5jZXJ0dW0ucGwv
-# Y2NzY2EyMDIxLmNlcjAfBgNVHSMEGDAWgBTddF1MANt7n6B0yrFu9zzAMsBwzTAd
-# BgNVHQ4EFgQUO6KtBpOBgmrlANVAnyiQC6W6lJwwSwYDVR0gBEQwQjAIBgZngQwB
-# BAEwNgYLKoRoAYb2dwIFAQQwJzAlBggrBgEFBQcCARYZaHR0cHM6Ly93d3cuY2Vy
-# dHVtLnBsL0NQUzATBgNVHSUEDDAKBggrBgEFBQcDAzAOBgNVHQ8BAf8EBAMCB4Aw
-# DQYJKoZIhvcNAQELBQADggIBAEQsN8wgPMdWVkwHPPTN+jKpdns5AKVFjcn00psf
-# 2NGVVgWWNQBIQc9lEuTBWb54IK6Ga3hxQRZfnPNo5HGl73YLmFgdFQrFzZ1lnaMd
-# Icyh8LTWv6+XNWfoyCM9wCp4zMIDPOs8LKSMQqA/wRgqiACWnOS4a6fyd5GUIAm4
-# CuaptpFYr90l4Dn/wAdXOdY32UhgzmSuxpUbhD8gVJUaBNVmQaRqeU8y49MxiVrU
-# KJXde1BCrtR9awXbqembc7Nqvmi60tYKlD27hlpKtj6eGPjkht0hHEsgzU0Fxw7Z
-# JghYG2wXfpF2ziN893ak9Mi/1dmCNmorGOnybKYfT6ff6YTCDDNkod4egcMZdOSv
-# +/Qv+HAeIgEvrxE9QsGlzTwbRtbm6gwYYcVBs/SsVUdBn/TSB35MMxRhHE5iC3aU
-# TkDbceo/XP3uFhVL4g2JZHpFfCSu2TQrrzRn2sn07jfMvzeHArCOJgBW1gPqR3Wr
-# J4hUxL06Rbg1gs9tU5HGGz9KNQMfQFQ70Wz7UIhezGcFcRfkIfSkMmQYYpsc7rfz
-# j+z0ThfDVzzJr2dMOFsMlfj1T6l22GBq9XQx0A4lcc5Fl9pRxbOuHHWFqIBD/BCE
-# hwniOCySzqENd2N+oz8znKooSISStnkNaYXt6xblJF2dx9Dn89FK7d1IquNxOwt0
-# tI5dMIIGgjCCBGqgAwIBAgIQNsKwvXwbOuejs902y8l1aDANBgkqhkiG9w0BAQwF
-# ADCBiDELMAkGA1UEBhMCVVMxEzARBgNVBAgTCk5ldyBKZXJzZXkxFDASBgNVBAcT
-# C0plcnNleSBDaXR5MR4wHAYDVQQKExVUaGUgVVNFUlRSVVNUIE5ldHdvcmsxLjAs
-# BgNVBAMTJVVTRVJUcnVzdCBSU0EgQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkwHhcN
-# MjEwMzIyMDAwMDAwWhcNMzgwMTE4MjM1OTU5WjBXMQswCQYDVQQGEwJHQjEYMBYG
-# A1UEChMPU2VjdGlnbyBMaW1pdGVkMS4wLAYDVQQDEyVTZWN0aWdvIFB1YmxpYyBU
-# aW1lIFN0YW1waW5nIFJvb3QgUjQ2MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIIC
-# CgKCAgEAiJ3YuUVnnR3d6LkmgZpUVMB8SQWbzFoVD9mUEES0QUCBdxSZqdTkdizI
-# CFNeINCSJS+lV1ipnW5ihkQyC0cRLWXUJzodqpnMRs46npiJPHrfLBOifjfhpdXJ
-# 2aHHsPHggGsCi7uE0awqKggE/LkYw3sqaBia67h/3awoqNvGqiFRJ+OTWYmUCO2G
-# AXsePHi+/JUNAax3kpqstbl3vcTdOGhtKShvZIvjwulRH87rbukNyHGWX5tNK/WA
-# BKf+Gnoi4cmisS7oSimgHUI0Wn/4elNd40BFdSZ1EwpuddZ+Wr7+Dfo0lcHflm/F
-# DDrOJ3rWqauUP8hsokDoI7D/yUVI9DAE/WK3Jl3C4LKwIpn1mNzMyptRwsXKrop0
-# 6m7NUNHdlTDEMovXAIDGAvYynPt5lutv8lZeI5w3MOlCybAZDpK3Dy1MKo+6aEtE
-# 9vtiTMzz/o2dYfdP0KWZwZIXbYsTIlg1YIetCpi5s14qiXOpRsKqFKqav9R1R5vj
-# 3NgevsAsvxsAnI8Oa5s2oy25qhsoBIGo/zi6GpxFj+mOdh35Xn91y72J4RGOJEoq
-# zEIbW3q0b2iPuWLA911cRxgY5SJYubvjay3nSMbBPPFsyl6mY4/WYucmyS9lo3l7
-# jk27MAe145GWxK4O3m3gEFEIkv7kRmefDR7Oe2T1HxAnICQvr9sCAwEAAaOCARYw
-# ggESMB8GA1UdIwQYMBaAFFN5v1qqK0rPVIDh2JvAnfKyA2bLMB0GA1UdDgQWBBT2
-# d2rdP/0BE/8WoWyCAi/QCj0UJTAOBgNVHQ8BAf8EBAMCAYYwDwYDVR0TAQH/BAUw
-# AwEB/zATBgNVHSUEDDAKBggrBgEFBQcDCDARBgNVHSAECjAIMAYGBFUdIAAwUAYD
-# VR0fBEkwRzBFoEOgQYY/aHR0cDovL2NybC51c2VydHJ1c3QuY29tL1VTRVJUcnVz
-# dFJTQUNlcnRpZmljYXRpb25BdXRob3JpdHkuY3JsMDUGCCsGAQUFBwEBBCkwJzAl
-# BggrBgEFBQcwAYYZaHR0cDovL29jc3AudXNlcnRydXN0LmNvbTANBgkqhkiG9w0B
-# AQwFAAOCAgEADr5lQe1oRLjlocXUEYfktzsljOt+2sgXke3Y8UPEooU5y39rAARa
-# AdAxUeiX1ktLJ3+lgxtoLQhn5cFb3GF2SSZRX8ptQ6IvuD3wz/LNHKpQ5nX8hjsD
-# LRhsyeIiJsms9yAWnvdYOdEMq1W61KE9JlBkB20XBee6JaXx4UBErc+YuoSb1SxV
-# f7nkNtUjPfcxuFtrQdRMRi/fInV/AobE8Gw/8yBMQKKaHt5eia8ybT8Y/Ffa6HAJ
-# yz9gvEOcF1VWXG8OMeM7Vy7Bs6mSIkYeYtddU1ux1dQLbEGur18ut97wgGwDiGin
-# CwKPyFO7ApcmVJOtlw9FVJxw/mL1TbyBns4zOgkaXFnnfzg4qbSvnrwyj1NiurMp
-# 4pmAWjR+Pb/SIduPnmFzbSN/G8reZCL4fvGlvPFk4Uab/JVCSmj59+/mB2Gn6G/U
-# YOy8k60mKcmaAZsEVkhOFuoj4we8CYyaR9vd9PGZKSinaZIkvVjbH/3nlLb0a7SB
-# IkiRzfPfS9T+JesylbHa1LtRV9U/7m0q7Ma2CQ/t392ioOssXW7oKLdOmMBl14su
-# VFBmbzrt5V5cQPnwtd3UOTpS9oCG+ZZheiIvPgkDmA8FzPsnfXW5qHELB43ET7HH
-# FHeRPRYrMBKjkb8/IN7Po0d0hQoF4TeMM+zYAJzoKQnVKOLg8pZVPT8wgganMIIE
-# j6ADAgECAhEAkKwIciD9xafEa1zHDfc9BjANBgkqhkiG9w0BAQwFADBXMQswCQYD
-# VQQGEwJHQjEYMBYGA1UEChMPU2VjdGlnbyBMaW1pdGVkMS4wLAYDVQQDEyVTZWN0
-# aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5nIFJvb3QgUjQ2MB4XDTI2MDMyNTAwMDAw
-# MFoXDTQxMDMyNDIzNTk1OVowVTELMAkGA1UEBhMCR0IxGDAWBgNVBAoTD1NlY3Rp
-# Z28gTGltaXRlZDEsMCoGA1UEAxMjU2VjdGlnbyBQdWJsaWMgVGltZSBTdGFtcGlu
-# ZyBDQSBSNDEwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQCu5EqiAa2C
-# HGL5Zi1bmgPM8NUXwYZJ+BtQqHps43GLTC+sjVLypsBh+8uv+TLkgtVGD//vSmA0
-# qrzELf9YRCh2MTAA/aGaQZKGg0BRCmziR3pbCnvgWjtGXBDUyn3j3K2lZAO8KxgF
-# tlxwOYEAkL+CCqK4v9zzTl8ZwzDpPMiDIFa5THk8an1ieF5I09cXNrPQw+1ER1li
-# ThaG0z6FrOpqwxZWmPRZQBw2E32878UB1bL0Zp91vuWZgsMpNNiPCoBj0/1F+LE8
-# +NRokfqacFI0F2tftrRB2W7HQClLR9zjxFbWb5be2rceIfNyHUUfKGIvMI2NzoxS
-# lxXnFqUG887D8W1Cj8DFok688JKxWvHR/9aQykSbd+9Vutj36ij2sgq/125wTpUZ
-# /AgC0ph50bRs7gFrUyaXE9wSsOqMvCCC+sEm7vd/BemSG0TSHNXSmyCba+FCzeke
-# WX03TRIcF3Laqd0Rw24OH7jpei4zaGhcI7nfdhBA4c8RScxNY6jeHLHHmSMMTk9W
-# qn7H4dLhUBP5YEwbgbN4uv1i9ltTnHli8t1xHV0StX9BFgrnmunTX19kUXY1H5OR
-# JbRZyZDdvm1oZyteDj0SnMozr+YSmdIleDUTXdfoY7b2taz8s2+QbOxLxcahEIYG
-# Wzqu6h955tKwcANHcZ4gTmAhT3btuOiQsQIDAQABo4IBbjCCAWowHwYDVR0jBBgw
-# FoAU9ndq3T/9ARP/FqFsggIv0Ao9FCUwHQYDVR0OBBYEFDp0pQxnxkJQwv21/Me7
-# KTSC9Hq5MA4GA1UdDwEB/wQEAwIBhjASBgNVHRMBAf8ECDAGAQH/AgEAMBMGA1Ud
-# JQQMMAoGCCsGAQUFBwMIMCMGA1UdIAQcMBowCAYGZ4EMAQQCMA4GDCsGAQQBsjEB
-# AgEDCDBMBgNVHR8ERTBDMEGgP6A9hjtodHRwOi8vY3JsLnNlY3RpZ28uY29tL1Nl
-# Y3RpZ29QdWJsaWNUaW1lU3RhbXBpbmdSb290UjQ2LmNybDB8BggrBgEFBQcBAQRw
-# MG4wRwYIKwYBBQUHMAKGO2h0dHA6Ly9jcnQuc2VjdGlnby5jb20vU2VjdGlnb1B1
-# YmxpY1RpbWVTdGFtcGluZ1Jvb3RSNDYucDdjMCMGCCsGAQUFBzABhhdodHRwOi8v
-# b2NzcC5zZWN0aWdvLmNvbTANBgkqhkiG9w0BAQwFAAOCAgEAMt5SR2bxngNm+N8o
-# c6Gq76Gx1c235fkX7jw8Ho9MAkJGADerHE7dhsBXttqmzgr/7ZZahZSykGRPhPY1
-# crj028kB8KzO0dKC2qQBAwtfgqMLKkkX/6bYq2uT33eD6ByAp2/XKD0LcmZh0kKe
-# cvSBr6ln9ajX6u1dnx2fA7xEKy1M3qBhfQSUWLtjs2nFt0ELVLptzTlX9ID0cL+i
-# OPfdboZ3CelT+JXKVKR2Sge0d4YiFAtPZkfSo8z1Z1x7y/Z9mwMIlBAnyuWXs4Ys
-# NuxdrYIt/QxE31PDOJ9DesS4Bc7H9OTORlEV/AvfiF/VepKZpira1MzLYuCw+uoL
-# Zn/pkpvd+CvNTS+mEHjBJNa6WK1j8qXFu+jIq+sG9QILHiyB6p/xpHrkJu8zkw39
-# 3+VqF9eKlTY2VjRxdycZLrVemZ4Yp3wi33b+W58CllH3HqjmowlZ7SOrgmx8YwYO
-# kgrHsXOQHyBp6O4FRb8In0+FzjT7ElGie9V7CfhL3IlVFZ4zjuKsZtH1iU3fGu4z
-# /JnOGT6sCb0BbTqe/uhvpFCQBdH5xPGIA/LrbQUXjU2tWJgHhTIqnN/HvHyOHi5t
-# M4zP3nhgh2rJ6Kqq2xsHBeNYs/R18xQ8DeIg+c90Eoaeh0YlN1KU8AyYol3K9M+q
-# Y5ez8syd/7ZlrRnoVewgH3P1pcswgga5MIIEoaADAgECAhEAmaOACiZVO2Wr3G6E
-# prPqOTANBgkqhkiG9w0BAQwFADCBgDELMAkGA1UEBhMCUEwxIjAgBgNVBAoTGVVu
-# aXpldG8gVGVjaG5vbG9naWVzIFMuQS4xJzAlBgNVBAsTHkNlcnR1bSBDZXJ0aWZp
-# Y2F0aW9uIEF1dGhvcml0eTEkMCIGA1UEAxMbQ2VydHVtIFRydXN0ZWQgTmV0d29y
-# ayBDQSAyMB4XDTIxMDUxOTA1MzIxOFoXDTM2MDUxODA1MzIxOFowVjELMAkGA1UE
-# BhMCUEwxITAfBgNVBAoTGEFzc2VjbyBEYXRhIFN5c3RlbXMgUy5BLjEkMCIGA1UE
-# AxMbQ2VydHVtIENvZGUgU2lnbmluZyAyMDIxIENBMIICIjANBgkqhkiG9w0BAQEF
-# AAOCAg8AMIICCgKCAgEAnSPPBDAjO8FGLOczcz5jXXp1ur5cTbq96y34vuTmflN4
-# mSAfgLKTvggv24/rWiVGzGxT9YEASVMw1Aj8ewTS4IndU8s7VS5+djSoMcbvIKck
-# 6+hI1shsylP4JyLvmxwLHtSworV9wmjhNd627h27a8RdrT1PH9ud0IF+njvMk2xq
-# bNTIPsnWtw3E7DmDoUmDQiYi/ucJ42fcHqBkbbxYDB7SYOouu9Tj1yHIohzuC8KN
-# qfcYf7Z4/iZgkBJ+UFNDcc6zokZ2uJIxWgPWXMEmhu1gMXgv8aGUsRdaCtVD2bSl
-# bfsq7BiqljjaCun+RJgTgFRCtsuAEw0pG9+FA+yQN9n/kZtMLK+Wo837Q4QOZgYq
-# VWQ4x6cM7/G0yswg1ElLlJj6NYKLw9EcBXE7TF3HybZtYvj9lDV2nT8mFSkcSkAE
-# xzd4prHwYjUXTeZIlVXqj+eaYqoMTpMrfh5MCAOIG5knN4Q/JHuurfTI5XDYO962
-# WZayx7ACFf5ydJpoEowSP07YaBiQ8nXpDkNrUA9g7qf/rCkKbWpQ5boufUnq1UiY
-# PIAHlezf4muJqxqIns/kqld6JVX8cixbd6PzkDpwZo4SlADaCi2JSplKShBSND36
-# E/ENVv8urPS0yOnpG4tIoBGxVCARPCg1BnyMJ4rBJAcOSnAWd18Jx5n858JSqPEC
-# AwEAAaOCAVUwggFRMA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFN10XUwA23uf
-# oHTKsW73PMAywHDNMB8GA1UdIwQYMBaAFLahVDkCw6A/joq8+tT4HKbROg79MA4G
-# A1UdDwEB/wQEAwIBBjATBgNVHSUEDDAKBggrBgEFBQcDAzAwBgNVHR8EKTAnMCWg
-# I6Ahhh9odHRwOi8vY3JsLmNlcnR1bS5wbC9jdG5jYTIuY3JsMGwGCCsGAQUFBwEB
-# BGAwXjAoBggrBgEFBQcwAYYcaHR0cDovL3N1YmNhLm9jc3AtY2VydHVtLmNvbTAy
-# BggrBgEFBQcwAoYmaHR0cDovL3JlcG9zaXRvcnkuY2VydHVtLnBsL2N0bmNhMi5j
-# ZXIwOQYDVR0gBDIwMDAuBgRVHSAAMCYwJAYIKwYBBQUHAgEWGGh0dHA6Ly93d3cu
-# Y2VydHVtLnBsL0NQUzANBgkqhkiG9w0BAQwFAAOCAgEAdYhYD+WPUCiaU58Q7EP8
-# 9DttyZqGYn2XRDhJkL6P+/T0IPZyxfxiXumYlARMgwRzLRUStJl490L94C9LGF3v
-# jzzH8Jq3iR74BRlkO18J3zIdmCKQa5LyZ48IfICJTZVJeChDUyuQy6rGDxLUUAsO
-# 0eqeLNhLVsgw6/zOfImNlARKn1FP7o0fTbj8ipNGxHBIutiRsWrhWM2f8pXdd3x2
-# mbJCKKtl2s42g9KUJHEIiLni9ByoqIUul4GblLQigO0ugh7bWRLDm0CdY9rNLqyA
-# 3ahe8WlxVWkxyrQLjH8ItI17RdySaYayX3PhRSC4Am1/7mATwZWwSD+B7eMcZNhp
-# n8zJ+6MTyE6YoEBSRVrs0zFFIHUR08Wk0ikSf+lIe5Iv6RY3/bFAEloMU+vUBfSo
-# uCReZwSLo8WdrDlPXtR0gicDnytO7eZ5827NS2x7gCBibESYkOh1/w1tVxTpV2Na
-# 3PR7nxYVlPu1JPoRZCbH86gc96UTvuWiOruWmyOEMLOGGniR+x+zPF/2DaGgK2W1
-# eEJfo2qyrBNPvF7wuAyQfiFXLwvWHamoYtPZo0LHuH8X3n9C+xN4YaNjt2ywzOr+
-# tKyEVAotnyU9vyEVOaIYMk3IeBrmFnn0gbKeTTyYeEEUz/Qwt4HOUBCrW602NCmv
-# O1nm+/80nLy5r0AZvCQxaQ4wggbiMIIEyqADAgECAhEA507yVbBQT/rbpt/3/Iuj
-# FTANBgkqhkiG9w0BAQwFADBVMQswCQYDVQQGEwJHQjEYMBYGA1UEChMPU2VjdGln
-# byBMaW1pdGVkMSwwKgYDVQQDEyNTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5n
-# IENBIFI0MTAeFw0yNjAzMjUwMDAwMDBaFw0zNzA2MjQyMzU5NTlaMHIxCzAJBgNV
-# BAYTAkdCMRcwFQYDVQQIEw5HcmVhdGVyIExvbmRvbjEYMBYGA1UEChMPU2VjdGln
-# byBMaW1pdGVkMTAwLgYDVQQDEydTZWN0aWdvIFB1YmxpYyBUaW1lIFN0YW1waW5n
-# IFNpZ25lciBSMzcwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQCy/8Nt
-# S9xQ2UUtBRF32bj7VK3n4m50Uqjk/zTciSziYV40H1LKah0/oEklYG42E4VCP3Dv
-# sBUB6DmpCkDZ0jCnZBPIEevaH15ZJOQwFWP2ZXr5YjlJpb68Nlbs+ElNvKx32/1Y
-# Hde3qqUSLybjulxPLz6T85+HOIqK7M1Bep8LspyhEP/q6nw5kGxTSrGvufmeH+JF
-# 8CnVBcVMFA40FlIYh0cDJVFhhfTfdWgLy/vWuLMQoKkf3s/FvByf16r0rtbyHm/i
-# emwxSioJL9zyZDDKUNAbHXl0dhXo2VxUV2NcPXWXuoKsjL+6cfk6Vm2DHnxAlFdF
-# saBDIF1JOkSnC6PeLlBznZn2buF3vIIYJcq6N/zeFRCk4/HXDz7zgRsRRMdUB+rh
-# yk5FoZaBjw0nLq3GZ3fClLUx5es5pUAxzNODMBn7JkFYip2BAGBPER5eV0ROhk6t
-# GTG+fUiMiV+vgjg1YnP5FvnYWyEtWeQD/B2hp3vz0RvtdkM0p3igyadzrfpOBq5p
-# pVk/YsuhTQkP99ivneHAGfi5e7lmxJ+meoBPrRLuzMmb81rzzbESjJHMsn5RVtc6
-# Ucs7rcMqQC13PUIO7BbGBETV2ufCmV6lPTp3P7XJOvmnUCRTPbVvMTpxP/z+SOHg
-# 4/OCBhiqs4FA9+4oQvlkk9w32NGASli9GWrm5wIDAQABo4IBjjCCAYowHwYDVR0j
-# BBgwFoAUOnSlDGfGQlDC/bX8x7spNIL0erkwHQYDVR0OBBYEFGEQ6XoSr1HEhdTy
-# z6R0D1DNIK/4MA4GA1UdDwEB/wQEAwIGwDAMBgNVHRMBAf8EAjAAMBYGA1UdJQEB
-# /wQMMAoGCCsGAQUFBwMIMEoGA1UdIARDMEEwCAYGZ4EMAQQCMDUGDCsGAQQBsjEB
-# AgEDCDAlMCMGCCsGAQUFBwIBFhdodHRwczovL3NlY3RpZ28uY29tL0NQUzBKBgNV
-# HR8EQzBBMD+gPaA7hjlodHRwOi8vY3JsLnNlY3RpZ28uY29tL1NlY3RpZ29QdWJs
-# aWNUaW1lU3RhbXBpbmdDQVI0MS5jcmwwegYIKwYBBQUHAQEEbjBsMEUGCCsGAQUF
-# BzAChjlodHRwOi8vY3J0LnNlY3RpZ28uY29tL1NlY3RpZ29QdWJsaWNUaW1lU3Rh
-# bXBpbmdDQVI0MS5jcnQwIwYIKwYBBQUHMAGGF2h0dHA6Ly9vY3NwLnNlY3RpZ28u
-# Y29tMA0GCSqGSIb3DQEBDAUAA4ICAQAD6j2N0azN+hl6k6bKB5/U6VuSOs93ZBb3
-# Pczy9VtBIKu4947Z5GwL0aFngIxl+GSuLFrJgPruBCRvKJEJsm7kv+LQ1COVCEG9
-# tZ+IRtr4ocUoa53lgdFaENlS0N4wgkZkbQEPv+x+1lSjYh+T4JeL9mUznT7Erc6S
-# p5dWLka5sMP/m3GZi6oJPdPcsCKWagH7m2H2xDGIyHJC5PdH9phvi/KmhkktiSVT
-# NNqVeV5bWdX2zhRE6UTfz0IcMoCL996lFIydXxOCE4MNDHDM0as4lnTiT/KHMccO
-# 6l8c9TnUVgmpci9ar1IABZ2U1XUkYjGGSn9MC3EHDP9V39VuBVvZ33/BEV/EWSRr
-# f07T7jFplKX+gQr/UOqPGMlE7ZJ72UaUkNJy7bVl3bcLKzdpjIHzLkf/4MVa1V7w
-# 8wqCv5W4gOnRGTlud5UMARbRM8BPxR/CXYXoMmIOD8pmTk2axgRL4LG8XtuchISd
-# CHRmtacAmLGq5XSYSVTHTXADlO48iDKh3HM2r98LSF6f0sG12d8V9Jn7C3wDUieO
-# xuKj4MdWrW+hiJU2kF87v6eH00HgCFFc2V0+CvfOCMn7juzS41jLaINcBlKWQ/fK
-# b/uDLfWOW73z1I2lFY7Xj8tQ1XYtK5eREjWItM8jpl1cbQOc88btR+0XS2TmboE/
-# 141+va2PWzGCBcMwggW/AgEBMGowVjELMAkGA1UEBhMCUEwxITAfBgNVBAoTGEFz
-# c2VjbyBEYXRhIFN5c3RlbXMgUy5BLjEkMCIGA1UEAxMbQ2VydHVtIENvZGUgU2ln
-# bmluZyAyMDIxIENBAhAIMk+dt9qRb2Pk8qM8Xl1RMA0GCWCGSAFlAwQCAQUAoIGE
-# MBgGCisGAQQBgjcCAQwxCjAIoAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQB
-# gjcCAQQwHAYKKwYBBAGCNwIBCzEOMAwGCisGAQQBgjcCARUwLwYJKoZIhvcNAQkE
-# MSIEIFatDE8f5h0Xa/3kAO0K2x/xHhhtj7mx7P5EAQxmqJyuMA0GCSqGSIb3DQEB
-# AQUABIIBgKdgP9s25a1CMZSc7I9oUDueJbbAXufypnMwljjlTNNgKZzthfmPjZkw
-# GtQjIxpavy9q8jQwzKWRZiUrHrOxcmfmsbcjUvL8CqmJKxwe23E2+YnIokmMJXXb
-# BVOJThAGkFnFQNd2ePKsdM40UleGywn5Ge0DzTaf6TVotRD+3ycK4SlOz/xZjtst
-# v3IjRJXN/siWU/VPAlO4UnPL0Z8Tb7ADPpjzrPRhF4870IuOvFEM/klv3mGpNIJn
-# MmbybEp06kHMXzWRu7mfZW5cidl+xOfvhkFRZzQLTJRKFF3yvVYc/Aij0K1yfPiu
-# fhq6sK8AHKkp5zevfc5dn5gVQldcVgwJpvUo7HVct6p+UXOq2OBaH+kjcxBx74iZ
-# ZkI2HuGuYzTQeexj4hscMva4gQSXJy/hVOi49ynK4PavVjHFB1EIpezmXgkwrgTq
-# IWZ4IVENX1n7cvHedELSu4qVLn6QNO0Vsi1X7mzgCqFQYjcThehJM6hwLP27JrXZ
-# +HFoJ/S6UaGCAyMwggMfBgkqhkiG9w0BCQYxggMQMIIDDAIBATBqMFUxCzAJBgNV
-# BAYTAkdCMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxLDAqBgNVBAMTI1NlY3Rp
-# Z28gUHVibGljIFRpbWUgU3RhbXBpbmcgQ0EgUjQxAhEA507yVbBQT/rbpt/3/Iuj
-# FTANBglghkgBZQMEAgIFAKB5MBgGCSqGSIb3DQEJAzELBgkqhkiG9w0BBwEwHAYJ
-# KoZIhvcNAQkFMQ8XDTI2MDcyMDEyMjUwM1owPwYJKoZIhvcNAQkEMTIEMCLRV9z6
-# r3cOOb0VyQDQE3+BuLn79B/bZUS0QIMG91nw+kjHKv4B7PR/6tkt6ux1mTANBgkq
-# hkiG9w0BAQEFAASCAgCObSIiy7Q5guxUNuKcPMqsOGBUJWV/3HxH4lMhJOxYhVDO
-# 8XQSOgT4j9AabIXDkJ87UwsD2TBu4zCIzmbAgTTpLaWMV2Yw8GWMlFR7WCZVYYTH
-# Zmr+JSbJ8FHUU/XoCb6LTsRY1eAza2Eg2mK6VGNn8GDURfU7FR1PpuYB00rYRGL+
-# ijpbCfchCshMPe9wlS7yerW1dNPMzpKqWsp9oT1Wi+zZoorulpP4B6TXeQISIPf7
-# FF9gHm2CS+GoYiDEu8LpyQwWDHmP7BwoJeAGlgkhepwKBkJ8L634+cfKbIt/bsmE
-# IRwBuFFANXsCgw3J2nd2DCIy2It5qBkvk3eX73sKO9WxeA7Ibk7JNXkiQEVs17YT
-# w17WmNjXTw+w/kMNqZoR2AC93o1xIjRUvCxoya+SRdlNRgjPejedCmJvvE3epN/z
-# GRE3IYhWfPKMhmFX/rXl/uFz/pl0BgADuu5WF7+Y+1dv6deKd+fSEcw7hZDOWMsA
-# JTU9gHjAG2tpruwhYjvpPA2XPsrUUHo0ewAIYxJ7GIDcmu8Hm46DFSLmYX78wvlR
-# wyPKeLU2cEa4mb/nl5O5Mczsrkl1sTVRjnLxHufpg2FhDn7wgrDWG4ShUjqMxyuw
-# DxtcG/j3oi+7LIHkhvFXBXU+dIv9FtcDHdZ4t1hyQsS6gn7GAzZPFHX9ap5Tuw==
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCC3jupxT5L9+v8s
+# 36UK+N/CiJEr3xNBBXUn7FY9SSabqaCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
+# lUgTecgRwIeZMA0GCSqGSIb3DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
+# ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVu
+# dGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAy
+# MDAeFw0yMDA0MTYxODM2MTZaFw00NTA0MTYxODQ0NDBaMHcxCzAJBgNVBAYTAlVT
+# MR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jv
+# c29mdCBJZGVudGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRo
+# b3JpdHkgMjAyMDCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALORKgeD
+# Bmf9np3gx8C3pOZCBH8Ppttf+9Va10Wg+3cL8IDzpm1aTXlT2KCGhFdFIMeiVPvH
+# or+Kx24186IVxC9O40qFlkkN/76Z2BT2vCcH7kKbK/ULkgbk/WkTZaiRcvKYhOuD
+# PQ7k13ESSCHLDe32R0m3m/nJxxe2hE//uKya13NnSYXjhr03QNAlhtTetcJtYmrV
+# qXi8LW9J+eVsFBT9FMfTZRY33stuvF4pjf1imxUs1gXmuYkyM6Nix9fWUmcIxC70
+# ViueC4fM7Ke0pqrrBc0ZV6U6CwQnHJFnni1iLS8evtrAIMsEGcoz+4m+mOJyoHI1
+# vnnhnINv5G0Xb5DzPQCGdTiO0OBJmrvb0/gwytVXiGhNctO/bX9x2P29Da6SZEi3
+# W295JrXNm5UhhNHvDzI9e1eM80UHTHzgXhgONXaLbZ7LNnSrBfjgc10yVpRnlyUK
+# xjU9lJfnwUSLgP3B+PR0GeUw9gb7IVc+BhyLaxWGJ0l7gpPKWeh1R+g/OPTHU3mg
+# trTiXFHvvV84wRPmeAyVWi7FQFkozA8kwOy6CXcjmTimthzax7ogttc32H83rwjj
+# O3HbbnMbfZlysOSGM1l0tRYAe1BtxoYT2v3EOYI9JACaYNq6lMAFUSw0rFCZE4e7
+# swWAsk0wAly4JoNdtGNz764jlU9gKL431VulAgMBAAGjVDBSMA4GA1UdDwEB/wQE
+# AwIBhjAPBgNVHRMBAf8EBTADAQH/MB0GA1UdDgQWBBTIftJqhSobyhmYBAcnz1AQ
+# T2ioojAQBgkrBgEEAYI3FQEEAwIBADANBgkqhkiG9w0BAQwFAAOCAgEAr2rd5hnn
+# LZRDGU7L6VCVZKUDkQKL4jaAOxWiUsIWGbZqWl10QzD0m/9gdAmxIR6QFm3FJI9c
+# Zohj9E/MffISTEAQiwGf2qnIrvKVG8+dBetJPnSgaFvlVixlHIJ+U9pW2UYXeZJF
+# xBA2CFIpF8svpvJ+1Gkkih6PsHMNzBxKq7Kq7aeRYwFkIqgyuH4yKLNncy2RtNwx
+# AQv3Rwqm8ddK7VZgxCwIo3tAsLx0J1KH1r6I3TeKiW5niB31yV2g/rarOoDXGpc8
+# FzYiQR6sTdWD5jw4vU8w6VSp07YEwzJ2YbuwGMUrGLPAgNW3lbBeUU0i/OxYqujY
+# lLSlLu2S3ucYfCFX3VVj979tzR/SpncocMfiWzpbCNJbTsgAlrPhgzavhgplXHT2
+# 6ux6anSg8Evu75SjrFDyh+3XOjCDyft9V77l4/hByuVkrrOj7FjshZrM77nq81YY
+# uVxzmq/FdxeDWds3GhhyVKVB0rYjdaNDmuV3fJZ5t0GNv+zcgKCf0Xd1WF81E+Al
+# GmcLfc4l+gcK5GEh2NQc5QfGNpn0ltDGFf5Ozdeui53bFv0ExpK91IjmqaOqu/dk
+# ODtfzAzQNb50GQOmxapMomE2gj4d8yu8l13bS3g7LfU772Aj6PXsCyM2la+YZr9T
+# 03u4aUoqlmZpxJTG9F9urJh4iIAGXKKy7aIwggbAMIIEqKADAgECAhMzAAS405bY
+# qvWOnUNsAAAABLjTMA0GCSqGSIb3DQEBDAUAMFoxCzAJBgNVBAYTAlVTMR4wHAYD
+# VQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzApBgNVBAMTIk1pY3Jvc29mdCBJ
+# RCBWZXJpZmllZCBDUyBBT0MgQ0EgMDQwHhcNMjYwODEyMjAwNzA0WhcNMjYwODE1
+# MjAwNzA0WjCBgzELMAkGA1UEBhMCTkwxFjAUBgNVBAgTDU5vb3JkLUJyYWJhbnQx
+# EjAQBgNVBAcTCVNjaGlqbmRlbDEjMCEGA1UEChMaSm9obiBCaWxsZWtlbnMgQ29u
+# c3VsdGFuY3kxIzAhBgNVBAMTGkpvaG4gQmlsbGVrZW5zIENvbnN1bHRhbmN5MIIB
+# ojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAi56FBfwzf5vShzPjNpAFDlIx
+# rP+WNwkHmP1Ca70ZVfvy+KP7+SJg61G0oDAs401zvQ84SQ+vpU8/DLCA66MphoTa
+# 0lynwbUy7I4gX/Ei+x1PnFa7O+XlkkAkU/S8AS8+MD7SZN258+t0r9dv+6aDiIZi
+# se826v+dg7qk2zhWUC77gLaTxYxUUP0aJsCd6ma6Wk073Hlro33++lgZe9wFs/Wv
+# jyvOi7hdbvNVoYrbmbumwqx4VXFhqeozGkZipsw7q3TE5zhsiKaNjsnMfoReiVe9
+# XcgBV1zpyLB10atYXKnA58jzrJrBf1plp9JFlmRRdyPLddK+QAPDdod74OAuVyui
+# zZAgxJEOiXpiwUiiR4wt5LIZWBrnHkBIX3n6avnMoPIUfWAHNoz3JB7tnYUeupQP
+# 4KFoKDJjqAnD+gnpEkqT5pKu1sVDU5tOhTppB5OGtULEwUToj3c3Twprl6P48u2x
+# BPvHdbRNfZSkEEjqOIUAZRzgTBW2vAdq5TJKQA8jAgMBAAGjggHTMIIBzzAMBgNV
+# HRMBAf8EAjAAMA4GA1UdDwEB/wQEAwIHgDA6BgNVHSUEMzAxBgorBgEEAYI3YQEA
+# BggrBgEFBQcDAwYZKwYBBAGCN2HK9PELgrHSgxH33KNOluu6MTAdBgNVHQ4EFgQU
+# iG7CwBXCUdrbg+i9vMzoTbq78g4wHwYDVR0jBBgwFoAUayVB3vtrfP0YgAotf492
+# XapzPbgwZwYDVR0fBGAwXjBcoFqgWIZWaHR0cDovL3d3dy5taWNyb3NvZnQuY29t
+# L3BraW9wcy9jcmwvTWljcm9zb2Z0JTIwSUQlMjBWZXJpZmllZCUyMENTJTIwQU9D
+# JTIwQ0ElMjAwNC5jcmwwdAYIKwYBBQUHAQEEaDBmMGQGCCsGAQUFBzAChlhodHRw
+# Oi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2NlcnRzL01pY3Jvc29mdCUyMElE
+# JTIwVmVyaWZpZWQlMjBDUyUyMEFPQyUyMENBJTIwMDQuY3J0MFQGA1UdIARNMEsw
+# SQYEVR0gADBBMD8GCCsGAQUFBwIBFjNodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20v
+# cGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wDQYJKoZIhvcNAQEMBQADggIBAKjO
+# LANEbvVcXnVYrx4NjQmly/9j4fNQvIBC3OxcnOR2ioVCrTfraGPFcVBYr0yl5G/m
+# Aj7anDfPVghMcTfMkqbd+WZ0Rt099iOuyZBELH5T4K2lOPT3fHr/jAPTZnF5x0eo
+# eftM2dJldo4n1hauwudmLrC9sv6K95lolW+ZNC19L96/xJBvXHjFQKeLs8XiMOBz
+# OCOzT2g0TiUut5I6XbwGDy9Jjr7vh8WRruFTLHFN5RD2+svsFQwUihUdOSNY7iBm
+# 4FLVVoRGB6JnbueJJkmLDqfjx9h+FjUoVgRVNLXCmUJDe6PZJKpx4WyAlH2eLjtG
+# S/xu/R9eXN/fk5YJl3eNhRMQ05j+7XFk8YpJKAkpX24Zitf8LPDZlIiEbl2RSAom
+# 23ib878A+MhkT5zvIFAXQglL4ydbkRDow5BNJYk2QNODgVm5KadMH2kQnZHAVNx+
+# d72G1Q5OEdGi1A2D+nhWB36P66FFKUlNvZ5zNdDxewSeWnNczGQoOrxykYckymdh
+# w/Po58mkeGeyKxd4ofvkurfhVJocrRg3/ytLk+jXLTXUCy5hgXb9cb7eybhSC7Rt
+# v83aXsk5ZpSCKnZ6KNRSJXo6u8UWLPrbqR4M4diIHBv6szF4XYynCiV+vqgYn1tf
+# R8PWV/zHIz92zHXqyd0dZVF6numJlaJS7dl7/L0jMIIGwDCCBKigAwIBAgITMwAE
+# uNOW2Kr1jp1DbAAAAAS40zANBgkqhkiG9w0BAQwFADBaMQswCQYDVQQGEwJVUzEe
+# MBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSswKQYDVQQDEyJNaWNyb3Nv
+# ZnQgSUQgVmVyaWZpZWQgQ1MgQU9DIENBIDA0MB4XDTI2MDgxMjIwMDcwNFoXDTI2
+# MDgxNTIwMDcwNFowgYMxCzAJBgNVBAYTAk5MMRYwFAYDVQQIEw1Ob29yZC1CcmFi
+# YW50MRIwEAYDVQQHEwlTY2hpam5kZWwxIzAhBgNVBAoTGkpvaG4gQmlsbGVrZW5z
+# IENvbnN1bHRhbmN5MSMwIQYDVQQDExpKb2huIEJpbGxla2VucyBDb25zdWx0YW5j
+# eTCCAaIwDQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBAIuehQX8M3+b0ocz4zaQ
+# BQ5SMaz/ljcJB5j9Qmu9GVX78vij+/kiYOtRtKAwLONNc70POEkPr6VPPwywgOuj
+# KYaE2tJcp8G1MuyOIF/xIvsdT5xWuzvl5ZJAJFP0vAEvPjA+0mTdufPrdK/Xb/um
+# g4iGYrHvNur/nYO6pNs4VlAu+4C2k8WMVFD9GibAnepmulpNO9x5a6N9/vpYGXvc
+# BbP1r48rzou4XW7zVaGK25m7psKseFVxYanqMxpGYqbMO6t0xOc4bIimjY7JzH6E
+# XolXvV3IAVdc6ciwddGrWFypwOfI86yawX9aZafSRZZkUXcjy3XSvkADw3aHe+Dg
+# Llcros2QIMSRDol6YsFIokeMLeSyGVga5x5ASF95+mr5zKDyFH1gBzaM9yQe7Z2F
+# HrqUD+ChaCgyY6gJw/oJ6RJKk+aSrtbFQ1ObToU6aQeThrVCxMFE6I93N08Ka5ej
+# +PLtsQT7x3W0TX2UpBBI6jiFAGUc4EwVtrwHauUySkAPIwIDAQABo4IB0zCCAc8w
+# DAYDVR0TAQH/BAIwADAOBgNVHQ8BAf8EBAMCB4AwOgYDVR0lBDMwMQYKKwYBBAGC
+# N2EBAAYIKwYBBQUHAwMGGSsGAQQBgjdhyvTxC4Kx0oMR99yjTpbrujEwHQYDVR0O
+# BBYEFIhuwsAVwlHa24PovbzM6E26u/IOMB8GA1UdIwQYMBaAFGslQd77a3z9GIAK
+# LX+Pdl2qcz24MGcGA1UdHwRgMF4wXKBaoFiGVmh0dHA6Ly93d3cubWljcm9zb2Z0
+# LmNvbS9wa2lvcHMvY3JsL01pY3Jvc29mdCUyMElEJTIwVmVyaWZpZWQlMjBDUyUy
+# MEFPQyUyMENBJTIwMDQuY3JsMHQGCCsGAQUFBwEBBGgwZjBkBggrBgEFBQcwAoZY
+# aHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9jZXJ0cy9NaWNyb3NvZnQl
+# MjBJRCUyMFZlcmlmaWVkJTIwQ1MlMjBBT0MlMjBDQSUyMDA0LmNydDBUBgNVHSAE
+# TTBLMEkGBFUdIAAwQTA/BggrBgEFBQcCARYzaHR0cDovL3d3dy5taWNyb3NvZnQu
+# Y29tL3BraW9wcy9Eb2NzL1JlcG9zaXRvcnkuaHRtMA0GCSqGSIb3DQEBDAUAA4IC
+# AQCoziwDRG71XF51WK8eDY0Jpcv/Y+HzULyAQtzsXJzkdoqFQq0362hjxXFQWK9M
+# peRv5gI+2pw3z1YITHE3zJKm3flmdEbdPfYjrsmQRCx+U+CtpTj093x6/4wD02Zx
+# ecdHqHn7TNnSZXaOJ9YWrsLnZi6wvbL+iveZaJVvmTQtfS/ev8SQb1x4xUCni7PF
+# 4jDgczgjs09oNE4lLreSOl28Bg8vSY6+74fFka7hUyxxTeUQ9vrL7BUMFIoVHTkj
+# WO4gZuBS1VaERgeiZ27niSZJiw6n48fYfhY1KFYEVTS1wplCQ3uj2SSqceFsgJR9
+# ni47Rkv8bv0fXlzf35OWCZd3jYUTENOY/u1xZPGKSSgJKV9uGYrX/Czw2ZSIhG5d
+# kUgKJtt4m/O/APjIZE+c7yBQF0IJS+MnW5EQ6MOQTSWJNkDTg4FZuSmnTB9pEJ2R
+# wFTcfne9htUOThHRotQNg/p4Vgd+j+uhRSlJTb2eczXQ8XsEnlpzXMxkKDq8cpGH
+# JMpnYcPz6OfJpHhnsisXeKH75Lq34VSaHK0YN/8rS5Po1y011AsuYYF2/XG+3sm4
+# Ugu0bb/N2l7JOWaUgip2eijUUiV6OrvFFiz626keDOHYiBwb+rMxeF2Mpwolfr6o
+# GJ9bX0fD1lf8xyM/dsx16sndHWVRep7piZWiUu3Ze/y9IzCCBygwggUQoAMCAQIC
+# EzMAAAAWMZKNkgJle5oAAAAAABYwDQYJKoZIhvcNAQEMBQAwYzELMAkGA1UEBhMC
+# VVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjE0MDIGA1UEAxMrTWlj
+# cm9zb2Z0IElEIFZlcmlmaWVkIENvZGUgU2lnbmluZyBQQ0EgMjAyMTAeFw0yNjAz
+# MjYxODExMjlaFw0zMTAzMjYxODExMjlaMFoxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
+# ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzApBgNVBAMTIk1pY3Jvc29mdCBJRCBW
+# ZXJpZmllZCBDUyBBT0MgQ0EgMDQwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIK
+# AoICAQDKVfrI2+gJMM/0bQ5OVKNdvOASzLbUUMvXuf+Vl7YGuofPaZHVo3gMHF5i
+# nT+GMSpIcfIZ9qtXU1UG68ry8vNbQtOL4Nm30ifXpqI1+ByiAWLO1YT0WnzG7XPO
+# uoTeeWsNZv5FmjxCsReBZvyzyzCyXZbu1EQfJxWTH4ebUwtAiW9rqMf9eDj/wYhi
+# EfNteJV3ZFeibD2ztCHr9JhFdd97XbnCHgQoTIqc02X5xlRKtUGBa++OtHBBjiJ/
+# uwBnzTkqu4FjpZjQeJtrmda+ur1CT2jflWIB/ypn7u7V9tvW9wJbJYt/H2EtJ0GO
+# NWxJZ7TEu8jWPindOO3lzPP7UtzS/mVDV94HucWaltmsra6zSG8BoEJ87IM8QSb7
+# vfm/O41FhYkUv89WIj5ES2O4kxyiMSfe95CMivCuYrRP2hKvx7egPMrWgDDBkxML
+# grKZO9hRNUMm8vk3w5b9SogHOyJVhxyFm8aFXfIxgqDF4S0g4bhbhnzljmSlCLlu
+# mMZcXFGDjpF2tNoAu3VGFGYtHtTSNVKvZpgB3b4ynaoDkbPf+Wg4523jt4VneasB
+# gZhC1srZI2NCnCBBfgjLq04pqEKAWEohyW2K29KSkkHvt5VaE1ac3Yt+oyiOzMS5
+# 7tXwQDJLGvLg/OXFO0VNvczDndfIfXYExB/ab2PuMSwd5VIBOwIDAQABo4IB3DCC
+# AdgwDgYDVR0PAQH/BAQDAgGGMBAGCSsGAQQBgjcVAQQDAgEAMB0GA1UdDgQWBBRr
+# JUHe+2t8/RiACi1/j3ZdqnM9uDBUBgNVHSAETTBLMEkGBFUdIAAwQTA/BggrBgEF
+# BQcCARYzaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9Eb2NzL1JlcG9z
+# aXRvcnkuaHRtMBkGCSsGAQQBgjcUAgQMHgoAUwB1AGIAQwBBMBIGA1UdEwEB/wQI
+# MAYBAf8CAQAwHwYDVR0jBBgwFoAU2UEpsA8PY2zvadf1zSmepEhqMOYwcAYDVR0f
+# BGkwZzBloGOgYYZfaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9jcmwv
+# TWljcm9zb2Z0JTIwSUQlMjBWZXJpZmllZCUyMENvZGUlMjBTaWduaW5nJTIwUENB
+# JTIwMjAyMS5jcmwwfQYIKwYBBQUHAQEEcTBvMG0GCCsGAQUFBzAChmFodHRwOi8v
+# d3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2NlcnRzL01pY3Jvc29mdCUyMElEJTIw
+# VmVyaWZpZWQlMjBDb2RlJTIwU2lnbmluZyUyMFBDQSUyMDIwMjEuY3J0MA0GCSqG
+# SIb3DQEBDAUAA4ICAQAG1VBeVHTVRBljlcZD3IiMxwPyMjQyLNaEnVu5mODm2hRB
+# JfH8GsBLATmrHAc8F47jmk5CnpUPiIguCbw6Z/KVj4Dsoiq228NSLMLewFfGMri7
+# uwNGLISC5ccp8vUdADDEIsS2dE+QI9OwkDpv3XuUD7d+hAgcLVcMOl1AsfEZtsZe
+# nhGvSYUrm/FuLq0BqEGL9GXM5c+Ho9q8o+Vn/S+GWQN2y+gkRO15s0kI05nUpq/d
+# OD4ri9rgVs6tipEd0YZqGgD+CZNiaZWrDTOQbNPncd2F9qOsUa20miYruoT5PwJA
+# aI+QQiTE2ZJeMJOkOpzhTUgqVMZwZidEUZKCqudaeQA08WwnkQMfKyHzaU8j48UL
+# cU4hUwvMsv7fSurOe9GAdRQCPvF8WcSK5oDHe8VVJM4tv6KKCm91HqLx9JamBgRI
+# 6R2SfY3nu26EGznu0rCg/769z8xWm4PVcC2ZaL6VlKVqFp1NsN8YqMyf5t+bbGVb
+# 09noFKcJG/UwyGlxRmQBlfeBUQx5/ytlzZzsEnhrJF9fTAfje8j3OdX5lEnePTFQ
+# LRlvzZFBqUXnIeQKv3fHQjC9m2fo/Z01DII/qp3d8LhGVUW0BCG04fRwHJNH8iqq
+# CG/qofMv+kym2AxBDnHzNgRjL60JOFiBgiurvLhYQNhB95KWojFA6shQnggkMTCC
+# B54wggWGoAMCAQICEzMAAAAHh6M0o3uljhwAAAAAAAcwDQYJKoZIhvcNAQEMBQAw
+# dzELMAkGA1UEBhMCVVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjFI
+# MEYGA1UEAxM/TWljcm9zb2Z0IElkZW50aXR5IFZlcmlmaWNhdGlvbiBSb290IENl
+# cnRpZmljYXRlIEF1dGhvcml0eSAyMDIwMB4XDTIxMDQwMTIwMDUyMFoXDTM2MDQw
+# MTIwMTUyMFowYzELMAkGA1UEBhMCVVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jw
+# b3JhdGlvbjE0MDIGA1UEAxMrTWljcm9zb2Z0IElEIFZlcmlmaWVkIENvZGUgU2ln
+# bmluZyBQQ0EgMjAyMTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCCAgoCggIBALLw
+# wK8ZiCji3VR6TElsaQhVCbRS/3pK+MHrJSj3Zxd3KU3rlfL3qrZilYKJNqztA9OQ
+# acr1AwoNcHbKBLbsQAhBnIB34zxf52bDpIO3NJlfIaTE/xrweLoQ71lzCHkD7A4A
+# s1Bs076Iu+mA6cQzsYYH/Cbl1icwQ6C65rU4V9NQhNUwgrx9rGQ//h890Q8JdjLL
+# w0nV+ayQ2Fbkd242o9kH82RZsH3HEyqjAB5a8+Ae2nPIPc8sZU6ZE7iRrRZywRmr
+# KDp5+TcmJX9MRff241UaOBs4NmHOyke8oU1TYrkxh+YeHgfWo5tTgkoSMoayqoDp
+# HOLJs+qG8Tvh8SnifW2Jj3+ii11TS8/FGngEaNAWrbyfNrC69oKpRQXY9bGH6jn9
+# NEJv9weFxhTwyvx9OJLXmRGbAUXN1U9nf4lXezky6Uh/cgjkVd6CGUAf0K+Jw+GE
+# /5VpIVbcNr9rNE50Sbmy/4RTCEGvOq3GhjITbCa4crCzTTHgYYjHs1NbOc6brH+e
+# KpWLtr+bGecy9CrwQyx7S/BfYJ+ozst7+yZtG2wR461uckFu0t+gCwLdN0A6cFtS
+# RtR8bvxVFyWwTtgMMFRuBa3vmUOTnfKLsLefRaQcVTgRnzeLzdpt32cdYKp+dhr2
+# ogc+qM6K4CBI5/j4VFyC4QFeUP2YAidLtvpXRRo3AgMBAAGjggI1MIICMTAOBgNV
+# HQ8BAf8EBAMCAYYwEAYJKwYBBAGCNxUBBAMCAQAwHQYDVR0OBBYEFNlBKbAPD2Ns
+# 72nX9c0pnqRIajDmMFQGA1UdIARNMEswSQYEVR0gADBBMD8GCCsGAQUFBwIBFjNo
+# dHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5o
+# dG0wGQYJKwYBBAGCNxQCBAweCgBTAHUAYgBDAEEwDwYDVR0TAQH/BAUwAwEB/zAf
+# BgNVHSMEGDAWgBTIftJqhSobyhmYBAcnz1AQT2ioojCBhAYDVR0fBH0wezB5oHeg
+# dYZzaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9jcmwvTWljcm9zb2Z0
+# JTIwSWRlbnRpdHklMjBWZXJpZmljYXRpb24lMjBSb290JTIwQ2VydGlmaWNhdGUl
+# MjBBdXRob3JpdHklMjAyMDIwLmNybDCBwwYIKwYBBQUHAQEEgbYwgbMwgYEGCCsG
+# AQUFBzAChnVodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2NlcnRzL01p
+# Y3Jvc29mdCUyMElkZW50aXR5JTIwVmVyaWZpY2F0aW9uJTIwUm9vdCUyMENlcnRp
+# ZmljYXRlJTIwQXV0aG9yaXR5JTIwMjAyMC5jcnQwLQYIKwYBBQUHMAGGIWh0dHA6
+# Ly9vbmVvY3NwLm1pY3Jvc29mdC5jb20vb2NzcDANBgkqhkiG9w0BAQwFAAOCAgEA
+# fyUqnv7Uq+rdZgrbVyNMul5skONbhls5fccPlmIbzi+OwVdPQ4H55v7VOInnmezQ
+# EeW4LqK0wja+fBznANbXLB0KrdMCbHQpbLvG6UA/Xv2pfpVIE1CRFfNF4XKO8XYE
+# a3oW8oVH+KZHgIQRIwAbyFKQ9iyj4aOWeAzwk+f9E5StNp5T8FG7/VEURIVWArbA
+# zPt9ThVN3w1fAZkF7+YU9kbq1bCR2YD+MtunSQ1Rft6XG7b4e0ejRA7mB2IoX5hN
+# h3UEauY0byxNRG+fT2MCEhQl9g2i2fs6VOG19CNep7SquKaBjhWmirYyANb0RJSL
+# WjinMLXNOAga10n8i9jqeprzSMU5ODmrMCJE12xS/NWShg/tuLjAsKP6SzYZ+1Ry
+# 358ZTFcx0FS/mx2vSoU8s8HRvy+rnXqyUJ9HBqS0DErVLjQwK8VtsBdekBmdTbQV
+# oCgPCqr+PDPB3xajYnzevs7eidBsM71PINK2BoE2UfMwxCCX3mccFgx6UsQeRSdV
+# VVNSyALQe6PT12418xon2iDGE81OGCreLzDcMAZnrUAx4XQLUz6ZTl65yPUiOh3k
+# 7Yww94lDf+8oG2oZmDh5O1Qe38E+M3vhKwmzIeoB1dVLlz4i3IpaDcR+iuGjH2Td
+# aC1ZOmBXiCRKJLj4DT2uhJ04ji+tHD6n58vhavFIrmcxghcxMIIXLQIBATBxMFox
+# CzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzAp
+# BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDQCEzMABLjT
+# ltiq9Y6dQ2wAAAAEuNMwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
+# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgsxqm
+# 4aP6Iy32l51uoaxDPpw89YSAGo+3cqz4dLXw88QwDQYJKoZIhvcNAQEBBQAEggGA
+# LC87WT955YXQ8bPRHigPXlqXFHnb92BVYhyxLPaNKOJqUs4upPwRrk0qWSimTS3l
+# JZBLdTBEX0CIAqVztU6He/ybvFp45ZelYqL+2IjGYc1Rl5356A5fWDvccDf4+uwa
+# NhVqIkIicpj5nelLdMxFZGIi6nlJeH/QX/YvvMIQloHG5QmGZwlS/BBZYnAWK0Xq
+# sTebLpOH30efLSf4iZIndeGMRsd/7DXTS9Zr0h5WWE7lKRC0gqou3henMf8o+zeN
+# p23svG/r5OWegFee70XLaSgbQhCiza1B90glDxc/+cUXPntaDqKCFEmKK9oND9Bw
+# RWJ+jXG1Vr5sBklqem4bMJ49mths2YhoBj7nwxiHvT1zTTn7VD4kJfsfZzMGOQO/
+# jYWTSqUHBL6rgIAGn4W9x0o2giAL3yR1RdPQowHBDoV0K3RzoDErd9gmv/fauvlH
+# NceoYpVUa/1C/UiwxQtBVzU7jP7cSCDA4G3/BX53LPaKDKxB+J8+lTg6ppKfxQjB
+# oYIUsTCCFK0GCisGAQQBgjcDAwExghSdMIIUmQYJKoZIhvcNAQcCoIIUijCCFIYC
+# AQMxDzANBglghkgBZQMEAgEFADCCAWkGCyqGSIb3DQEJEAEEoIIBWASCAVQwggFQ
+# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEINTzInop77/Jc0IA2eO9
+# cCM1t24NL4YL2ZDJxHvFI8soAgZqddIui7QYEjIwMjYwODE0MDkwNzI1Ljk0WjAE
+# gAIB9KCB6aSB5jCB4zELMAkGA1UEBhMCVVMxEzARBgNVBAgTCldhc2hpbmd0b24x
+# EDAOBgNVBAcTB1JlZG1vbmQxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlv
+# bjEtMCsGA1UECxMkTWljcm9zb2Z0IElyZWxhbmQgT3BlcmF0aW9ucyBMaW1pdGVk
+# MScwJQYDVQQLEx5uU2hpZWxkIFRTUyBFU046N0ExQS0wNUUwLUQ5NDcxNTAzBgNV
+# BAMTLE1pY3Jvc29mdCBQdWJsaWMgUlNBIFRpbWUgU3RhbXBpbmcgQXV0aG9yaXR5
+# oIIPKTCCB4IwggVqoAMCAQICEzMAAAAF5c8P/2YuyYcAAAAAAAUwDQYJKoZIhvcN
+# AQEMBQAwdzELMAkGA1UEBhMCVVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3Jh
+# dGlvbjFIMEYGA1UEAxM/TWljcm9zb2Z0IElkZW50aXR5IFZlcmlmaWNhdGlvbiBS
+# b290IENlcnRpZmljYXRlIEF1dGhvcml0eSAyMDIwMB4XDTIwMTExOTIwMzIzMVoX
+# DTM1MTExOTIwNDIzMVowYTELMAkGA1UEBhMCVVMxHjAcBgNVBAoTFU1pY3Jvc29m
+# dCBDb3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGlt
+# ZXN0YW1waW5nIENBIDIwMjAwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoIC
+# AQCefOdSY/3gxZ8FfWO1BiKjHB7X55cz0RMFvWVGR3eRwV1wb3+yq0OXDEqhUhxq
+# oNv6iYWKjkMcLhEFxvJAeNcLAyT+XdM5i2CgGPGcb95WJLiw7HzLiBKrxmDj1EQB
+# /mG5eEiRBEp7dDGzxKCnTYocDOcRr9KxqHydajmEkzXHOeRGwU+7qt8Md5l4bVZr
+# XAhK+WSk5CihNQsWbzT1nRliVDwunuLkX1hyIWXIArCfrKM3+RHh+Sq5RZ8aYyik
+# 2r8HxT+l2hmRllBvE2Wok6IEaAJanHr24qoqFM9WLeBUSudz+qL51HwDYyIDPSQ3
+# SeHtKog0ZubDk4hELQSxnfVYXdTGncaBnB60QrEuazvcob9n4yR65pUNBCF5qeA4
+# QwYnilBkfnmeAjRN3LVuLr0g0FXkqfYdUmj1fFFhH8k8YBozrEaXnsSL3kdTD01X
+# +4LfIWOuFzTzuoslBrBILfHNj8RfOxPgjuwNvE6YzauXi4orp4Sm6tF245DaFOSY
+# bWFK5ZgG6cUY2/bUq3g3bQAqZt65KcaewEJ3ZyNEobv35Nf6xN6FrA6jF9447+NH
+# vCjeWLCQZ3M8lgeCcnnhTFtyQX3XgCoc6IRXvFOcPVrr3D9RPHCMS6Ckg8wggTrt
+# IVnY8yjbvGOUsAdZbeXUIQAWMs0d3cRDv09SvwVRd61evQIDAQABo4ICGzCCAhcw
+# DgYDVR0PAQH/BAQDAgGGMBAGCSsGAQQBgjcVAQQDAgEAMB0GA1UdDgQWBBRraSg6
+# NS9IY0DPe9ivSek+2T3bITBUBgNVHSAETTBLMEkGBFUdIAAwQTA/BggrBgEFBQcC
+# ARYzaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9Eb2NzL1JlcG9zaXRv
+# cnkuaHRtMBMGA1UdJQQMMAoGCCsGAQUFBwMIMBkGCSsGAQQBgjcUAgQMHgoAUwB1
+# AGIAQwBBMA8GA1UdEwEB/wQFMAMBAf8wHwYDVR0jBBgwFoAUyH7SaoUqG8oZmAQH
+# J89QEE9oqKIwgYQGA1UdHwR9MHsweaB3oHWGc2h0dHA6Ly93d3cubWljcm9zb2Z0
+# LmNvbS9wa2lvcHMvY3JsL01pY3Jvc29mdCUyMElkZW50aXR5JTIwVmVyaWZpY2F0
+# aW9uJTIwUm9vdCUyMENlcnRpZmljYXRlJTIwQXV0aG9yaXR5JTIwMjAyMC5jcmww
+# gZQGCCsGAQUFBwEBBIGHMIGEMIGBBggrBgEFBQcwAoZ1aHR0cDovL3d3dy5taWNy
+# b3NvZnQuY29tL3BraW9wcy9jZXJ0cy9NaWNyb3NvZnQlMjBJZGVudGl0eSUyMFZl
+# cmlmaWNhdGlvbiUyMFJvb3QlMjBDZXJ0aWZpY2F0ZSUyMEF1dGhvcml0eSUyMDIw
+# MjAuY3J0MA0GCSqGSIb3DQEBDAUAA4ICAQBfiHbHfm21WhV150x4aPpO4dhEmSUV
+# pbixNDmv6TvuIHv1xIs174bNGO/ilWMm+Jx5boAXrJxagRhHQtiFprSjMktTliL4
+# sKZyt2i+SXncM23gRezzsoOiBhv14YSd1Klnlkzvgs29XNjT+c8hIfPRe9rvVCMP
+# iH7zPZcw5nNjthDQ+zD563I1nUJ6y59TbXWsuyUsqw7wXZoGzZwijWT5oc6GvD3H
+# DokJY401uhnj3ubBhbkR83RbfMvmzdp3he2bvIUztSOuFzRqrLfEvsPkVHYnvH1w
+# tYyrt5vShiKheGpXa2AWpsod4OJyT4/y0dggWi8g/tgbhmQlZqDUf3UqUQsZaLdI
+# u/XSjgoZqDjamzCPJtOLi2hBwL+KsCh0Nbwc21f5xvPSwym0Ukr4o5sCcMUcSy6T
+# EP7uMV8RX0eH/4JLEpGyae6Ki8JYg5v4fsNGif1OXHJ2IWG+7zyjTDfkmQ1snFOT
+# gyEX8qBpefQbF0fx6URrYiarjmBprwP6ZObwtZXJ23jK3Fg/9uqM3j0P01nzVygT
+# ppBabzxPAh/hHhhls6kwo3QLJ6No803jUsZcd4JQxiYHHc+Q/wAMcPUnYKv/q2O4
+# 44LO1+n6j01z5mggCSlRwD9faBIySAcA9S8h22hIAcRQqIGEjolCK9F6nK9ZyX4l
+# hthsGHumaABdWzCCB58wggWHoAMCAQICEzMAAABbSrWNQTJt3HQAAAAAAFswDQYJ
+# KoZIhvcNAQEMBQAwYTELMAkGA1UEBhMCVVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBD
+# b3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGltZXN0
+# YW1waW5nIENBIDIwMjAwHhcNMjYwMTA4MTg1OTA1WhcNMjcwMTA3MTg1OTA1WjCB
+# 4zELMAkGA1UEBhMCVVMxEzARBgNVBAgTCldhc2hpbmd0b24xEDAOBgNVBAcTB1Jl
+# ZG1vbmQxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjEtMCsGA1UECxMk
+# TWljcm9zb2Z0IElyZWxhbmQgT3BlcmF0aW9ucyBMaW1pdGVkMScwJQYDVQQLEx5u
+# U2hpZWxkIFRTUyBFU046N0ExQS0wNUUwLUQ5NDcxNTAzBgNVBAMTLE1pY3Jvc29m
+# dCBQdWJsaWMgUlNBIFRpbWUgU3RhbXBpbmcgQXV0aG9yaXR5MIICIjANBgkqhkiG
+# 9w0BAQEFAAOCAg8AMIICCgKCAgEAkFTMFtueUNd57QHQoPkbj/jvm2EXJ9y0LK4R
+# JNZBe+UuLhbH+13apR16riJ156DpVaGI4d+7fAlXhNQZJG2qH0JyvUGaIEq/2K4W
+# mAfIgG7lDHfxmzHCUV5dVL5mokkqddFsM1B1xhKgL/pzSFAn88fnQMFENCQ9dXDI
+# WLMutEf0CWsl5SDsEp5PbfN+1Lz8o4ku8QRsc4XqlI5jdlWmtlRZtaNbBFOagdpD
+# 8Ty+ta0s3IQn5vTz1VbUiStre3gZMHlZvLcIvUrbNicDEEi9p+wowXKP065cdxM8
+# owOgVIx5qYb0wo4xvq6gbU+N2cOCws/oQ4xFLOssvuMQPWZsH1FJ31+G3L4dCvq9
+# mCwGfqhTL5hOk1UuyTB21QzzZZgCQ/O2U63cCIvSrJXv9TeP+6re8cyM8zTDTfjQ
+# zns16LSDgEJwy3R1uqhz3VWAJvf/fqwdAA2ie2fUc4XaguTzX3RBFLjeKwdWtrwf
+# yx/n4aWohixiIIpfTgdmI7NlbzbqdUjp377yXJN5aamP3RRr249smFWPATeiHq07
+# nXTJKqZIxIsQ3Tuncht7cToEBvbD3etbNvbr52lK2FsoXiQCmh+oGxY9fgwS0cpI
+# 5+0+ZVMJDju2CGtW4eJr2Nj4eyPTWbgpbha2SZWbcvqExkQIxriyMzEBfP5tf8Am
+# FZN7pNkCAwEAAaOCAcswggHHMB0GA1UdDgQWBBTv8upSVZZiFcl1fCBgrHhvwa/S
+# tjAfBgNVHSMEGDAWgBRraSg6NS9IY0DPe9ivSek+2T3bITBsBgNVHR8EZTBjMGGg
+# X6BdhltodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2NybC9NaWNyb3Nv
+# ZnQlMjBQdWJsaWMlMjBSU0ElMjBUaW1lc3RhbXBpbmclMjBDQSUyMDIwMjAuY3Js
+# MHkGCCsGAQUFBwEBBG0wazBpBggrBgEFBQcwAoZdaHR0cDovL3d3dy5taWNyb3Nv
+# ZnQuY29tL3BraW9wcy9jZXJ0cy9NaWNyb3NvZnQlMjBQdWJsaWMlMjBSU0ElMjBU
+# aW1lc3RhbXBpbmclMjBDQSUyMDIwMjAuY3J0MAwGA1UdEwEB/wQCMAAwFgYDVR0l
+# AQH/BAwwCgYIKwYBBQUHAwgwDgYDVR0PAQH/BAQDAgeAMGYGA1UdIARfMF0wUQYM
+# KwYBBAGCN0yDfQEBMEEwPwYIKwYBBQUHAgEWM2h0dHA6Ly93d3cubWljcm9zb2Z0
+# LmNvbS9wa2lvcHMvRG9jcy9SZXBvc2l0b3J5Lmh0bTAIBgZngQwBBAIwDQYJKoZI
+# hvcNAQEMBQADggIBAAAf7N35cqHg7FdgxYWa2CKVcBAZy06MJQHXD+4GIL85dwfc
+# hrj9dt1SErMVtqJNsgTq9hkp3Wni7uco4uRrDKYAxXK47stKXqssq21kjIuFaNMr
+# TNc7PS7jEur35tG0EQom8DqwPmcnAfUg7rPViLPK4hGhqUwKdutSLF9bFCfhMCY3
+# u326T5fYVROERrd7DNHCG0b7HBoBssyTFGZHbgmd9d3VXEqj3T6btbO6i/3pS6DH
+# nBl17CIgibVlZOPiUIke6nrv0tw5ru0DEkyKlVpKW1Af1+b1M4pzOV/G1a4FwtTh
+# 25l+rCCwguwfs8yRxfXPBDNAPTIC0+GdjP0o0bXbltf6KKU57VLxEeq/ZtsGkylq
+# jiRxS9Ajp0yApG8WabV4tuFI05CmUMxMYPW01V00aQj3qNS762uhSNYwyLjpNB8E
+# AfG0NOlGEi7/zu8BVDxnpEeEXF6zPgR3klOFohBEDLoZw78mT5DMPOhnRqtEiQiw
+# YnutmA5UCPH1y1/DyUf1F+NzAHfB0YFg0w1UmpClRqLZNp11/mlfNNkQciosQXnd
+# KsGMh4iehCs/tTlWVeIxCzF7At0g2sATaXZNHcoGKRv5FBHKBtOnyOPbKILQ0JTA
+# b4r6d2CU3lExteMVbpoprn1er5vxfMr8Mr4Am2A6keAm/xCuTrYD63A5Us6mMYID
+# 1DCCA9ACAQEweDBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENv
+# cnBvcmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3Rh
+# bXBpbmcgQ0EgMjAyMAITMwAAAFtKtY1BMm3cdAAAAAAAWzANBglghkgBZQMEAgEF
+# AKCCAS0wGgYJKoZIhvcNAQkDMQ0GCyqGSIb3DQEJEAEEMC8GCSqGSIb3DQEJBDEi
+# BCAAN1ZPHfilgV5FVjK/ARTxV2k50C8wKlJocOhvpuWAiDCB3QYLKoZIhvcNAQkQ
+# Ai8xgc0wgcowgccwgaAEIC8xA1VdnRvTHGUbDxf/cgTJs5u5PprlbV3rUJb5wYPv
+# MHwwZaRjMGExCzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9y
+# YXRpb24xMjAwBgNVBAMTKU1pY3Jvc29mdCBQdWJsaWMgUlNBIFRpbWVzdGFtcGlu
+# ZyBDQSAyMDIwAhMzAAAAW0q1jUEybdx0AAAAAABbMCIEIMlPRaqp795pD5Fkpvfy
+# bO3/m5gV1og3egokbqF0IY3+MA0GCSqGSIb3DQEBCwUABIICABDQjbzFQOcDfNv0
+# +JP1/oROyU7K/NX1fg7QE0V7NN+2vp4YJI6u3qafFqoSn8OzWxlmnRIlf56G7WyP
+# l1UUUsrA8maFtHWYGI0CwFtAvuEXaGIByjNR3WuRkUXkRV3P55tVHpxYAet2m0Uj
+# fvoYtqEZMAO55k9L2omkF/UetaPbh5fYIgmVMUyP3ksthLmpVA2IXC8SqCWiLzuS
+# ypKKSyr8jG8esTpqYphxWnGtGqoI9q0CTvxK9FPDFEDtXN77oTbROGqO2W7/1Dyt
+# S1digZeOyzcBZSuDRU2SQiMWJamazxOJpLEujsuuWQv+9mr1tex+LG/ahs5i93ix
+# dHj9JfDVDO8uYA0ALhWJKHb5JbNjoFVliAgE4hbz97DF7igPZZz36AkQRdtEY3Xq
+# 2Z7YsTGWhlLKGmVq25ycMRodPBuCMzy2/PtiJv2XrctnmF9mlB3uhtZmUS2HxQBJ
+# /RFMgf3Dk1wSXtqLebrabi++qpGAfmfAlWtG3IxxBdXoZtY4nMqNxYF0D6ziDOMw
+# BFPT0qN1COYV8tIrsClkPl4S3VQ9mCtxi34noH6qTGjjZD91Kb65Bia10WdQUTs4
+# HjYgvbUoBJM+LGJRCXo/aZ/p7ht3Zt+rrTdEDjKc7cNjOXGZPKdBvuPKgikn0ITg
+# xlqYW4EurBD9HPoaqU7btOeRtGcv
 # SIG # End signature block

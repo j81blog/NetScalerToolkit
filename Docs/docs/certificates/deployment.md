@@ -5,7 +5,7 @@ Use certificate deployment when you want NetScalerToolkit to create or update th
 After ACME issuance, NetScalerToolkit deploys the certificate to NetScaler as a PFX-backed SSL certkey.
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[Issued certificate artifacts] --> B[Select PFX and chain]
     B --> C[Validate selected chain]
     C --> D[Upload PFX to NetScaler]
