@@ -4,24 +4,40 @@
         Determines whether a certificate request should be renewed.
 
     .DESCRIPTION
-        Evaluates renewal metadata from ACME order state, certificate validity,
-        and legacy GenLeCertForNS request metadata. A request is renewed when
-        forced, when the selected renewal window has passed, or when no reliable
-        renewal source is available.
+        The deployed NetScaler certificate is the only source that describes what is
+        actually serving traffic, so it decides whether a replacement is needed. ACME
+        order metadata can still pull renewal forward, but only when that order describes
+        the deployed certificate. Local Posh-ACME state and legacy GenLeCertForNS request
+        metadata are used only when the appliance has nothing to say.
+
+        A request is also renewed when forced, when the request definition no longer
+        matches the certificate that was last issued, when a staging certificate is found
+        on a production run, or when no reliable renewal source is available.
 
     .PARAMETER Request
         Certificate request object from command parameters or an AutoRun config file.
+        LastIssuedSerial, LastIssuedDomains, LastIssuedAcmeServer and LastIssuedKeyLength
+        describe the certificate this request last produced.
 
     .PARAMETER AcmeOrder
-        Refreshed Posh-ACME order object. When RenewAfter is available, this is
-        the preferred decision source.
+        Refreshed Posh-ACME order object. Used for the renewal window when its CertExpires
+        matches the deployed certificate, and as a fallback when nothing is deployed.
 
     .PARAMETER AcmeCertificate
         Existing ACME certificate object or X509 certificate used for dynamic
-        renewal calculation when ACME order RenewAfter is unavailable.
+        renewal calculation when no deployed certificate or ACME order is available.
 
     .PARAMETER NetScalerCertificate
-        Existing NetScaler sslcertkey object used as a fallback renewal source.
+        Existing NetScaler sslcertkey object. Primary renewal source.
+
+    .PARAMETER Domains
+        Domains the request currently asks for, compared against LastIssuedDomains.
+
+    .PARAMETER AcmeServer
+        ACME server this run uses, compared against LastIssuedAcmeServer.
+
+    .PARAMETER IsProduction
+        Indicates a production run, which rejects a deployed staging certificate.
 
     .PARAMETER Force
         Forces renewal regardless of CertExpires or RenewAfter values.
@@ -30,7 +46,7 @@
         Function  : Test-NSACMECertificateRenewalRequired
         Author    : John Billekens
         Copyright : Copyright (c) John Billekens Consultancy
-        Version   : 2026.0527.2130
+        Version   : 2026.0817.1600
 #>
     [CmdletBinding()]
     param(
@@ -45,6 +61,17 @@
 
         [Parameter()]
         [object]$NetScalerCertificate,
+
+        [Parameter()]
+        [AllowEmptyCollection()]
+        [string[]]$Domains,
+
+        [Parameter()]
+        [AllowEmptyString()]
+        [string]$AcmeServer,
+
+        [Parameter()]
+        [switch]$IsProduction,
 
         [Parameter()]
         [switch]$Force
@@ -65,9 +92,23 @@
             return [datetime]$Value
         }
 
-        $dateValue = [string]$Value
+        $dateValue = ([string]$Value).Trim()
         if ($dateValue -match '^/Date\((?<Milliseconds>-?\d+)\)/$') {
             return ([datetimeoffset]::FromUnixTimeMilliseconds([int64]$Matches.Milliseconds)).LocalDateTime
+        }
+
+        # NITRO sslcertkey reports 'Jul 16 18:51:18 2020 GMT', with a space-padded single digit day.
+        if ($dateValue -match '^(?<Date>[A-Za-z]{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+GMT$') {
+            $nitroDate = $Matches.Date -replace '\s+', ' '
+            [datetime]$nitroParsed = [datetime]::MinValue
+            if ([datetime]::TryParseExact(
+                    $nitroDate,
+                    'MMM d HH:mm:ss yyyy',
+                    [System.Globalization.CultureInfo]::InvariantCulture,
+                    [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal,
+                    [ref]$nitroParsed)) {
+                return $nitroParsed.ToLocalTime()
+            }
         }
 
         try {
@@ -132,8 +173,10 @@
             }
         }
 
-        if (-not $notBefore -or -not $notAfter) { return $null }
-        if ($notAfter -le $notBefore) { return $null }
+        if (-not $notAfter) { return $null }
+        # NotBefore is optional. Without it the lifetime is unknown, so the caller can only
+        # test expiry from this source and has to take the renewal window elsewhere.
+        if ($notBefore -and $notAfter -le $notBefore) { return $null }
 
         [PSCustomObject]@{
             NotBefore = $notBefore
@@ -230,21 +273,93 @@
         return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason 'ForceCertRenew was specified.' -Summary 'Forced renewal.' -CertExpires $certExpires -RenewAfter $renewAfter -Source 'Force' -Strategy 'Forced renewal.'
     }
 
+    $deployedSerial = Get-NSACMECertificateObjectValue -InputObject $NetScalerCertificate -Name @('serial', 'Serial')
+    $deployedIssuer = [string](Get-NSACMECertificateObjectValue -InputObject $NetScalerCertificate -Name @('issuer', 'Issuer'))
+    $deployedStatus = [string](Get-NSACMECertificateObjectValue -InputObject $NetScalerCertificate -Name @('status', 'Status'))
+    $deployedValidity = Get-NSACMECertificateValidityWindow -InputObject $NetScalerCertificate
+
+    # The recorded definition only describes the deployed certificate when the serial still matches.
+    # Without that corroboration the record is treated as unknown, which keeps an upgrade from
+    # renewing everything at once.
+    $recordedSerial = [string](Get-NSACMECertificateObjectValue -InputObject $Request -Name @('LastIssuedSerial'))
+    $definitionTrusted = $deployedSerial -and $recordedSerial -and ($recordedSerial -eq [string]$deployedSerial)
+
+    if ($definitionTrusted) {
+        $recordedDomains = [string](Get-NSACMECertificateObjectValue -InputObject $Request -Name @('LastIssuedDomains'))
+        $currentDomains = (@($Domains | Where-Object { $_ } | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } | Sort-Object -Unique) -join ',')
+        if ($recordedDomains -and $currentDomains -and $recordedDomains -ne $currentDomains) {
+            return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "Requested domains changed since the deployed certificate was issued ('$recordedDomains' -> '$currentDomains')." -Summary 'Requested domains changed.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'request definition' -Strategy 'Deployed certificate no longer matches the request.'
+        }
+
+        $recordedServer = [string](Get-NSACMECertificateObjectValue -InputObject $Request -Name @('LastIssuedAcmeServer'))
+        if ($recordedServer -and $AcmeServer -and $recordedServer -ne $AcmeServer) {
+            return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "ACME server changed since the deployed certificate was issued ('$recordedServer' -> '$AcmeServer')." -Summary 'ACME server changed.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'request definition' -Strategy 'Deployed certificate no longer matches the request.'
+        }
+
+        $recordedKeyLength = [string](Get-NSACMECertificateObjectValue -InputObject $Request -Name @('LastIssuedKeyLength'))
+        $currentKeyLength = [string](Get-NSACMECertificateObjectValue -InputObject $Request -Name @('KeyLength'))
+        if ($recordedKeyLength -and $currentKeyLength -and $recordedKeyLength -ne $currentKeyLength) {
+            return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "Key length changed since the deployed certificate was issued ('$recordedKeyLength' -> '$currentKeyLength')." -Summary 'Key length changed.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'request definition' -Strategy 'Deployed certificate no longer matches the request.'
+        }
+    }
+
+    # A staging certificate can be inside its validity window and still be wrong for a production run.
+    if ($IsProduction -and $deployedIssuer -match 'Fake LE|STAGING|Lets Encrypt.*Staging|Let''s Encrypt.*Staging') {
+        return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "The deployed certificate was issued by a staging authority ('$deployedIssuer') and this is a production run." -Summary 'Staging certificate on a production run.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'NetScaler certificate' -Strategy 'Deployed certificate no longer matches the request.'
+    }
+
+    # Only acted on when a CN can be read from the subject, so a SAN-only certificate is left alone.
+    $deployedSubject = [string](Get-NSACMECertificateObjectValue -InputObject $NetScalerCertificate -Name @('subject', 'Subject'))
+    if ($deployedSubject -match 'CN=(?<CommonName>[^,/]+)') {
+        $deployedCommonName = $Matches.CommonName.Trim()
+        if ($Request.CN -and $deployedCommonName -ne [string]$Request.CN) {
+            return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "The deployed certificate is issued to '$deployedCommonName' but the request is for '$($Request.CN)'." -Summary 'Deployed certificate is for another name.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'NetScaler certificate' -Strategy 'Deployed certificate no longer matches the request.'
+        }
+    }
+
+    if ($NetScalerCertificate -and $deployedStatus -and $deployedStatus -notmatch '^valid$') {
+        return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "The NetScaler reports certkey status '$deployedStatus'." -Summary 'Certkey not valid on the NetScaler.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'NetScaler certificate' -Strategy 'Deployed certificate is unusable.'
+    }
+
     $orderCertExpires = ConvertFrom-NSACMECertificateDateValue -Value (Get-NSACMECertificateObjectValue -InputObject $AcmeOrder -Name @('CertExpires', 'certexpires'))
     $orderRenewAfter = ConvertFrom-NSACMECertificateDateValue -Value (Get-NSACMECertificateObjectValue -InputObject $AcmeOrder -Name @('RenewAfter', 'renewafter'))
+
+    # The deployed certificate is the only source that describes what is actually serving traffic,
+    # so it decides whether a replacement is needed. ACME order metadata can still pull renewal
+    # forward, but only when it belongs to that same certificate.
+    if ($deployedValidity) {
+        if ($now -ge $deployedValidity.NotAfter) {
+            return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "The deployed certificate expired on $($deployedValidity.NotAfter.ToString('yyyy-MM-dd HH:mm:ss'))." -Summary 'Certificate expired.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'NetScaler certificate' -Strategy 'Deployed certificate validity.'
+        }
+
+        $deployedRenewAfter = $null
+        if ($deployedValidity.NotBefore) {
+            $deployedRenewAfter = Get-NSACMECertificateCalculatedRenewAfter -NotBefore $deployedValidity.NotBefore -NotAfter $deployedValidity.NotAfter
+        }
+
+        $orderDescribesDeployed = $orderCertExpires -and ([math]::Abs(($orderCertExpires - $deployedValidity.NotAfter).TotalMinutes) -le 1)
+        if ($orderDescribesDeployed -and $orderRenewAfter -and $now -ge $orderRenewAfter) {
+            return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "The ACME renewal window for the deployed certificate has started ($($orderRenewAfter.ToString('yyyy-MM-dd HH:mm:ss')))." -Summary 'Renewal window started.' -CertExpires $deployedValidity.NotAfter -RenewAfter $orderRenewAfter -Source 'ACME order' -Strategy 'ACME/Posh-ACME renewal metadata for the deployed certificate.'
+        }
+
+        if ($deployedRenewAfter) {
+            $effectiveRenewAfter = if ($orderDescribesDeployed -and $orderRenewAfter -and $orderRenewAfter -lt $deployedRenewAfter) { $orderRenewAfter } else { $deployedRenewAfter }
+            return Test-NSACMECertificateRenewalWindow -RenewAfter $effectiveRenewAfter -CertExpires $deployedValidity.NotAfter -Source 'NetScaler certificate' -Strategy 'Dynamic two-thirds certificate lifetime fallback.'
+        }
+
+        if ($orderDescribesDeployed -and $orderRenewAfter) {
+            return Test-NSACMECertificateRenewalWindow -RenewAfter $orderRenewAfter -CertExpires $deployedValidity.NotAfter -Source 'ACME order' -Strategy 'ACME/Posh-ACME renewal metadata for the deployed certificate.'
+        }
+    }
+
     if ($orderRenewAfter) {
         return Test-NSACMECertificateRenewalWindow -RenewAfter $orderRenewAfter -CertExpires $orderCertExpires -Source 'ACME order' -Strategy 'ACME/Posh-ACME renewal metadata.'
     }
 
-    foreach ($source in @(
-            [PSCustomObject]@{ Name = 'ACME certificate'; Certificate = $AcmeCertificate },
-            [PSCustomObject]@{ Name = 'NetScaler certificate'; Certificate = $NetScalerCertificate }
-        )) {
-        $validity = Get-NSACMECertificateValidityWindow -InputObject $source.Certificate
-        if ($validity) {
-            $calculatedRenewAfter = Get-NSACMECertificateCalculatedRenewAfter -NotBefore $validity.NotBefore -NotAfter $validity.NotAfter
-            return Test-NSACMECertificateRenewalWindow -RenewAfter $calculatedRenewAfter -CertExpires $validity.NotAfter -Source $source.Name -Strategy 'Dynamic two-thirds certificate lifetime fallback.'
-        }
+    $acmeValidity = Get-NSACMECertificateValidityWindow -InputObject $AcmeCertificate
+    if ($acmeValidity -and $acmeValidity.NotBefore) {
+        $calculatedRenewAfter = Get-NSACMECertificateCalculatedRenewAfter -NotBefore $acmeValidity.NotBefore -NotAfter $acmeValidity.NotAfter
+        return Test-NSACMECertificateRenewalWindow -RenewAfter $calculatedRenewAfter -CertExpires $acmeValidity.NotAfter -Source 'ACME certificate' -Strategy 'Dynamic two-thirds certificate lifetime fallback.'
     }
 
     if ($renewAfter) {
@@ -261,8 +376,8 @@
 # SIG # Begin signature block
 # MII6AgYJKoZIhvcNAQcCoII58zCCOe8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB4t77ARnztPQ/x
-# FV8ob4uf8s3WHjN9fTRS21ZfDAWxeqCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCv5Z6UKoLxYZo5
+# 6y757iRYbZ837JGfaMkbn23yVbM3oKCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
 # lUgTecgRwIeZMA0GCSqGSIb3DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
 # ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVu
 # dGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAy
@@ -293,61 +408,61 @@
 # uVxzmq/FdxeDWds3GhhyVKVB0rYjdaNDmuV3fJZ5t0GNv+zcgKCf0Xd1WF81E+Al
 # GmcLfc4l+gcK5GEh2NQc5QfGNpn0ltDGFf5Ozdeui53bFv0ExpK91IjmqaOqu/dk
 # ODtfzAzQNb50GQOmxapMomE2gj4d8yu8l13bS3g7LfU772Aj6PXsCyM2la+YZr9T
-# 03u4aUoqlmZpxJTG9F9urJh4iIAGXKKy7aIwggbAMIIEqKADAgECAhMzAAQqYjg2
-# C/C7UthEAAAABCpiMA0GCSqGSIb3DQEBDAUAMFoxCzAJBgNVBAYTAlVTMR4wHAYD
+# 03u4aUoqlmZpxJTG9F9urJh4iIAGXKKy7aIwggbAMIIEqKADAgECAhMzAATfMuDq
+# zV60pQpVAAAABN8yMA0GCSqGSIb3DQEBDAUAMFoxCzAJBgNVBAYTAlVTMR4wHAYD
 # VQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzApBgNVBAMTIk1pY3Jvc29mdCBJ
-# RCBWZXJpZmllZCBDUyBBT0MgQ0EgMDQwHhcNMjYwODAxMTk0NTU5WhcNMjYwODA0
-# MTk0NTU5WjCBgzELMAkGA1UEBhMCTkwxFjAUBgNVBAgTDU5vb3JkLUJyYWJhbnQx
+# RCBWZXJpZmllZCBDUyBBT0MgQ0EgMDQwHhcNMjYwODE1MjAxNzA0WhcNMjYwODE4
+# MjAxNzA0WjCBgzELMAkGA1UEBhMCTkwxFjAUBgNVBAgTDU5vb3JkLUJyYWJhbnQx
 # EjAQBgNVBAcTCVNjaGlqbmRlbDEjMCEGA1UEChMaSm9obiBCaWxsZWtlbnMgQ29u
 # c3VsdGFuY3kxIzAhBgNVBAMTGkpvaG4gQmlsbGVrZW5zIENvbnN1bHRhbmN5MIIB
-# ojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAzJVfDiyD7X5wjaVAbNcWusQ1
-# m3nZDHQpCr9Tac4NJB+RO2I778PjqBIVN5CyAGRYbP/nK+yy2tOAjaC/Fo5hatz0
-# 5EFprl6CuV28E2OulBZ6fZm1NByGMHdctNVVoQDnZp0H32GVlavYJKwiLzESO01m
-# 5DV2mQxEyxWGQlPyNUZousEvBi0LyvtQ/MnekqzqSqRnoT1HNul8Em4CoEMqUsLe
-# nyYSQJ/YBj5ZiLbPdvEdSSZfHBnKFyJSzU1LoXYpgH1BLsS24pIlF3kHUxN8LcKd
-# yBkqISEUElx7O4+fi71na+s04CjDI2ffkGt4Uhhcd2kzMsUEATi5YLLW/0m3SX1k
-# AaSX4k2SmIGrCIiD7Tg5dxsnoz37mshvEhsGCd91PLsxVlCQrTcz1Pg2lLki9RXv
-# ekrOS9B8jAdXbN5cU42szS4Z6olfShAHFBo1TizkYMgjxAOqZPWKCsgAZrT4R9SH
-# auKCkCkTqGV3XoIKQ22FozT/NMfxKcmo4kh0MCaNAgMBAAGjggHTMIIBzzAMBgNV
+# ojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAiZBf/l2RqJyJ+1+4okn6GNfE
+# iw/Kq7cMh8aXc5cazPlH2fN8jJzabqNNqBfrLZp3UWIGLvCYAHOpOEu1gavAdrJa
+# osXyJophs9z4wR/AKKszZanZ+A5+oofL7D1NwIKsA7X2RMJSlPWBGn9fTPx/4TU+
+# LtQaRzg9RoZjJanDSIHPx2PYAQGkw3XsXfiQRpjcvIfRAtSDC4VtD8OZ6/tsmaou
+# TDY/ACLgyMTtUthzekFUjHfEnz5yGVWPOKd8Ch62TM2Dg0PEiJbtwtYOH6f22iN2
+# telegUdXsvl7MGjbQU4rSQ176ON3/GgAkOe1ZDK7ykdNRVBuHPx8dIlnR6qGyXhb
+# ChmI8Tuh2vy3ak3MppLhI+TIn2znPZg/2ysv+ZM2lVJOBmsYPkrJAm6YuJENNN5b
+# LbpaEMk94XQvDwwWMV5FzaK+HhmCK7K1xcqB1+kInx433VYUIYGqCLSZiOQJyA0+
+# EUK+PLgFfvwjU82iy9j1pfQh54flH1wvwYBAg86vAgMBAAGjggHTMIIBzzAMBgNV
 # HRMBAf8EAjAAMA4GA1UdDwEB/wQEAwIHgDA6BgNVHSUEMzAxBgorBgEEAYI3YQEA
 # BggrBgEFBQcDAwYZKwYBBAGCN2HK9PELgrHSgxH33KNOluu6MTAdBgNVHQ4EFgQU
-# SNqcq9sa54tVhaeGFcwQwietz+UwHwYDVR0jBBgwFoAUayVB3vtrfP0YgAotf492
+# ZFuWNZpkA8KtQxPIXw67POaVNIcwHwYDVR0jBBgwFoAUayVB3vtrfP0YgAotf492
 # XapzPbgwZwYDVR0fBGAwXjBcoFqgWIZWaHR0cDovL3d3dy5taWNyb3NvZnQuY29t
 # L3BraW9wcy9jcmwvTWljcm9zb2Z0JTIwSUQlMjBWZXJpZmllZCUyMENTJTIwQU9D
 # JTIwQ0ElMjAwNC5jcmwwdAYIKwYBBQUHAQEEaDBmMGQGCCsGAQUFBzAChlhodHRw
 # Oi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2NlcnRzL01pY3Jvc29mdCUyMElE
 # JTIwVmVyaWZpZWQlMjBDUyUyMEFPQyUyMENBJTIwMDQuY3J0MFQGA1UdIARNMEsw
 # SQYEVR0gADBBMD8GCCsGAQUFBwIBFjNodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20v
-# cGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wDQYJKoZIhvcNAQEMBQADggIBADop
-# 8VvsB0PCl6Oomj6RIkJs5sJADvWluNDY8wf4eidt0AX2JpTTLzXVWcZTE+78wYhe
-# 2sBmufBXIw6PRhOcTSOfReICWaUTSKLTWX0Z1x9YN1HugpMpvMatentzINPYpP+q
-# ao91Rsn9lT91MES6CnrhhB/sBZEK4KHf2yNQ3MJ+kRAf1qre1j9S9DWuBiprg+2C
-# sOex2VKs2+rHbuT6CFdw67T9k+bleKiktjFInfVlJ0dfMTa6D/mv5ED/az9xccjQ
-# cses9dSiGIXg2stIc49dvfZZK16/zFfn4JXZOHcenYvg1HXNaywh8htkOz2ylbQB
-# XB8JtDmY5sLCT8oYxILmhgmZ8FWrRaW7yOnGUSAxRYaiGj7tiDcIhwI86tuxEKFu
-# vkGoFTOh5fch0g/pNqAxDnUlDyrlkaZ3w6c2cC6lEeOEnX9wMNbpgdE0kX/vNB6Y
-# p2IqGZ9e01rKS0T1yHYy2jvY761YirKkewV/xWqjj9OQktKA9ri+LRcizKD1PqkH
-# uVyjsUs5LDdZbkjJTCkr07LEda/cGG9SFxd4nFuUWW+IcU7QwCMLpCUaoUmpVNJF
-# 93lLntphbR4lQjJqcO68JXvJ8zE2yCjQ/07fk+BqJDe9/ha1pJpqizxeqkCsdJcg
-# Fc3dv1gLb4r3GwBWsVpvKE+gTpVk/1z1SK7OjMKRMIIGwDCCBKigAwIBAgITMwAE
-# KmI4Ngvwu1LYRAAAAAQqYjANBgkqhkiG9w0BAQwFADBaMQswCQYDVQQGEwJVUzEe
+# cGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wDQYJKoZIhvcNAQEMBQADggIBAKno
+# dx/TzwuGuRRzvIQ5C0v0LlvWY8T1yEhoLehulqNLVrzfLVU0Lj3O9k3nmXeaj7qF
+# Oq/J5aNxssX2bB5NSWLvrlOrkZ7cdVSJ/SyDCn6Wtvt24d21J7Oc3USzyLQlngZ1
+# QwtahcowVJE+mE+0/Z4CU3ZLtIA+6C9doK4TovCJfadbBiBI9jxI2UsoD2p0b0Ec
+# Nlpyc/rbThZxQc/lQNAQxRsb6I5eWa7DG+JsRxyHA+d8RwhrAJg8avHtDdJNuZ8r
+# P7C6d+71Cf6EVG9rh2bsVBkELD/FtC+zdUsNjp1vVFHtHMJhl0UjerXrEmJ23bW2
+# FhWI51GRm1aXTwt9rbXxveH/9fx7EaFipgS+hCYF/gFGyUhuJLzY34CdRNXTdTSg
+# st2JqFNHLeHlNNV2g704nD+0RX4HaZjumk+60mbRFVyzGITDvjTWRBHJVfoelaxi
+# 0xO9zU83xOyVzpi9ECBdqXxdda6blKbMIzaqQv4rx1EPWqhkI1fUNRnXR6vZ56Bc
+# lNSnpzevptJmQU7K3RV9A6Ld3qSvTEmjvBOQnjygFrVokSBh+SO9Dc/6GRi3v7CU
+# dRQrcFXt8EiMm9dP2ZnWAqe/djm5VtxI6IpDSl8H6Z3cwpdC1ThnZ+uZgxKZcsET
+# XgXsf7DcU119x6GbgvQi2TaKVG4kPG3F6BJmerTEMIIGwDCCBKigAwIBAgITMwAE
+# 3zLg6s1etKUKVQAAAATfMjANBgkqhkiG9w0BAQwFADBaMQswCQYDVQQGEwJVUzEe
 # MBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSswKQYDVQQDEyJNaWNyb3Nv
-# ZnQgSUQgVmVyaWZpZWQgQ1MgQU9DIENBIDA0MB4XDTI2MDgwMTE5NDU1OVoXDTI2
-# MDgwNDE5NDU1OVowgYMxCzAJBgNVBAYTAk5MMRYwFAYDVQQIEw1Ob29yZC1CcmFi
+# ZnQgSUQgVmVyaWZpZWQgQ1MgQU9DIENBIDA0MB4XDTI2MDgxNTIwMTcwNFoXDTI2
+# MDgxODIwMTcwNFowgYMxCzAJBgNVBAYTAk5MMRYwFAYDVQQIEw1Ob29yZC1CcmFi
 # YW50MRIwEAYDVQQHEwlTY2hpam5kZWwxIzAhBgNVBAoTGkpvaG4gQmlsbGVrZW5z
 # IENvbnN1bHRhbmN5MSMwIQYDVQQDExpKb2huIEJpbGxla2VucyBDb25zdWx0YW5j
-# eTCCAaIwDQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBAMyVXw4sg+1+cI2lQGzX
-# FrrENZt52Qx0KQq/U2nODSQfkTtiO+/D46gSFTeQsgBkWGz/5yvsstrTgI2gvxaO
-# YWrc9ORBaa5egrldvBNjrpQWen2ZtTQchjB3XLTVVaEA52adB99hlZWr2CSsIi8x
-# EjtNZuQ1dpkMRMsVhkJT8jVGaLrBLwYtC8r7UPzJ3pKs6kqkZ6E9RzbpfBJuAqBD
-# KlLC3p8mEkCf2AY+WYi2z3bxHUkmXxwZyhciUs1NS6F2KYB9QS7EtuKSJRd5B1MT
-# fC3CncgZKiEhFBJcezuPn4u9Z2vrNOAowyNn35BreFIYXHdpMzLFBAE4uWCy1v9J
-# t0l9ZAGkl+JNkpiBqwiIg+04OXcbJ6M9+5rIbxIbBgnfdTy7MVZQkK03M9T4NpS5
-# IvUV73pKzkvQfIwHV2zeXFONrM0uGeqJX0oQBxQaNU4s5GDII8QDqmT1igrIAGa0
-# +EfUh2rigpApE6hld16CCkNthaM0/zTH8SnJqOJIdDAmjQIDAQABo4IB0zCCAc8w
+# eTCCAaIwDQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBAImQX/5dkaiciftfuKJJ
+# +hjXxIsPyqu3DIfGl3OXGsz5R9nzfIyc2m6jTagX6y2ad1FiBi7wmABzqThLtYGr
+# wHayWqLF8iaKYbPc+MEfwCirM2Wp2fgOfqKHy+w9TcCCrAO19kTCUpT1gRp/X0z8
+# f+E1Pi7UGkc4PUaGYyWpw0iBz8dj2AEBpMN17F34kEaY3LyH0QLUgwuFbQ/Dmev7
+# bJmqLkw2PwAi4MjE7VLYc3pBVIx3xJ8+chlVjzinfAoetkzNg4NDxIiW7cLWDh+n
+# 9tojdrXpXoFHV7L5ezBo20FOK0kNe+jjd/xoAJDntWQyu8pHTUVQbhz8fHSJZ0eq
+# hsl4WwoZiPE7odr8t2pNzKaS4SPkyJ9s5z2YP9srL/mTNpVSTgZrGD5KyQJumLiR
+# DTTeWy26WhDJPeF0Lw8MFjFeRc2ivh4ZgiuytcXKgdfpCJ8eN91WFCGBqgi0mYjk
+# CcgNPhFCvjy4BX78I1PNosvY9aX0IeeH5R9cL8GAQIPOrwIDAQABo4IB0zCCAc8w
 # DAYDVR0TAQH/BAIwADAOBgNVHQ8BAf8EBAMCB4AwOgYDVR0lBDMwMQYKKwYBBAGC
 # N2EBAAYIKwYBBQUHAwMGGSsGAQQBgjdhyvTxC4Kx0oMR99yjTpbrujEwHQYDVR0O
-# BBYEFEjanKvbGueLVYWnhhXMEMInrc/lMB8GA1UdIwQYMBaAFGslQd77a3z9GIAK
+# BBYEFGRbljWaZAPCrUMTyF8OuzzmlTSHMB8GA1UdIwQYMBaAFGslQd77a3z9GIAK
 # LX+Pdl2qcz24MGcGA1UdHwRgMF4wXKBaoFiGVmh0dHA6Ly93d3cubWljcm9zb2Z0
 # LmNvbS9wa2lvcHMvY3JsL01pY3Jvc29mdCUyMElEJTIwVmVyaWZpZWQlMjBDUyUy
 # MEFPQyUyMENBJTIwMDQuY3JsMHQGCCsGAQUFBwEBBGgwZjBkBggrBgEFBQcwAoZY
@@ -355,17 +470,17 @@
 # MjBJRCUyMFZlcmlmaWVkJTIwQ1MlMjBBT0MlMjBDQSUyMDA0LmNydDBUBgNVHSAE
 # TTBLMEkGBFUdIAAwQTA/BggrBgEFBQcCARYzaHR0cDovL3d3dy5taWNyb3NvZnQu
 # Y29tL3BraW9wcy9Eb2NzL1JlcG9zaXRvcnkuaHRtMA0GCSqGSIb3DQEBDAUAA4IC
-# AQA6KfFb7AdDwpejqJo+kSJCbObCQA71pbjQ2PMH+HonbdAF9iaU0y811VnGUxPu
-# /MGIXtrAZrnwVyMOj0YTnE0jn0XiAlmlE0ii01l9GdcfWDdR7oKTKbzGrXp7cyDT
-# 2KT/qmqPdUbJ/ZU/dTBEugp64YQf7AWRCuCh39sjUNzCfpEQH9aq3tY/UvQ1rgYq
-# a4PtgrDnsdlSrNvqx27k+ghXcOu0/ZPm5XiopLYxSJ31ZSdHXzE2ug/5r+RA/2s/
-# cXHI0HLHrPXUohiF4NrLSHOPXb32WStev8xX5+CV2Th3Hp2L4NR1zWssIfIbZDs9
-# spW0AVwfCbQ5mObCwk/KGMSC5oYJmfBVq0Wlu8jpxlEgMUWGoho+7Yg3CIcCPOrb
-# sRChbr5BqBUzoeX3IdIP6TagMQ51JQ8q5ZGmd8OnNnAupRHjhJ1/cDDW6YHRNJF/
-# 7zQemKdiKhmfXtNayktE9ch2Mto72O+tWIqypHsFf8Vqo4/TkJLSgPa4vi0XIsyg
-# 9T6pB7lco7FLOSw3WW5IyUwpK9OyxHWv3BhvUhcXeJxblFlviHFO0MAjC6QlGqFJ
-# qVTSRfd5S57aYW0eJUIyanDuvCV7yfMxNsgo0P9O35PgaiQ3vf4WtaSaaos8XqpA
-# rHSXIBXN3b9YC2+K9xsAVrFabyhPoE6VZP9c9UiuzozCkTCCBygwggUQoAMCAQIC
+# AQCp6Hcf088LhrkUc7yEOQtL9C5b1mPE9chIaC3obpajS1a83y1VNC49zvZN55l3
+# mo+6hTqvyeWjcbLF9mweTUli765Tq5Ge3HVUif0sgwp+lrb7duHdtSeznN1Es8i0
+# JZ4GdUMLWoXKMFSRPphPtP2eAlN2S7SAPugvXaCuE6LwiX2nWwYgSPY8SNlLKA9q
+# dG9BHDZacnP6204WcUHP5UDQEMUbG+iOXlmuwxvibEcchwPnfEcIawCYPGrx7Q3S
+# TbmfKz+wunfu9Qn+hFRva4dm7FQZBCw/xbQvs3VLDY6db1RR7RzCYZdFI3q16xJi
+# dt21thYViOdRkZtWl08Lfa218b3h//X8exGhYqYEvoQmBf4BRslIbiS82N+AnUTV
+# 03U0oLLdiahTRy3h5TTVdoO9OJw/tEV+B2mY7ppPutJm0RVcsxiEw7401kQRyVX6
+# HpWsYtMTvc1PN8Tslc6YvRAgXal8XXWum5SmzCM2qkL+K8dRD1qoZCNX1DUZ10er
+# 2eegXJTUp6c3r6bSZkFOyt0VfQOi3d6kr0xJo7wTkJ48oBa1aJEgYfkjvQ3P+hkY
+# t7+wlHUUK3BV7fBIjJvXT9mZ1gKnv3Y5uVbcSOiKQ0pfB+md3MKXQtU4Z2frmYMS
+# mXLBE14F7H+w3FNdfcehm4L0Itk2ilRuJDxtxegSZnq0xDCCBygwggUQoAMCAQIC
 # EzMAAAAWMZKNkgJle5oAAAAAABYwDQYJKoZIhvcNAQEMBQAwYzELMAkGA1UEBhMC
 # VVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjE0MDIGA1UEAxMrTWlj
 # cm9zb2Z0IElEIFZlcmlmaWVkIENvZGUgU2lnbmluZyBQQ0EgMjAyMTAeFw0yNjAz
@@ -446,26 +561,26 @@
 # 7Yww94lDf+8oG2oZmDh5O1Qe38E+M3vhKwmzIeoB1dVLlz4i3IpaDcR+iuGjH2Td
 # aC1ZOmBXiCRKJLj4DT2uhJ04ji+tHD6n58vhavFIrmcxghcyMIIXLgIBATBxMFox
 # CzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzAp
-# BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDQCEzMABCpi
-# ODYL8LtS2EQAAAAEKmIwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
-# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQg78Le
-# xolRL9zKZRskDOXwJBjd6anaCH16lKT4jYPI/aQwDQYJKoZIhvcNAQEBBQAEggGA
-# SOcjDreMD7rRCAyMtVjnPJFnBCZ9bqjNB2+UgYIZRCRwV8RL06rDoqJ7u5B3qYpX
-# 8m678FLgTtrPxNwj2rIVd50iomjrKlm1wp64o45TbcrF6G3dp42iRDXbKT+LV0xc
-# C9ezVwdtHS4qSn2XH62Dy3rP9XRdgwFq4WeaDeaDs0OGK0QFFvE4KPxV4g5EEnYF
-# sZfl5FCo7c0EBRqiJ8nDjTvLAzzZlO6u7/IofdPMdPGNQ7ksDc51hUQrY5cgyZZs
-# 8GPLrNcA7fHmy31m3g3+PlHtPmx5qESRLyoaOOuHd+bb09UzfoZasglzMOWx/lcl
-# iOumRUQ5tuzdXEZCp7wDN/bP1FXl7ZRy1wPSvL3F/XQfnoA1AcBL8/1VG+NvGG+O
-# u1OLA59wlbJ4hh8/YXfYTQHPg9nHXf1y/nU9zIizLYJvqIOosNEl5QD+XVwmkrrQ
-# qKJJsIPMN+y+IGj5ffHzSkbIkEodga+BuZjycahTijbNao19WQBW76p9r0b3p8Nn
+# BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDQCEzMABN8y
+# 4OrNXrSlClUAAAAE3zIwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
+# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgqvYp
+# y9QMqpJYpJ7KqRRKZ4wvJ/eO7+jRNj7vjXdyzYowDQYJKoZIhvcNAQEBBQAEggGA
+# Gp/FSbBE8Dja4lrrk8LfQkNbHgZUwmC81aLXYz+FpsBNm6zOn3i3RyC0kPIZg9v2
+# cdNNtXsjWtIWuGWbUs9TpmAOIrciMMvK5Pplo2POU87beA9UG59RrDAO8D4Is2ze
+# QXpSa058/JrlPj74qyDhAgH6pNXw8eaBXADozJfaM9d3TI9CnEgGmskhO3f10j/p
+# ec+CZBAsQSN43Fse5jfe54H3K32QI72zEGpPIaLBFGBuX+YjoFQiEgfzpcq1mUcJ
+# ce1jxMcNffG4F0wJGhxVOop1KaMSWm2Z/5Xe7HNRJZLvASVOmX9mEA6om4hApS5Y
+# t20i4c3cpPbfzeogSMtmkix4zZNOS9hjco0J63bWLpJTaER+7Qh2XEpRLwQgKpME
+# jIRMTi0ayZgrDTrsK8stuUEeGVXC0i1DkgCBaMi8Vxdx6ahbHBCxDBtFYGf+eDqo
+# 9M2F8Lb0BF/ZzXIP0uQLaJOsFNVfV3itWSV0PxYEjyds8FWMWbGE5kJJp4tExC5a
 # oYIUsjCCFK4GCisGAQQBgjcDAwExghSeMIIUmgYJKoZIhvcNAQcCoIIUizCCFIcC
 # AQMxDzANBglghkgBZQMEAgEFADCCAWoGCyqGSIb3DQEJEAEEoIIBWQSCAVUwggFR
-# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIAJwGQF5EldJ1nRzdOH6
-# ZzmkYccIHEEUXFGVuYqsTktvAgZqNWdu3OcYEzIwMjYwODAzMTg1ODAxLjk3N1ow
+# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIMgscR0WxEcUuBqeM0fB
+# pMWGDzhfjtJmVLndCDeyzDe6AgZqNTCDLswYEzIwMjYwODE3MTMwNjU1LjA5MVow
 # BIACAfSggemkgeYwgeMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xLTArBgNVBAsTJE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRl
-# ZDEnMCUGA1UECxMeblNoaWVsZCBUU1MgRVNOOjdBMUEtMDVFMC1EOTQ3MTUwMwYD
+# ZDEnMCUGA1UECxMeblNoaWVsZCBUU1MgRVNOOjQ5MUEtMDVFMC1EOTQ3MTUwMwYD
 # VQQDEyxNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lIFN0YW1waW5nIEF1dGhvcml0
 # eaCCDykwggeCMIIFaqADAgECAhMzAAAABeXPD/9mLsmHAAAAAAAFMA0GCSqGSIb3
 # DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9y
@@ -507,28 +622,28 @@
 # k4MhF/KgaXn0GxdH8elEa2Imq45gaa8D+mTm8LWVydt4ytxYP/bqjN49D9NZ81co
 # E6aQWm88TwIf4R4YZbOpMKN0CyejaPNN41LGXHeCUMYmBx3PkP8ADHD1J2Cr/6tj
 # uOOCztfp+o9Nc+ZoIAkpUcA/X2gSMkgHAPUvIdtoSAHEUKiBhI6JQivRepyvWcl+
-# JYbYbBh7pmgAXVswggefMIIFh6ADAgECAhMzAAAAW0q1jUEybdx0AAAAAABbMA0G
+# JYbYbBh7pmgAXVswggefMIIFh6ADAgECAhMzAAAAWvYNZ4yF7d0IAAAAAABaMA0G
 # CSqGSIb3DQEBDAUAMGExCzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQg
 # Q29ycG9yYXRpb24xMjAwBgNVBAMTKU1pY3Jvc29mdCBQdWJsaWMgUlNBIFRpbWVz
-# dGFtcGluZyBDQSAyMDIwMB4XDTI2MDEwODE4NTkwNVoXDTI3MDEwNzE4NTkwNVow
+# dGFtcGluZyBDQSAyMDIwMB4XDTI2MDEwODE4NTkwM1oXDTI3MDEwNzE4NTkwM1ow
 # geMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdS
 # ZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xLTArBgNVBAsT
 # JE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRlZDEnMCUGA1UECxMe
-# blNoaWVsZCBUU1MgRVNOOjdBMUEtMDVFMC1EOTQ3MTUwMwYDVQQDEyxNaWNyb3Nv
+# blNoaWVsZCBUU1MgRVNOOjQ5MUEtMDVFMC1EOTQ3MTUwMwYDVQQDEyxNaWNyb3Nv
 # ZnQgUHVibGljIFJTQSBUaW1lIFN0YW1waW5nIEF1dGhvcml0eTCCAiIwDQYJKoZI
-# hvcNAQEBBQADggIPADCCAgoCggIBAJBUzBbbnlDXee0B0KD5G4/475thFyfctCyu
-# ESTWQXvlLi4Wx/td2qUdeq4ideeg6VWhiOHfu3wJV4TUGSRtqh9Ccr1BmiBKv9iu
-# FpgHyIBu5Qx38ZsxwlFeXVS+ZqJJKnXRbDNQdcYSoC/6c0hQJ/PH50DBRDQkPXVw
-# yFizLrRH9AlrJeUg7BKeT23zftS8/KOJLvEEbHOF6pSOY3ZVprZUWbWjWwRTmoHa
-# Q/E8vrWtLNyEJ+b089VW1Ikra3t4GTB5Wby3CL1K2zYnAxBIvafsKMFyj9OuXHcT
-# PKMDoFSMeamG9MKOMb6uoG1PjdnDgsLP6EOMRSzrLL7jED1mbB9RSd9fhty+HQr6
-# vZgsBn6oUy+YTpNVLskwdtUM82WYAkPztlOt3AiL0qyV7/U3j/uq3vHMjPM0w034
-# 0M57Nei0g4BCcMt0dbqoc91VgCb3/36sHQANontn1HOF2oLk8190QRS43isHVra8
-# H8sf5+GlqIYsYiCKX04HZiOzZW826nVI6d++8lyTeWmpj90Ua9uPbJhVjwE3oh6t
-# O510ySqmSMSLEN07p3Ibe3E6BAb2w93rWzb26+dpSthbKF4kApofqBsWPX4MEtHK
-# SOftPmVTCQ47tghrVuHia9jY+Hsj01m4KW4WtkmVm3L6hMZECMa4sjMxAXz+bX/A
-# JhWTe6TZAgMBAAGjggHLMIIBxzAdBgNVHQ4EFgQU7/LqUlWWYhXJdXwgYKx4b8Gv
-# 0rYwHwYDVR0jBBgwFoAUa2koOjUvSGNAz3vYr0npPtk92yEwbAYDVR0fBGUwYzBh
+# hvcNAQEBBQADggIPADCCAgoCggIBAO/0O0eWjgUb9rnHcQLRdfWPN4H+91a3Ynla
+# P46E1m4uD+JKx6csWMStX79fxLJUAqHJqQWE19UlNMhS9jEB32dAJ4yuWsHyUuM+
+# dphjDz4E5jl4gYGZEmaOrKvNt+KqlFayyg/oTg3BlLRu4aBq8668A5qlHcfsuh6D
+# dSqFID1ixJFZzHrZFG1iGBG7U1Bn2ONLDo7jbwX5rMcPduTAUw/c7M3WhSxQBuZp
+# Qiz8RQGKIqCKfIxgQkKdzpCpU0SWQOE/DgTXbz3c15KMRCdkGlL2zb+lnuSV4sse
+# Qm3qflZiZckLyn2xJI8ZXDkq+Ig+b/rsPPIfI8di228WvK1j67JXpyeVCaSUO9Er
+# zlLnTrnjQkeXVQIp73xuVBVrmvoTf/v4a7MnrmuKSyIXc5vJUHEGB345+O8omFt1
+# w8b+Xg9D9PKIRqDPEv7HRk0C+Yvxu8FvHJvSocSIZK+v/FmKFOipYnpP76yAmJNn
+# yheucShOgk8QiU53USn/+AyMb7xW905gZnyNqb29HeVdQ175pDHJGEz8Cx5wiHeV
+# liGz5hABucFDylR9z3LSTmB6+3ZuIxeG9BZS46P6ANPkuVuD5m8wgc7GLLzg73Cs
+# DF09ukt8Uf8dTcMBX3ro+7/k9M6Xt8WPG7IL9v/4DvyMY03tkb9Y9Ri6HWavXRPY
+# RCUePspPAgMBAAGjggHLMIIBxzAdBgNVHQ4EFgQUjmOyQ6twMcP1ZbRytJxI4fnX
+# mcIwHwYDVR0jBBgwFoAUa2koOjUvSGNAz3vYr0npPtk92yEwbAYDVR0fBGUwYzBh
 # oF+gXYZbaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9jcmwvTWljcm9z
 # b2Z0JTIwUHVibGljJTIwUlNBJTIwVGltZXN0YW1waW5nJTIwQ0ElMjAyMDIwLmNy
 # bDB5BggrBgEFBQcBAQRtMGswaQYIKwYBBQUHMAKGXWh0dHA6Ly93d3cubWljcm9z
@@ -537,36 +652,36 @@
 # JQEB/wQMMAoGCCsGAQUFBwMIMA4GA1UdDwEB/wQEAwIHgDBmBgNVHSAEXzBdMFEG
 # DCsGAQQBgjdMg30BATBBMD8GCCsGAQUFBwIBFjNodHRwOi8vd3d3Lm1pY3Jvc29m
 # dC5jb20vcGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wCAYGZ4EMAQQCMA0GCSqG
-# SIb3DQEBDAUAA4ICAQAAH+zd+XKh4OxXYMWFmtgilXAQGctOjCUB1w/uBiC/OXcH
-# 3Ia4/XbdUhKzFbaiTbIE6vYZKd1p4u7nKOLkawymAMVyuO7LSl6rLKttZIyLhWjT
-# K0zXOz0u4xLq9+bRtBEKJvA6sD5nJwH1IO6z1YizyuIRoalMCnbrUixfWxQn4TAm
-# N7t9uk+X2FUThEa3ewzRwhtG+xwaAbLMkxRmR24JnfXd1VxKo90+m7Wzuov96Uug
-# x5wZdewiIIm1ZWTj4lCJHup679LcOa7tAxJMipVaSltQH9fm9TOKczlfxtWuBcLU
-# 4duZfqwgsILsH7PMkcX1zwQzQD0yAtPhnYz9KNG125bX+iilOe1S8RHqv2bbBpMp
-# ao4kcUvQI6dMgKRvFmm1eLbhSNOQplDMTGD1tNVdNGkI96jUu+troUjWMMi46TQf
-# BAHxtDTpRhIu/87vAVQ8Z6RHhFxesz4Ed5JThaIQRAy6GcO/Jk+QzDzoZ0arRIkI
-# sGJ7rZgOVAjx9ctfw8lH9RfjcwB3wdGBYNMNVJqQpUai2Taddf5pXzTZEHIqLEF5
-# 3SrBjIeInoQrP7U5VlXiMQsxewLdINrAE2l2TR3KBikb+RQRygbTp8jj2yiC0NCU
-# wG+K+ndglN5RMbXjFW6aKa59Xq+b8XzK/DK+AJtgOpHgJv8Qrk62A+twOVLOpjGC
+# SIb3DQEBDAUAA4ICAQCAlM8r+t3hIb2h1lDTAx+iYkQlxFuU7QONeyIFIBZ29xvG
+# l8pehKxErDzIniOpIX/eluUAwQKoaI0zwuKAdR0mrSHXCniMoLNko5W+5r7sXNam
+# KX7QMV3BfGOX3gi9qVfxyUe7AHXbqQ8KBQHNYCnNFtQQHgARrlYhtyAKol5ctM0C
+# Ac/y3oY7bTMsVJvnA5u7DVWPeXoST2KEMDeLBvJYq0IJZ6yMpDOWLZ4UP82bksyS
+# hIB/XdawirIGLdseudryRxVMk313mAcjGRb59+Ittt6otVvYQWqH+PGrTUzEcez8
+# aQuO3umoNZjKuFoX5VsPP/gSZse+orhG3zfZk9IDyE3DfUFrhvkv6H0tijK1D0uI
+# GhwMBWSm9ktQ6oeU+aurZFx3MI+LODnHsbRFZAy11uMvwKq+ZNC1Se4tIM1u9piW
+# AhnTPoh6mULKikHOVhHaO953tkzDCtjsse5GUKOx9yg9nqHKWMgnODp62/uPPzC/
+# yDEISrXCcU7UB7tATr3zWNEdtM4d009iXWI6dV/SdcIIX44rpoLyCLw+nXjxp+fY
+# /dygLO7UdSQaVaUFVj3K2nVyuujPspt5Lunc5FvuYPqmi/z8kASmmwbiF+W0P0UT
+# WFaC84MWfU2h6MDg5s0oxmdNFK76jXr3wZfdSoV7FCKfq5GdeGoy5UwDQwMC0DGC
 # A9QwggPQAgEBMHgwYTELMAkGA1UEBhMCVVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBD
 # b3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGltZXN0
-# YW1waW5nIENBIDIwMjACEzMAAABbSrWNQTJt3HQAAAAAAFswDQYJYIZIAWUDBAIB
+# YW1waW5nIENBIDIwMjACEzMAAABa9g1njIXt3QgAAAAAAFowDQYJYIZIAWUDBAIB
 # BQCgggEtMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQx
-# IgQg3OPjTTXBVWkQic1foBlolfg9Kj8EfeyFFfRMoXY4xSQwgd0GCyqGSIb3DQEJ
-# EAIvMYHNMIHKMIHHMIGgBCAvMQNVXZ0b0xxlGw8X/3IEybObuT6a5W1d61CW+cGD
-# 7zB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
+# IgQgxiC6CNkloz4LUVsXKXMUyse0JRfT2c8zDx5jZaRYZb0wgd0GCyqGSIb3DQEJ
+# EAIvMYHNMIHKMIHHMIGgBCBiuWRAi+p96PRsBt3TwW3jNozgPQS+Qco1CVm/NaU0
+# QzB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
 # cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3RhbXBp
-# bmcgQ0EgMjAyMAITMwAAAFtKtY1BMm3cdAAAAAAAWzAiBCDyjUhamxOjePgcevol
-# Y1nqu7TW43oXi+pfLJCqyO6TLDANBgkqhkiG9w0BAQsFAASCAgAYsbKxIu2ZWJPr
-# yAidFhqypu8qikDKq3KH1F6QGemxYvCvq5YDqakYCgJ3+G7oQamXLzs/fPG3xYfl
-# wCh8C82fXhIT27d0Z1q5zwSOgDysgHvJcUNtlGnGofnbW4tiffQmgRvc6Zalt6sX
-# R2uvAaJhDKVMSrEiXtGqO6K4TjT+UQX4r7dcPFv2adtgFHvUrIR6YFLoACwV2ozG
-# Jmv3a7gLyn6T0XXHYEMrVOlZVLnIR3bPmqv8xhMxfy+ciHSaftwlkajW2cZq4Hdx
-# y4p49gqVLN+4ZpRc4DD+uBXEnA+jD26mQRm3qoroYMKMVZN3AFu1tBy7EtGuvFeu
-# hSgRkamFStN76GnLPXGNiWA+g9CfBa4+6oMj3RLWRvi3Vy+l2twiNoReajHFIBoQ
-# CS1ViWVoSeUyhBy3BIwEfO7FZ6w7Y7U9wa0bA2+iW+24UPHBiK2/BrX2x0xLp+3L
-# EQ+lGoQCiwj0g8UI5qP3iEs2Gyjc+rYzniP2oZZExETr3yj53xhDmW1k8GvTYFEv
-# sPuOFWKFOWoacVU/ys49Z9nybRxztqP+La9fMVTESS6+hNs2J2i3HtUS8WhAfA1v
-# AuFe5vqlc2y6peP0+9aFcZ0FqitOWIGy1iunSMDyVQm7iLqsL0kWDMrLASPy2GqK
-# 68lDy92NkCxsj+rs1UaOb2G+oNkc5g==
+# bmcgQ0EgMjAyMAITMwAAAFr2DWeMhe3dCAAAAAAAWjAiBCAgqtjeG80BojCocMwl
+# 1STFmFHvyPwfAlK5TQwYKigjgjANBgkqhkiG9w0BAQsFAASCAgDsURxObrxIPi/A
+# ai8WGghHbduEYRNbajsd6mygnC1tEKbYe48HXt1f7jPrJVM8qO4pz9/+yGRPGYO5
+# ulWjQFcBG8x0XK9JXdVm8Qlj5BB3BK2uIcqBezDbz+IW6+wt3kZ6WdzMPJg4bWgq
+# pbyilHkbqrYU9UaDFn8vOuKxeRF6tc9wNT3/ENzCzZm2zfaJXo4WXzZYaj02nlKq
+# /kCWCNVsqbsZ99uoFqZwdYylum75Vxg3C23Y78j2nDsvP2JCW/MmfoohLcHjPapT
+# fYXeL34o2Do//BW1IVCZMJuSkym8uuJ+/9uVYSXWyos4iswC3iOmDKXNUGv0MaSa
+# B2kkCYHrAb7Kq95Uiz53vCTEJEvAEexIfXI9JlEWMajBPQ3mOSwJPSsi0MbZJb5a
+# G8orxYq+vYUXElTK4m54YB+PyULZO7EgezyeK1wrUfXl1id4CUwOvomCa2rIIla7
+# MLQ6tgQ6sMIgWfrTVJS4lVRHBKg8QsGx7ZMUav1IBIK0GqGG8hhJTAY6afs3GbyC
+# RQAof/a2r3xOcKziXlEE9VBd2mjmDFI9aVszKygwrXd8xhjTE5Xi0vfqiGyRxG5O
+# LkPIb1CN6M7+9SgtDaVwFWRxQaekXc6Uv6FROv+nW0sRqHYyrYEk9ZEH9Cd/37T1
+# 83OFvR9ipbySMMblGs8rV/aZ+WCcEw==
 # SIG # End signature block

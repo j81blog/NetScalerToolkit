@@ -177,6 +177,215 @@ Describe 'ACME helper functions' {
             }
         }
 
+        Context 'deployed NetScaler certificate as the primary renewal source' {
+            BeforeAll {
+                function New-TestNitroDate {
+                    param([Parameter(Mandatory)][datetime]$Date)
+                    # NITRO reports 'Jul 16 18:51:18 2020 GMT'.
+                    '{0} GMT' -f $Date.ToUniversalTime().ToString('MMM d HH:mm:ss yyyy', [System.Globalization.CultureInfo]::InvariantCulture)
+                }
+
+                function New-TestNitroCertKey {
+                    param(
+                        [int]$NotBeforeDays = -20,
+                        [int]$NotAfterDays = 70,
+                        [string]$Issuer = 'CN=YR1, O=Lets Encrypt, C=US',
+                        [string]$Status = 'Valid',
+                        [string]$Serial = 'SERIAL-1',
+                        [string]$Subject = 'CN=host.example.com'
+                    )
+
+                    [pscustomobject]@{
+                        certkey             = 'host.example.com'
+                        subject             = $Subject
+                        issuer              = $Issuer
+                        status              = $Status
+                        serial              = $Serial
+                        clientcertnotbefore = New-TestNitroDate -Date (Get-Date).AddDays($NotBeforeDays)
+                        clientcertnotafter  = New-TestNitroDate -Date (Get-Date).AddDays($NotAfterDays)
+                        daystoexpiration    = $NotAfterDays
+                    }
+                }
+
+            }
+
+            It 'parses the NITRO certkey date format, including a space padded day' {
+                # Space padded NotBefore, unpadded NotAfter, so one case covers both.
+                $certKey = [pscustomobject]@{
+                    certkey             = 'host.example.com'
+                    subject             = 'CN=host.example.com'
+                    status              = 'Valid'
+                    clientcertnotbefore = 'Jul  6 18:51:18 2030 GMT'
+                    clientcertnotafter  = 'Jul 16 18:51:18 2040 GMT'
+                }
+
+                $decision = Test-NSACMECertificateRenewalRequired -Request ([pscustomobject]@{ CN = 'host.example.com' }) -NetScalerCertificate $certKey -Domains @('host.example.com') -IsProduction
+
+                $decision.CertExpires.ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss') | Should -Be '2040-07-16 18:51:18'
+                # Two thirds of a lifetime starting 2030-07-06 lands in 2037, so nothing is due yet.
+                $decision.ShouldRenew | Should -BeFalse
+            }
+
+            It 'skips a valid deployed certificate when the ACME order metadata is stale' {
+                # Regression: a Posh-ACME order left over from a previous account claimed the
+                # certificate had expired, while the appliance was serving a valid one.
+                $request = [pscustomobject]@{ CN = 'host.example.com' }
+                $staleOrder = [pscustomobject]@{
+                    CertExpires = '2025-06-27T00:06:14Z'
+                    RenewAfter  = '2025-05-27T02:50:19Z'
+                }
+
+                $decision = Test-NSACMECertificateRenewalRequired -Request $request -AcmeOrder $staleOrder -NetScalerCertificate (New-TestNitroCertKey) -Domains @('host.example.com') -AcmeServer 'LE_PROD' -IsProduction
+
+                $decision.ShouldRenew | Should -BeFalse
+                $decision.Source | Should -Be 'NetScaler certificate'
+            }
+
+            It 'lets an ACME order for the deployed certificate pull renewal forward' {
+                $deployedNotAfter = (Get-Date).AddDays(70)
+                $certKey = New-TestNitroCertKey
+                $certKey.clientcertnotafter = New-TestNitroDate -Date $deployedNotAfter
+                $matchingOrder = [pscustomobject]@{
+                    CertExpires = $deployedNotAfter.ToString('o')
+                    RenewAfter  = (Get-Date).AddDays(-1).ToString('o')
+                }
+
+                $decision = Test-NSACMECertificateRenewalRequired -Request ([pscustomobject]@{ CN = 'host.example.com' }) -AcmeOrder $matchingOrder -NetScalerCertificate $certKey -Domains @('host.example.com') -AcmeServer 'LE_PROD' -IsProduction
+
+                $decision.ShouldRenew | Should -BeTrue
+                $decision.Source | Should -Be 'ACME order'
+            }
+
+            It 'renews an expired deployed certificate and skips one outside its window' {
+                $expired = Test-NSACMECertificateRenewalRequired -Request ([pscustomobject]@{ CN = 'host.example.com' }) -NetScalerCertificate (New-TestNitroCertKey -NotBeforeDays -120 -NotAfterDays -5) -Domains @('host.example.com') -IsProduction
+                $current = Test-NSACMECertificateRenewalRequired -Request ([pscustomobject]@{ CN = 'host.example.com' }) -NetScalerCertificate (New-TestNitroCertKey) -Domains @('host.example.com') -IsProduction
+
+                $expired.ShouldRenew | Should -BeTrue
+                $expired.Summary | Should -Be 'Certificate expired.'
+                $current.ShouldRenew | Should -BeFalse
+            }
+
+            It 'derives expiry from daystoexpiration when the validity dates are missing' {
+                $certKey = [pscustomobject]@{ certkey = 'host.example.com'; status = 'Valid'; daystoexpiration = -3 }
+
+                $decision = Test-NSACMECertificateRenewalRequired -Request ([pscustomobject]@{ CN = 'host.example.com' }) -NetScalerCertificate $certKey -Domains @('host.example.com') -IsProduction
+
+                $decision.ShouldRenew | Should -BeTrue
+                $decision.Source | Should -Be 'NetScaler certificate'
+                $decision.Summary | Should -Be 'Certificate expired.'
+            }
+
+            It 'renews a staging certificate on a production run but leaves it alone otherwise' {
+                $stagingCertKey = New-TestNitroCertKey -Issuer '(STAGING) False Fennel E6'
+
+                $production = Test-NSACMECertificateRenewalRequired -Request ([pscustomobject]@{ CN = 'host.example.com' }) -NetScalerCertificate $stagingCertKey -Domains @('host.example.com') -IsProduction
+                $staging = Test-NSACMECertificateRenewalRequired -Request ([pscustomobject]@{ CN = 'host.example.com' }) -NetScalerCertificate $stagingCertKey -Domains @('host.example.com')
+
+                $production.ShouldRenew | Should -BeTrue
+                $production.Summary | Should -Be 'Staging certificate on a production run.'
+                $staging.ShouldRenew | Should -BeFalse
+            }
+
+            It 'renews when the NetScaler reports the certkey as not valid' {
+                $decision = Test-NSACMECertificateRenewalRequired -Request ([pscustomobject]@{ CN = 'host.example.com' }) -NetScalerCertificate (New-TestNitroCertKey -Status 'Expired') -Domains @('host.example.com') -IsProduction
+
+                $decision.ShouldRenew | Should -BeTrue
+                $decision.Summary | Should -Be 'Certkey not valid on the NetScaler.'
+            }
+
+            It 'renews when the deployed certificate is issued to another common name' {
+                $decision = Test-NSACMECertificateRenewalRequired -Request ([pscustomobject]@{ CN = 'host.example.com' }) -NetScalerCertificate (New-TestNitroCertKey -Subject 'C=US,O=Example,CN=other.example.com') -Domains @('host.example.com') -IsProduction
+
+                $decision.ShouldRenew | Should -BeTrue
+                $decision.Summary | Should -Be 'Deployed certificate is for another name.'
+            }
+        }
+
+        Context 'request definition drift' {
+            BeforeAll {
+                function New-TestDriftCertKey {
+                    [pscustomobject]@{
+                        certkey             = 'host.example.com'
+                        subject             = 'CN=host.example.com'
+                        issuer              = 'CN=YR1'
+                        status              = 'Valid'
+                        serial              = 'SERIAL-1'
+                        clientcertnotbefore = '{0} GMT' -f (Get-Date).AddDays(-20).ToUniversalTime().ToString('MMM d HH:mm:ss yyyy', [System.Globalization.CultureInfo]::InvariantCulture)
+                        clientcertnotafter  = '{0} GMT' -f (Get-Date).AddDays(70).ToUniversalTime().ToString('MMM d HH:mm:ss yyyy', [System.Globalization.CultureInfo]::InvariantCulture)
+                    }
+                }
+
+                function New-TestDriftRequest {
+                    param([hashtable]$Override, [switch]$WithoutRecord)
+                    $properties = @{ CN = 'host.example.com'; KeyLength = '2048' }
+                    if (-not $WithoutRecord) {
+                        $properties['LastIssuedSerial'] = 'SERIAL-1'
+                        $properties['LastIssuedDomains'] = 'host.example.com'
+                        $properties['LastIssuedAcmeServer'] = 'LE_PROD'
+                        $properties['LastIssuedKeyLength'] = '2048'
+                    }
+                    if ($Override) {
+                        foreach ($key in $Override.Keys) { $properties[$key] = $Override[$key] }
+                    }
+                    [pscustomobject]$properties
+                }
+            }
+
+            It 'renews when a SAN is added to a corroborated request' {
+                $decision = Test-NSACMECertificateRenewalRequired -Request (New-TestDriftRequest) -NetScalerCertificate (New-TestDriftCertKey) -Domains @('host.example.com', 'www.example.com') -AcmeServer 'LE_PROD' -IsProduction
+
+                $decision.ShouldRenew | Should -BeTrue
+                $decision.Source | Should -Be 'request definition'
+                $decision.Summary | Should -Be 'Requested domains changed.'
+            }
+
+            It 'ignores domain order and casing' {
+                $decision = Test-NSACMECertificateRenewalRequired -Request (New-TestDriftRequest) -NetScalerCertificate (New-TestDriftCertKey) -Domains @('HOST.example.com') -AcmeServer 'LE_PROD' -IsProduction
+
+                $decision.ShouldRenew | Should -BeFalse
+            }
+
+            It 'renews when the ACME server changed, covering a staging to production move' {
+                $decision = Test-NSACMECertificateRenewalRequired -Request (New-TestDriftRequest @{ LastIssuedAcmeServer = 'LE_STAGE' }) -NetScalerCertificate (New-TestDriftCertKey) -Domains @('host.example.com') -AcmeServer 'LE_PROD' -IsProduction
+
+                $decision.ShouldRenew | Should -BeTrue
+                $decision.Summary | Should -Be 'ACME server changed.'
+            }
+
+            It 'renews when the requested key length changed' {
+                $decision = Test-NSACMECertificateRenewalRequired -Request (New-TestDriftRequest @{ LastIssuedKeyLength = '4096' }) -NetScalerCertificate (New-TestDriftCertKey) -Domains @('host.example.com') -AcmeServer 'LE_PROD' -IsProduction
+
+                $decision.ShouldRenew | Should -BeTrue
+                $decision.Summary | Should -Be 'Key length changed.'
+            }
+
+            It 'does not renew on drift when no record exists yet, so an upgrade stays quiet' {
+                $decision = Test-NSACMECertificateRenewalRequired -Request (New-TestDriftRequest -WithoutRecord) -NetScalerCertificate (New-TestDriftCertKey) -Domains @('host.example.com', 'www.example.com') -AcmeServer 'LE_PROD' -IsProduction
+
+                $decision.ShouldRenew | Should -BeFalse
+                $decision.Source | Should -Be 'NetScaler certificate'
+            }
+
+            It 'ignores the record when the serial no longer matches the deployed certificate' {
+                $decision = Test-NSACMECertificateRenewalRequired -Request (New-TestDriftRequest @{ LastIssuedSerial = 'SERIAL-OLD' }) -NetScalerCertificate (New-TestDriftCertKey) -Domains @('host.example.com', 'www.example.com') -AcmeServer 'LE_PROD' -IsProduction
+
+                $decision.ShouldRenew | Should -BeFalse
+                $decision.Source | Should -Be 'NetScaler certificate'
+            }
+
+            It 'keeps renewal metadata stable across a save and reload cycle' {
+                # Regression: a local time was written with a literal Z, so every run shifted the
+                # stored value by the UTC offset.
+                $stored = '2126-10-25T23:19:04Z'
+                foreach ($pass in 1..3) {
+                    $decision = Test-NSACMECertificateRenewalRequired -Request ([pscustomobject]@{ CN = 'host.example.com'; RenewAfter = $stored })
+                    $stored = ([datetimeoffset]$decision.RenewAfter).UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
+                }
+
+                $stored | Should -Be '2126-10-25T23:19:04Z'
+            }
+        }
+
         Context 'request normalization' {
             It 'keeps the legacy CleanVault alias for Posh-ACME storage cleanup' {
                 $parameter = (Get-Command Request-NSACMECertificate).Parameters['CleanPoshACMEStorage']
@@ -317,6 +526,80 @@ Describe 'ACME helper functions' {
                             -Production `
                             -StopOnError
                     } | Should -Throw -ExpectedMessage '*CertDir is required*'
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            It 'merges into the config as it stands and keeps a backup, so an edit made during the run survives' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    $configPath = Join-Path $dir 'GenLe-Config.json'
+                    $config = [pscustomobject]@{
+                        settings     = [pscustomobject]@{
+                            ManagementURL         = 'https://ns-01.domain.local'
+                            ADCCredentialUsername = 'nsroot'
+                            ADCCredentialPassword = ConvertTo-NSACMECertificateLegacySecret -Object 'Sup3rS3cretP@ssw0rd'
+                            LogFile               = Join-Path $dir 'run.log'
+                        }
+                        certrequests = @(
+                            [pscustomobject]@{
+                                Enabled                 = $true
+                                CN                      = 'example.com'
+                                ValidationMethod        = 'http'
+                                CsVipName               = @('cs_example_http')
+                                CertDir                 = $dir
+                                CurrentCertIsProduction = $true
+                            },
+                            [pscustomobject]@{
+                                Enabled          = $false
+                                CN               = 'other.example.com'
+                                ValidationMethod = 'http'
+                                CsVipName        = @('cs_example_http')
+                                CertDir          = $dir
+                            }
+                        )
+                    }
+                    $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+                    Mock Import-Module {} -ParameterFilter { $Name -eq 'Posh-ACME' }
+                    Mock Set-NSACMEPoshACMEServer {}
+                    Mock Get-PAServer { [pscustomobject]@{ renewalInfo = 'https://example.com/acme/renewal-info'; DisableARI = $false } }
+                    Mock Connect-NSNode { [pscustomobject]@{ IsHA = $false; IsPrimary = $true } }
+                    Mock Test-NSACMECertificateRenewalRequired {
+                        # Stands in for an edit landing while the run is in progress.
+                        $onDisk = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+                        $onDisk.certrequests[1].Enabled = $true
+                        $onDisk | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+                        [pscustomobject]@{
+                            ShouldRenew    = $false
+                            Reason         = 'unit test skip'
+                            Summary        = 'unit test skip'
+                            CertExpires    = $null
+                            RenewAfter     = $null
+                            Source         = 'unit'
+                            Strategy       = 'unit test'
+                            ExpireDays     = $null
+                            RenewAfterDays = $null
+                        }
+                    }
+
+                    Request-NSACMECertificate `
+                        -ConfigFile $configPath `
+                        -AutoRun `
+                        -Production `
+                        -SkipCertificateCheck `
+                        -NoConsoleOutput | Out-Null
+
+                    $saved = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+                    $saved.certrequests[1].Enabled | Should -BeTrue
+                    $saved.certrequests[0].RenewalSource | Should -Be 'unit'
+                    # Retired in favour of LastIssuedAcmeServer.
+                    $saved.certrequests[0].PSObject.Properties.Name | Should -Not -Contain 'CurrentCertIsProduction'
+                    Test-Path -LiteralPath "$configPath.bak" | Should -BeTrue
+                    Test-Path -LiteralPath "$configPath.tmp" | Should -BeFalse
                 } finally {
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                 }

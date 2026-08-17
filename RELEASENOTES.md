@@ -1,5 +1,29 @@
 ﻿# Release Notes
 
+## v2026.817.1545
+
+### New
+- NEW: A request is renewed when it no longer matches the certificate it last produced: added or removed SANs, a changed key length, or a move between staging and production. Tracked in the JSON config with `LastIssuedSerial`, `LastIssuedDomains`, `LastIssuedAcmeServer` and `LastIssuedKeyLength`, written only after a successful deploy and only trusted while the serial still matches the deployed certkey, so a first run after upgrading renews nothing on this basis
+- NEW: A staging certificate found on the appliance during a production run is replaced, even when it is still inside its validity window
+- NEW: A certkey the NetScaler does not report as `Valid`, or one issued to a different common name than the request, is replaced
+
+### Fixed
+- FIX: The renewal decision now treats the certificate installed on the NetScaler as the primary source. Local Posh-ACME state is a per-machine cache, so a stale order left by another machine or an older ACME account could claim a certificate had expired while the appliance was serving a valid one, renewing certificates that did not need it. Provider renewal information such as ARI can still move renewal earlier, but only when the ACME order describes the certificate that is actually installed
+- FIX: The NetScaler certkey renewal source never worked. The sslcertkey validity fields were read under names NITRO does not use, and the NITRO date format (`Jul 16 18:51:18 2020 GMT`, including a space padded day) could not be parsed. `daystoexpiration` alone is now enough to establish expiry
+- FIX: `CertExpires` and `RenewAfter` were written as local time carrying a literal `Z`, so every run reparsed them as UTC and shifted the stored values by the local offset. They are now stored as true UTC and survive any number of runs unchanged
+- FIX: Renewal metadata is no longer written from the pre-flight decision. Values describing an issued certificate are written after a successful deploy, so a failed renewal can no longer replace accurate dates with a guess taken from whichever source the decision happened to use
+- FIX: `ForceCertRenew` set on a request in a JSON config is reset after the certificate is successfully deployed. It previously persisted and renewed the same certificate on every subsequent run. The reset happens after the deploy, not after issuance, so a failed NetScaler update still retries next run
+- FIX: The config file is saved by merging into the file as it stands rather than overwriting it with the copy loaded at run start. Only fields the run owns are replaced, and only on requests it processed, so an edit made while a run is in progress is no longer discarded. The write goes through a temporary file and keeps the previous version as `<config>.bak`
+
+### Improved
+- IMPROVED: Disabled certificate requests are logged by name instead of only counted, so a request excluded by `Enabled: false` is visible in the log
+- IMPROVED: The certkey renewal source logs status, validity, serial and issuer
+- IMPROVED: `CurrentCertIsProduction` is retired and removed from a request when it is next saved. `LastIssuedAcmeServer` carries the same information
+- IMPROVED: Test coverage added for the NITRO date format, the deployed certificate decision path, request definition drift, first run after upgrade, UTC round tripping, and the config merge and backup
+
+### Known Issues
+- None at the moment
+
 ## v2026.817.1230
 
 ### New
