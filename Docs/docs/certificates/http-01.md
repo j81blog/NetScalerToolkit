@@ -34,7 +34,7 @@ Request-NSACMECertificate @requestParams
 8. Uploads/reuses chain certkeys and links the chain.
 9. Cleans temporary validation bindings and objects.
 
-Repeated runs skip the request while the existing certificate is still valid and outside its renewal window. Add `ForceCertRenew = $true` only when an immediate replacement is intentional.
+Repeated runs skip the request while the existing certificate is still valid and outside its renewal window. Add `ForceCertRenew = $true` only when an immediate replacement is intentional. In a JSON config the flag is one shot and resets itself once the certificate deploys.
 
 ## Requirements
 

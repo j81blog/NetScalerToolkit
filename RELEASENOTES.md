@@ -1,6 +1,6 @@
 # Release Notes
 
-## v2026.817.1715
+## v2026.817.1745
 
 ### New
 - NEW: A request is renewed when it no longer matches the certificate it last produced: added or removed SANs, a changed key length, or a move between staging and production. Tracked in the JSON config with `LastIssuedSerial`, `LastIssuedDomains`, `LastIssuedAcmeServer` and `LastIssuedKeyLength`, written only after a successful deploy and only trusted while the serial still matches the deployed certkey, so a first run after upgrading renews nothing on this basis
@@ -25,7 +25,8 @@
 - IMPROVED: Disabled certificate requests are logged by name instead of only counted, so a request excluded by `Enabled: false` is visible in the log
 - IMPROVED: The certkey renewal source logs status, validity, serial and issuer
 - IMPROVED: `CurrentCertIsProduction` is retired and removed from a request when it is next saved. `LastIssuedAcmeServer` carries the same information
-- IMPROVED: Test coverage added for the NITRO date format, the deployed certificate decision path, request definition drift, first run after upgrade, UTC round tripping, and the config merge and backup
+- IMPROVED: Test coverage added for the NITRO date format, the deployed certificate decision path, request definition drift, first run after upgrade, UTC round tripping, the config merge and backup, and the ACME account being selected before order metadata is read
+- IMPROVED: Documentation updated for the renewal decision order, the one shot `ForceCertRenew` flag, the `LastIssued*` config fields, and the merging config save
 
 ### Known Issues
 - None at the moment

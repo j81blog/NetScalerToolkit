@@ -136,6 +136,10 @@ Renewal is skipped for certificates that are still outside their renewal window
 unless -ForceCertRenew is used, and one ACME account is reused for all requests
 that share a contact address and account key length.
 
+The certificate installed on the NetScaler decides whether a replacement is needed.
+Local Posh-ACME state is a per-machine cache and is not authoritative on its own,
+so runs spread across several machines reach the same decision.
+
 Besides requesting certificates, the function also creates the NetScaler command
 policies and API user used for automation, cleans up NetScaler validation
 objects and test certificates, and removes expired certificates from disk.
@@ -1346,6 +1350,10 @@ Accept wildcard characters: False
 
 ### -ForceCertRenew
 Renews certificates even when they are still outside their renewal window.
+The switch itself is never written to a config file.
+A ForceCertRenew flag set on a request inside a JSON config is one shot, and is
+reset once that certificate deploys successfully, so it does not renew the same
+certificate on every later run.
 
 ```yaml
 Type: SwitchParameter

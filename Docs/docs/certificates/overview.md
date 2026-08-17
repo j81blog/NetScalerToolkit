@@ -41,7 +41,7 @@ HTTP-01 is the preferred validation method in most examples because it keeps the
 
 ## Renewal Decisions
 
-Scheduled and repeated requests do not rely only on a static `RenewAfter` value. NetScalerToolkit prefers ACME order renewal metadata from Posh-ACME, uses certificate validity as a dynamic fallback, and skips valid certificates that are outside their renewal window. See [Renewal Behavior](renewal-behavior.md).
+Scheduled and repeated requests do not rely only on a static `RenewAfter` value. NetScalerToolkit decides from the certificate installed on the NetScaler, calculating the renewal window from its actual lifetime, and skips valid certificates that are outside that window. ACME order metadata from Posh-ACME can move renewal earlier when it describes the installed certificate, and is used as a fallback when nothing is deployed. See [Renewal Behavior](renewal-behavior.md).
 
 ## Legacy Script Compatibility
 
