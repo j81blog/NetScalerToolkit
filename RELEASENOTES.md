@@ -1,11 +1,12 @@
 # Release Notes
 
-## v2026.817.1745
+## v2026.817.2045
 
 ### New
 - NEW: A request is renewed when it no longer matches the certificate it last produced: added or removed SANs, a changed key length, or a move between staging and production. Tracked in the JSON config with `LastIssuedSerial`, `LastIssuedDomains`, `LastIssuedAcmeServer` and `LastIssuedKeyLength`, written only after a successful deploy and only trusted while the serial still matches the deployed certkey, so a first run after upgrading renews nothing on this basis
 - NEW: A staging certificate found on the appliance during a production run is replaced, even when it is still inside its validity window
 - NEW: A certkey the NetScaler does not report as `Valid`, or one issued to a different common name than the request, is replaced
+- NEW: `Request-NSACMECertificate` supports `-WhatIf` and `-Confirm`. A `-WhatIf` run connects, reads the installed certkeys and ACME metadata, and makes the real renewal decision for every request, then stops before requesting anything from the provider, changing anything on the NetScaler, or writing the config. The log is still written, so the decision and its reason are recorded for every request. It is not a simulation of the ACME exchange, which would publish challenges the provider cannot validate and report failures that mean nothing
 
 ### Fixed
 - FIX: The renewal decision now treats the certificate installed on the NetScaler as the primary source. Local Posh-ACME state is a per-machine cache, so a stale order left by another machine or an older ACME account could claim a certificate had expired while the appliance was serving a valid one, renewing certificates that did not need it. Provider renewal information such as ARI can still move renewal earlier, but only when the ACME order describes the certificate that is actually installed

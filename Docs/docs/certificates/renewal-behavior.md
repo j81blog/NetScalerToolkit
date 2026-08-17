@@ -46,6 +46,28 @@ j81.nl skipped. Outside renewal window. Use -ForceCertRenew to renew now.
 
 This can happen with direct splatted requests and with JSON config runs. A direct splatted request does not need to include `RenewAfter`; the module can use the existing ACME order or NetScaler certkey when available.
 
+## Previewing a Run
+
+`-WhatIf` answers "what would this run do" without changing anything:
+
+```powershell
+Request-NSACMECertificate -ConfigFile C:\Certs\config.json -AutoRun -Production -WhatIf
+```
+
+The run connects, reads the installed certkeys and the ACME metadata, and makes the real renewal decision for every request. It then stops at the point it would commit to a change:
+
+```text
+  Renewal check             vpn.example.com    ......... renewal required [  OK  ]
+What if: Performing the operation "Request a new certificate and deploy it to the NetScaler" on target "vpn.example.com".
+  Renewal action            vpn.example.com    ............ not performed [ SKIP ]
+```
+
+Nothing is requested from the ACME provider, no NetScaler object is created or changed, and the config file is not written. The log is still written, so the decision and its reason are recorded for every request exactly as in a real run.
+
+This is deliberately not a simulation of the whole ACME exchange. Publishing a challenge the CA cannot validate and then reporting the resulting failures would say nothing useful, so the preview stops once the decision is made.
+
+`-Confirm` uses the same point to prompt per certificate, which is useful for a one-off run over a large config where only some requests should proceed.
+
 ## Debug Decision Details
 
 Use `-LogLevel Debug` when you need to see why a request was renewed or skipped. The console shows the final decision source and dates:

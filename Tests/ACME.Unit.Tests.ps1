@@ -573,6 +573,79 @@ Describe 'ACME helper functions' {
                 }
             }
 
+            It 'reports intent and changes nothing under WhatIf' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    $configPath = Join-Path $dir 'GenLe-Config.json'
+                    $orderMarker = Join-Path $dir 'order-created.txt'
+                    $config = [pscustomobject]@{
+                        settings     = [pscustomobject]@{
+                            ManagementURL         = 'https://ns-01.domain.local'
+                            ADCCredentialUsername = 'nsroot'
+                            ADCCredentialPassword = ConvertTo-NSACMECertificateLegacySecret -Object 'Sup3rS3cretP@ssw0rd'
+                            LogFile               = Join-Path $dir 'run.log'
+                        }
+                        certrequests = @(
+                            [pscustomobject]@{
+                                Enabled             = $true
+                                CN                  = 'example.com'
+                                ValidationMethod    = 'http'
+                                CsVipName           = @('cs_example_http')
+                                CertDir             = $dir
+                                EmailAddress        = 'hostmaster@example.com'
+                                KeyLength           = '2048'
+                                CertKeyNameToUpdate = 'example-cert'
+                            }
+                        )
+                    }
+                    $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath -Encoding UTF8
+                    $configBefore = Get-Content -LiteralPath $configPath -Raw
+
+                    Mock Import-Module {} -ParameterFilter { $Name -eq 'Posh-ACME' }
+                    Mock Set-NSACMEPoshACMEServer {}
+                    Mock Connect-NSNode { [pscustomobject]@{ IsHA = $false; IsPrimary = $true } }
+                    # Expired certkey, so the decision is to renew and WhatIf has something to stop.
+                    Mock Invoke-NSGetSSLCertKey {
+                        [pscustomobject]@{
+                            certkey             = 'example-cert'
+                            subject             = 'CN=example.com'
+                            status              = 'Valid'
+                            clientcertnotbefore = '{0} GMT' -f (Get-Date).AddDays(-120).ToUniversalTime().ToString('MMM d HH:mm:ss yyyy', [System.Globalization.CultureInfo]::InvariantCulture)
+                            clientcertnotafter  = '{0} GMT' -f (Get-Date).AddDays(-5).ToUniversalTime().ToString('MMM d HH:mm:ss yyyy', [System.Globalization.CultureInfo]::InvariantCulture)
+                        }
+                    }
+                    function Get-PAServer { param($DirectoryUrl) [pscustomobject]@{ renewalInfo = $null; DisableARI = $true } }
+                    function Get-PACertificate { param($MainDomain) $null }
+                    function Get-PAAccount { param($ID, $Contact, $KeyLength, $Status, [switch]$List, [switch]$Refresh) [pscustomobject]@{ ID = '12345' } }
+                    function Set-PAAccount { param($ID, [switch]$Force) }
+                    function Get-PAOrder { param($MainDomain, [switch]$Refresh) $null }
+                    function New-PAOrder { param($Domain, $KeyLength, $FriendlyName, $PfxPassSecure, [switch]$AlwaysNewKey, [switch]$Force) Add-Content -LiteralPath $orderMarker -Value 'created' }
+
+                    $result = Request-NSACMECertificate `
+                        -ConfigFile $configPath `
+                        -AutoRun `
+                        -Production `
+                        -SkipCertificateCheck `
+                        -NoConsoleOutput `
+                        -WhatIf
+
+                    @($result).Count | Should -Be 1
+                    $result.Status | Should -Be 'WhatIf'
+                    $result.CN | Should -Be 'example.com'
+                    # No ACME order placed with the CA, and the config left untouched.
+                    Test-Path -LiteralPath $orderMarker | Should -BeFalse
+                    Get-Content -LiteralPath $configPath -Raw | Should -Be $configBefore
+                    Test-Path -LiteralPath "$configPath.bak" | Should -BeFalse
+                    # The log is diagnostics, not a state change, so a WhatIf run still records it.
+                    $logPath = Join-Path $dir 'run.log'
+                    Test-Path -LiteralPath $logPath | Should -BeTrue
+                    (Get-Content -LiteralPath $logPath -Raw) | Should -Match 'would be renewed'
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
             It 'selects the ACME account before reading order metadata' {
                 # Posh-ACME orders are account scoped. Reading them before the account is selected
                 # made renewal decisions depend on whichever account was last active.
