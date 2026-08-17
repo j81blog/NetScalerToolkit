@@ -573,6 +573,74 @@ Describe 'ACME helper functions' {
                 }
             }
 
+            It 'selects the ACME account before reading order metadata' {
+                # Posh-ACME orders are account scoped. Reading them before the account is selected
+                # made renewal decisions depend on whichever account was last active.
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    $configPath = Join-Path $dir 'GenLe-Config.json'
+                    $orderPath = Join-Path $dir 'callorder.txt'
+                    $config = [pscustomobject]@{
+                        settings     = [pscustomobject]@{
+                            ManagementURL         = 'https://ns-01.domain.local'
+                            ADCCredentialUsername = 'nsroot'
+                            ADCCredentialPassword = ConvertTo-NSACMECertificateLegacySecret -Object 'Sup3rS3cretP@ssw0rd'
+                            LogFile               = Join-Path $dir 'run.log'
+                        }
+                        certrequests = @(
+                            [pscustomobject]@{
+                                Enabled          = $true
+                                CN               = 'example.com'
+                                ValidationMethod = 'http'
+                                CsVipName        = @('cs_example_http')
+                                CertDir             = $dir
+                                EmailAddress        = 'hostmaster@example.com'
+                                KeyLength           = '2048'
+                                CertKeyNameToUpdate = 'example-cert'
+                            }
+                        )
+                    }
+                    $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+                    Mock Import-Module {} -ParameterFilter { $Name -eq 'Posh-ACME' }
+                    Mock Set-NSACMEPoshACMEServer {}
+                    Mock Connect-NSNode { [pscustomobject]@{ IsHA = $false; IsPrimary = $true } }
+                    # Certkey outside its renewal window, so the run stops after the renewal check.
+                    Mock Invoke-NSGetSSLCertKey {
+                        [pscustomobject]@{
+                            certkey             = 'example-cert'
+                            subject             = 'CN=example.com'
+                            status              = 'Valid'
+                            serial              = 'SERIAL-1'
+                            clientcertnotbefore = '{0} GMT' -f (Get-Date).AddDays(-5).ToUniversalTime().ToString('MMM d HH:mm:ss yyyy', [System.Globalization.CultureInfo]::InvariantCulture)
+                            clientcertnotafter  = '{0} GMT' -f (Get-Date).AddDays(85).ToUniversalTime().ToString('MMM d HH:mm:ss yyyy', [System.Globalization.CultureInfo]::InvariantCulture)
+                        }
+                    }
+                    # Shadow functions rather than mocks: Posh-ACME parameter validation calls
+                    # module private helpers that are unavailable to Mock.
+                    function Get-PAServer { param($DirectoryUrl) [pscustomobject]@{ renewalInfo = $null; DisableARI = $true } }
+                    function Get-PACertificate { param($MainDomain) $null }
+                    function Get-PAAccount { param($ID, $Contact, $KeyLength, $Status, [switch]$List, [switch]$Refresh) [pscustomobject]@{ ID = '12345'; contact = @('mailto:hostmaster@example.com') } }
+                    function Set-PAAccount { param($ID, [switch]$Force) Add-Content -LiteralPath $orderPath -Value 'Set-PAAccount' }
+                    function Get-PAOrder { param($MainDomain, [switch]$Refresh) Add-Content -LiteralPath $orderPath -Value 'Get-PAOrder'; $null }
+
+                    Request-NSACMECertificate `
+                        -ConfigFile $configPath `
+                        -AutoRun `
+                        -Production `
+                        -SkipCertificateCheck `
+                        -NoConsoleOutput | Out-Null
+
+                    $calls = @(Get-Content -LiteralPath $orderPath)
+                    $calls | Should -Contain 'Set-PAAccount'
+                    $calls | Should -Contain 'Get-PAOrder'
+                    $calls.IndexOf('Set-PAAccount') | Should -BeLessThan $calls.IndexOf('Get-PAOrder')
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
             It 'merges into the config as it stands and keeps a backup, so an edit made during the run survives' {
                 $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
                 New-Item -ItemType Directory -Path $dir | Out-Null

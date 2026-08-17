@@ -1,6 +1,6 @@
-﻿# Release Notes
+# Release Notes
 
-## v2026.817.1645
+## v2026.817.1715
 
 ### New
 - NEW: A request is renewed when it no longer matches the certificate it last produced: added or removed SANs, a changed key length, or a move between staging and production. Tracked in the JSON config with `LastIssuedSerial`, `LastIssuedDomains`, `LastIssuedAcmeServer` and `LastIssuedKeyLength`, written only after a successful deploy and only trusted while the serial still matches the deployed certkey, so a first run after upgrading renews nothing on this basis
@@ -13,12 +13,15 @@
 - FIX: `CertExpires` and `RenewAfter` were written as local time carrying a literal `Z`, so every run reparsed them as UTC and shifted the stored values by the local offset. They are now stored as true UTC and survive any number of runs unchanged
 - FIX: Renewal metadata is no longer written from the pre-flight decision. Values describing an issued certificate are written after a successful deploy, so a failed renewal can no longer replace accurate dates with a guess taken from whichever source the decision happened to use
 - FIX: `ForceCertRenew` set on a request in a JSON config is reset after the certificate is successfully deployed. It previously persisted and renewed the same certificate on every subsequent run. The reset happens after the deploy, not after issuance, so a failed NetScaler update still retries next run
+- FIX: Posh-ACME orders are scoped to the current ACME account, but the renewal check read them before the account was selected. Which orders were visible therefore depended on whichever account happened to be active and changed partway through a run, so the same request could be skipped in one run and renewed in the next on identical input. The account is now selected before the order metadata is read, and is never registered for a request that only gets checked
+- FIX: `RenewalSource` and `RenewalStrategy` were overwritten with a fixed `ACME order` value after every successful deploy, so a forced or definition driven renewal was recorded as an ACME order decision. They now keep what the renewal check decided
 - FIX: The config file is saved by merging into the file as it stands rather than overwriting it with the copy loaded at run start. Only fields the run owns are replaced, and only on requests it processed, so an edit made while a run is in progress is no longer discarded. The write goes through a temporary file and keeps the previous version as `<config>.bak`
 
 ### Improved
-- IMPROVED: The console header reports the running NetScalerToolkit and ConsoleStatus versions. Which build actually ran is the first thing needed when a run behaves unexpectedly, and it was previously only in the log file
+- IMPROVED: The console header reports the running NetScalerToolkit version. Which build actually ran is the first thing needed when a run behaves unexpectedly, and it was previously only in the log file
 - IMPROVED: The log header reports NetScalerToolkit, Posh-ACME and ConsoleStatus through one resolver. It distinguishes a loaded version from an installed one, since the header is written before those two modules are imported, and previously reported the highest installed Posh-ACME version as though it were the one in use
 - IMPROVED: A `Loaded ConsoleStatus v<version>` line matches the existing Posh-ACME one, and a warning is logged when ConsoleStatus is unavailable and console output falls back to plain text
+- IMPROVED: The Setup section reports `Load ConsoleStatus` alongside `Load Posh-ACME`, so both dependencies are shown the same way. The header line above it names the NetScalerToolkit version
 - IMPROVED: Disabled certificate requests are logged by name instead of only counted, so a request excluded by `Enabled: false` is visible in the log
 - IMPROVED: The certkey renewal source logs status, validity, serial and issuer
 - IMPROVED: `CurrentCertIsProduction` is retired and removed from a request when it is next saved. `LastIssuedAcmeServer` carries the same information
