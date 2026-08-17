@@ -1,6 +1,6 @@
 ﻿# Release Notes
 
-## v2026.817.1630
+## v2026.817.1645
 
 ### New
 - NEW: A request is renewed when it no longer matches the certificate it last produced: added or removed SANs, a changed key length, or a move between staging and production. Tracked in the JSON config with `LastIssuedSerial`, `LastIssuedDomains`, `LastIssuedAcmeServer` and `LastIssuedKeyLength`, written only after a successful deploy and only trusted while the serial still matches the deployed certkey, so a first run after upgrading renews nothing on this basis
@@ -17,7 +17,8 @@
 
 ### Improved
 - IMPROVED: The console header reports the running NetScalerToolkit and ConsoleStatus versions. Which build actually ran is the first thing needed when a run behaves unexpectedly, and it was previously only in the log file
-- IMPROVED: The log header reports the ConsoleStatus version, and reports the Posh-ACME version that was loaded rather than the highest version installed. The two differ when the run installs a newer Posh-ACME before importing it
+- IMPROVED: The log header reports NetScalerToolkit, Posh-ACME and ConsoleStatus through one resolver. It distinguishes a loaded version from an installed one, since the header is written before those two modules are imported, and previously reported the highest installed Posh-ACME version as though it were the one in use
+- IMPROVED: A `Loaded ConsoleStatus v<version>` line matches the existing Posh-ACME one, and a warning is logged when ConsoleStatus is unavailable and console output falls back to plain text
 - IMPROVED: Disabled certificate requests are logged by name instead of only counted, so a request excluded by `Enabled: false` is visible in the log
 - IMPROVED: The certkey renewal source logs status, validity, serial and issuer
 - IMPROVED: `CurrentCertIsProduction` is retired and removed from a request when it is next saved. `LastIssuedAcmeServer` carries the same information

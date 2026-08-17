@@ -177,6 +177,48 @@ Describe 'ACME helper functions' {
             }
         }
 
+        Context 'module version reporting' {
+            It 'reports a loaded module by version alone' {
+                $result = Get-NSACMECertificateModuleVersion -Name 'NetScalerToolkit'
+
+                $result.Loaded | Should -BeTrue
+                $result.Version | Should -Not -BeNullOrEmpty
+                $result.Display | Should -Be ([string]$result.Version)
+            }
+
+            It 'marks an installed but unloaded module instead of presenting it as in use' {
+                # The log header is written before Posh-ACME and ConsoleStatus are imported, so an
+                # installed version must not read as the running one.
+                Mock Get-Module { } -ParameterFilter { -not $ListAvailable }
+                Mock Get-Module { [pscustomobject]@{ Name = 'Posh-ACME'; Version = [version]'4.31.0' } } -ParameterFilter { $ListAvailable }
+
+                $result = Get-NSACMECertificateModuleVersion -Name 'Posh-ACME'
+
+                $result.Loaded | Should -BeFalse
+                $result.Version | Should -Be ([version]'4.31.0')
+                $result.Display | Should -Be '4.31.0 (installed, not loaded yet)'
+            }
+
+            It 'reports a module that is not installed at all' {
+                $result = Get-NSACMECertificateModuleVersion -Name 'NetScalerToolkitNoSuchModule'
+
+                $result.Loaded | Should -BeFalse
+                $result.Version | Should -BeNullOrEmpty
+                $result.Display | Should -Be 'not installed'
+            }
+
+            It 'resolves Posh-ACME and ConsoleStatus through the same code path' {
+                $poshACME = Get-NSACMECertificateModuleVersion -Name 'Posh-ACME'
+                $consoleStatus = Get-NSACMECertificateModuleVersion -Name 'ConsoleStatus'
+
+                foreach ($result in @($poshACME, $consoleStatus)) {
+                    $result.PSObject.Properties.Name | Should -Contain 'Loaded'
+                    $result.PSObject.Properties.Name | Should -Contain 'Display'
+                    $result.Display | Should -Not -BeNullOrEmpty
+                }
+            }
+        }
+
         Context 'deployed NetScaler certificate as the primary renewal source' {
             BeforeAll {
                 function New-TestNitroDate {
