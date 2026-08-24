@@ -289,24 +289,24 @@
         $recordedDomains = [string](Get-NSACMECertificateObjectValue -InputObject $Request -Name @('LastIssuedDomains'))
         $currentDomains = (@($Domains | Where-Object { $_ } | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } | Sort-Object -Unique) -join ',')
         if ($recordedDomains -and $currentDomains -and $recordedDomains -ne $currentDomains) {
-            return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "Requested domains changed since the deployed certificate was issued ('$recordedDomains' -> '$currentDomains')." -Summary 'Requested domains changed.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'request definition' -Strategy 'Deployed certificate no longer matches the request.'
+            return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason @('Requested domains changed since the deployed certificate was issued.', "Was '$recordedDomains', now '$currentDomains'.") -Summary 'Requested domains changed.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'request definition' -Strategy 'Deployed certificate no longer matches the request.'
         }
 
         $recordedServer = [string](Get-NSACMECertificateObjectValue -InputObject $Request -Name @('LastIssuedAcmeServer'))
         if ($recordedServer -and $AcmeServer -and $recordedServer -ne $AcmeServer) {
-            return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "ACME server changed since the deployed certificate was issued ('$recordedServer' -> '$AcmeServer')." -Summary 'ACME server changed.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'request definition' -Strategy 'Deployed certificate no longer matches the request.'
+            return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason @('The ACME server changed since the deployed certificate was issued.', "Was '$recordedServer', now '$AcmeServer'.") -Summary 'ACME server changed.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'request definition' -Strategy 'Deployed certificate no longer matches the request.'
         }
 
         $recordedKeyLength = [string](Get-NSACMECertificateObjectValue -InputObject $Request -Name @('LastIssuedKeyLength'))
         $currentKeyLength = [string](Get-NSACMECertificateObjectValue -InputObject $Request -Name @('KeyLength'))
         if ($recordedKeyLength -and $currentKeyLength -and $recordedKeyLength -ne $currentKeyLength) {
-            return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "Key length changed since the deployed certificate was issued ('$recordedKeyLength' -> '$currentKeyLength')." -Summary 'Key length changed.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'request definition' -Strategy 'Deployed certificate no longer matches the request.'
+            return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason @('The requested key length changed since the deployed certificate was issued.', "Was '$recordedKeyLength', now '$currentKeyLength'.") -Summary 'Key length changed.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'request definition' -Strategy 'Deployed certificate no longer matches the request.'
         }
     }
 
     # A staging certificate can be inside its validity window and still be wrong for a production run.
     if ($IsProduction -and $deployedIssuer -match 'Fake LE|STAGING|Lets Encrypt.*Staging|Let''s Encrypt.*Staging') {
-        return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "The deployed certificate was issued by a staging authority ('$deployedIssuer') and this is a production run." -Summary 'Staging certificate on a production run.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'NetScaler certificate' -Strategy 'Deployed certificate no longer matches the request.'
+        return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason @('The deployed certificate was issued by a staging authority and this is a production run.', "Issuer: $deployedIssuer.") -Summary 'Staging certificate on a production run.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'NetScaler certificate' -Strategy 'Deployed certificate no longer matches the request.'
     }
 
     # Only acted on when a CN can be read from the subject, so a SAN-only certificate is left alone.
@@ -314,7 +314,7 @@
     if ($deployedSubject -match 'CN=(?<CommonName>[^,/]+)') {
         $deployedCommonName = $Matches.CommonName.Trim()
         if ($Request.CN -and $deployedCommonName -ne [string]$Request.CN) {
-            return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "The deployed certificate is issued to '$deployedCommonName' but the request is for '$($Request.CN)'." -Summary 'Deployed certificate is for another name.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'NetScaler certificate' -Strategy 'Deployed certificate no longer matches the request.'
+            return New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason @('The deployed certificate is issued to a different name than the request.', "Certificate '$deployedCommonName', request '$($Request.CN)'.") -Summary 'Deployed certificate is for another name.' -CertExpires $deployedValidity.NotAfter -RenewAfter $null -Source 'NetScaler certificate' -Strategy 'Deployed certificate no longer matches the request.'
         }
     }
 
@@ -377,8 +377,8 @@
 # SIG # Begin signature block
 # MII6AgYJKoZIhvcNAQcCoII58zCCOe8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDVQ5LhQ0RDbbTg
-# 5duh4bWiJrAbSOyUtVAuKdYpzhErA6CCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUD9z1290jb9Ls
+# kiTUfBka8AqvbGyQKiTDkxL9jEubVaCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
 # lUgTecgRwIeZMA0GCSqGSIb3DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
 # ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVu
 # dGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAy
@@ -564,20 +564,20 @@
 # CzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzAp
 # BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDMCEzMABTtU
 # QaiXHbdEqJcAAAAFO1QwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
-# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgQAwt
-# MSKR6txCF4vg6m3qLWbsN0BClH5TAQFXBVjPX1cwDQYJKoZIhvcNAQEBBQAEggGA
-# KJdmA/JXwIJXapuH00OlxTgmOd2PAZFeAS7B4dpJsvYM/8YKA5wZhm6MNNQRQVdc
-# ojL5Rz2a0SRulwAQD8jKOk73wjRzrmw1iY1p6TFyJi+Ae3hllb+FsLQTWQoUnj2f
-# cirz/WuwdoCwkY/1KV0rUYeVtrzrv0DzJKjhdXQAauZTOAcrXm2swTmu2F+ym2hy
-# HbwsLDN/Y8Z3APu9Aoul7Kw+cKLNIjL0aUdNqc20vEH5WUBwLMKScs2cr4JIZ3ED
-# hhVHVQ6M9mGV3BjKOeEdSmExnNloegXpRwSyg0fUXKGBkMFv+0uX4a6hrl0/taKX
-# y2tD8qLyGz7g2k3aGLv0kYr6WmnR5exjoJQFGxiuTFotGpI/m+Sn9+t84wTFvvNY
-# aFEE8vRpZ9q7OaYiB7MoEMx4H8eN7s5N6ITC+hECvy+j7NR7xOcFgD5rAVhf2XY6
-# RoSsAESgUgya77t6JbaCtaMPg48mK64kTQpylpgW6Me6m7/Y692y0bBF3/IfLXy+
+# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgToWy
+# 5D5HObEHE+VX+h/wpNCYjgoyyn74m9W6x48MP2UwDQYJKoZIhvcNAQEBBQAEggGA
+# J/1FBlO1CNINSEUz5KGiadHtYBFlT9fu6dXfS+VieQQvj85pEMWwdKsXKrVIQUeW
+# dsNQdrQCsDF3HjcpwoMZjM1lT1cXu/KMIZKDLyVXxhpRebw/gAqHdoVQQ1fn2PHa
+# hx+x+2TqjELP0qHGjw01q5kXS67ocO27TyWlFL8xJ4b5WKBJ3lDAKrjiaTQbMMWg
+# Rzoaajm6a3u3oCIRZVgBeV5oBIrLCApXUw9xAefCbzEsWF9dQlVfFHU98n99ct1D
+# ytCwdivE9Fjuh1k5c99uwS2b6MbZzlyP0IfgJiSGVtJrS36zB397sX3Xt/C73UKn
+# r00lsUMYVCimH9DG2K9D2VW70Lpunx9odfi7ZBs/XYSoK17N9+LEkplwlUebhzvK
+# +dUlERSyT2CtA2ULHnP7BMxJLCPZhDetWj/IlEU8GQ0gftx/pRNjXcTVonud9S+E
+# 1fWEjVU+sAzFr8wZVxkUad3a9Xsyc0/5MbZ9GzNrtB9Pjq6uYUGysMqqryy5lr01
 # oYIUsjCCFK4GCisGAQQBgjcDAwExghSeMIIUmgYJKoZIhvcNAQcCoIIUizCCFIcC
 # AQMxDzANBglghkgBZQMEAgEFADCCAWoGCyqGSIb3DQEJEAEEoIIBWQSCAVUwggFR
-# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIKU60IzcSEpZ3P6OoH58
-# 6hBg6Q6fjoHOyZ88JKoboso9AgZqg90fvwAYEzIwMjYwODI0MTU0MjQ4LjY1Mlow
+# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIHjVXfCgirq7og7UkDv1
+# vkxn+nlqHLn0mENYx6ZDNuUoAgZqg90gJQAYEzIwMjYwODI0MTc1NzEwLjAwOFow
 # BIACAfSggemkgeYwgeMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xLTArBgNVBAsTJE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRl
@@ -668,21 +668,21 @@
 # b3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGltZXN0
 # YW1waW5nIENBIDIwMjACEzMAAABbSrWNQTJt3HQAAAAAAFswDQYJYIZIAWUDBAIB
 # BQCgggEtMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQx
-# IgQgHVRejcIfWwpy933h0sM0/k71ndjV9HFKVD/AByqeJy8wgd0GCyqGSIb3DQEJ
+# IgQg9mc9beA3sCWd/2+ev+McO8M8f0wIVYJmpbWyRft701wwgd0GCyqGSIb3DQEJ
 # EAIvMYHNMIHKMIHHMIGgBCAvMQNVXZ0b0xxlGw8X/3IEybObuT6a5W1d61CW+cGD
 # 7zB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
 # cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3RhbXBp
-# bmcgQ0EgMjAyMAITMwAAAFtKtY1BMm3cdAAAAAAAWzAiBCAVu5ck9x2wgI9/eDMZ
-# kkZUoAiPfBjjohe+prFgrmKKkDANBgkqhkiG9w0BAQsFAASCAgB7jHah0WOVywto
-# WNoLJuyGJ8mwrFyMjpED3d0quJUc5Yun2s9600yoBls0NjZMTQ6OwvvQokkUCaHv
-# ySM1MPfQB03XmDEtFljyco+rGM2afHF6JXShWAfjwJkK4P0QPKOv2XfQIxocZHKw
-# 6g/PVjuaiZ2b2JiZhujfjDnG4ViDyDci5ugdJwez5tDWoYuLYe4QdXsQ/YerpAJz
-# HXil0PixZf4BBc/BFRXztU095B8p80XUCl7oQKdMELviu+V7ZnkidbIyRqES8x7d
-# JHHTnNLCcOU1HdV7mCdffLwHX/MuuyzcU0eufej/6cROdic8+3BdDDhLYV2E6gEQ
-# dRHtxAbjSRxLhGZKCNghd+SyjjB6D2zIt2sRjXZhaCfVSGOGxedCo65FfkxGl/BD
-# pLuy3eSVmfBgGmbwujUO0b6FQEnwBjdxdbVd9kzyw2AglbeHjOfLDt3ZuuFYitU7
-# vi2onJecDVVqhe3wygGWEXfuVYlrvmyOcio6r1prd+0+URxf9NG7s1v6/Q/5XDJU
-# VfKvTvMsxu0PIyt6o/4OOrx3ZagtPG/Vt9gGNhEmZbUrq+icr5h61NqT22h0aa3d
-# cWL8BcJT6MJYkdlEbm+kbcPgJavKU0O2w5LxoKqGsl6G4LjQh6riiTaEFkMqMOBS
-# v243HuLPhVM1WiHF+yT2aDSmd9YY/Q==
+# bmcgQ0EgMjAyMAITMwAAAFtKtY1BMm3cdAAAAAAAWzAiBCBlRHXwUZVxwivPk9dG
+# iVcSmvge/0wT8CuN4lHY5JBEzzANBgkqhkiG9w0BAQsFAASCAgAu39ue3YxY58x4
+# Xu0t0CTK4pB1Vzb+eDWqd/RL6Vg48UpmmPtD8zpl2I6qF6v78gqKNYj65AasSl9g
+# SD7eH45b+EWQw9spIxSnBWwVykgx3FPzk+RrTQ+Tj7Fzj7wrAuMQYOTMNJW8dmsT
+# fHrvYlo7yATOSA5lHifLIJsn/5UatnTMVx4wjHYyEz5VdQYOunzHq8+7JjnjSBLy
+# 8KD6EtPZiaEHrdog5arEAnZSE8Cy4CovfsD2C7eFLIkVYnUbndImaiJZIy10easm
+# ql9bMztGw3n3IfYTAmUJkmi6lnnJGFVoZE/es4Cu3DgLYnIK8NKgVRkPMFOwhDKw
+# OLowDTp2Q8BLt0wc5S7v2AxLgpLFKC+uTL2tQA+BA8Jnqq7CWHeVwws3kIAJZW+I
+# UvDRzde2kSF/pY/rlRk4CHK0ZsZPtoq8FT8bMzOWtmkfazbi2O1Pmra9FlQAsC2m
+# MNaYtcCur2LKXrBsGUX3v/hNJHefl8KJVdo05vQmC49DaP6zPZ+YvObXCVwwaiRP
+# P2X6yCUZU5B7iI6UGse8JYhRWGWhKXiHKWjOqJxAzNYXevaAqg6qtX8NFpDUFi4x
+# mZ91glN3OYhzzpRHHBztPAuT0T9J4FImV0jzU0WwkEAxFoo0jDm7KLsTx2f3Qig2
+# eybjPRkJsJOxpCABVMQ0szaYdYmGoA==
 # SIG # End signature block
