@@ -1,6 +1,6 @@
 # Release Notes
 
-## v2026.817.2045
+## v2026.824.1015
 
 ### New
 - NEW: A request is renewed when it no longer matches the certificate it last produced: added or removed SANs, a changed key length, or a move between staging and production. Tracked in the JSON config with `LastIssuedSerial`, `LastIssuedDomains`, `LastIssuedAcmeServer` and `LastIssuedKeyLength`, written only after a successful deploy and only trusted while the serial still matches the deployed certkey, so a first run after upgrading renews nothing on this basis
@@ -23,6 +23,7 @@
 - IMPROVED: The log header reports NetScalerToolkit, Posh-ACME and ConsoleStatus through one resolver. It distinguishes a loaded version from an installed one, since the header is written before those two modules are imported, and previously reported the highest installed Posh-ACME version as though it were the one in use
 - IMPROVED: A `Loaded ConsoleStatus v<version>` line matches the existing Posh-ACME one, and a warning is logged when ConsoleStatus is unavailable and console output falls back to plain text
 - IMPROVED: The Setup section reports `Load ConsoleStatus` alongside `Load Posh-ACME`, so both dependencies are shown the same way. The header line above it names the NetScalerToolkit version
+- IMPROVED: The Results recap fits one line per certificate. The label and value columns widened from 26 and 24 to 32, so a common name such as `ows-emssapi-test.vgmdiensten.nl` is no longer truncated, the value column is left empty when the certkey is named after the common name rather than printing the same name twice, and a skipped entry shows its renew date instead of repeating the full reason that already appeared under that certificate's own section. The complete reason is still written to the log
 - IMPROVED: Disabled certificate requests are logged by name instead of only counted, so a request excluded by `Enabled: false` is visible in the log
 - IMPROVED: The certkey renewal source logs status, validity, serial and issuer
 - IMPROVED: `CurrentCertIsProduction` is retired and removed from a request when it is next saved. `LastIssuedAcmeServer` carries the same information
