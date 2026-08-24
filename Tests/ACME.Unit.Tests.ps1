@@ -1091,7 +1091,7 @@ Describe 'ACME helper functions' {
                 New-Item -ItemType Directory -Path $targetRoot | Out-Null
                 try {
                     $orderDir = Join-Path $sourceRoot '3416058976'
-                    $domainDir = Join-Path $orderDir 'topdesk-va-upgr.vgmdiensten.nl'
+                    $domainDir = Join-Path $orderDir 'portal.example.com'
                     New-Item -ItemType Directory -Path $domainDir -Force | Out-Null
                     Set-Content -LiteralPath (Join-Path $domainDir 'fullchain.pfx') -Value 'pfx' -Encoding ASCII
                     Set-Content -LiteralPath (Join-Path $domainDir 'cert.pfx') -Value 'pfx' -Encoding ASCII
@@ -1109,9 +1109,9 @@ Describe 'ACME helper functions' {
                         FullChainFile = (Join-Path $domainDir 'fullchain.cer')
                     }
 
-                    $result = Copy-NSACMECertificateArtifactsToCertDir -Certificate $certificate -CertDir $targetRoot -CommonName 'topdesk-va-upgr.vgmdiensten.nl'
+                    $result = Copy-NSACMECertificateArtifactsToCertDir -Certificate $certificate -CertDir $targetRoot -CommonName 'portal.example.com'
 
-                    $expectedDir = Join-Path $targetRoot 'LECRT-20260523-020149-topdesk-va-upgr.vgmdiensten.nl'
+                    $expectedDir = Join-Path $targetRoot 'LECRT-20260523-020149-portal.example.com'
                     (Test-Path -LiteralPath (Join-Path $expectedDir 'fullchain.pfx')) | Should -BeTrue
                     (Test-Path -LiteralPath (Join-Path $expectedDir 'cert.pfx')) | Should -BeTrue
                     (Test-Path -LiteralPath (Join-Path $expectedDir 'chain.cer')) | Should -BeTrue
@@ -1130,17 +1130,17 @@ Describe 'ACME helper functions' {
                 $certDir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
                 New-Item -ItemType Directory -Path $certDir | Out-Null
                 try {
-                    New-Item -ItemType Directory -Path (Join-Path $certDir 'LECRT-20250101-010101-topdesk-va-upgr.vgmdiensten.nl') | Out-Null
-                    New-Item -ItemType Directory -Path (Join-Path $certDir 'LECRT-20260501-010101-topdesk-va-upgr.vgmdiensten.nl') | Out-Null
-                    New-Item -ItemType Directory -Path (Join-Path $certDir 'LECRT-20250101-010101-other.vgmdiensten.nl') | Out-Null
+                    New-Item -ItemType Directory -Path (Join-Path $certDir 'LECRT-20250101-010101-portal.example.com') | Out-Null
+                    New-Item -ItemType Directory -Path (Join-Path $certDir 'LECRT-20260501-010101-portal.example.com') | Out-Null
+                    New-Item -ItemType Directory -Path (Join-Path $certDir 'LECRT-20250101-010101-other.example.com') | Out-Null
 
                     Mock Get-Date { [datetime]'2026-06-08T15:00:00' }
-                    $result = Remove-NSACMECertificateExpiredDiskCertificate -CertDir $certDir -Days 100 -CN 'topdesk-va-upgr.vgmdiensten.nl'
+                    $result = Remove-NSACMECertificateExpiredDiskCertificate -CertDir $certDir -Days 100 -CN 'portal.example.com'
 
                     $result.Removed | Should -Be 1
-                    (Test-Path -LiteralPath (Join-Path $certDir 'LECRT-20250101-010101-topdesk-va-upgr.vgmdiensten.nl')) | Should -BeFalse
-                    (Test-Path -LiteralPath (Join-Path $certDir 'LECRT-20260501-010101-topdesk-va-upgr.vgmdiensten.nl')) | Should -BeTrue
-                    (Test-Path -LiteralPath (Join-Path $certDir 'LECRT-20250101-010101-other.vgmdiensten.nl')) | Should -BeTrue
+                    (Test-Path -LiteralPath (Join-Path $certDir 'LECRT-20250101-010101-portal.example.com')) | Should -BeFalse
+                    (Test-Path -LiteralPath (Join-Path $certDir 'LECRT-20260501-010101-portal.example.com')) | Should -BeTrue
+                    (Test-Path -LiteralPath (Join-Path $certDir 'LECRT-20250101-010101-other.example.com')) | Should -BeTrue
                 } finally {
                     Remove-Item -LiteralPath $certDir -Recurse -Force -ErrorAction SilentlyContinue
                 }
