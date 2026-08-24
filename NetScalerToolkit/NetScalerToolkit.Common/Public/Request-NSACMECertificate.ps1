@@ -1339,7 +1339,7 @@
                 foreach ($reasonLine in @($renewalDecision.ReasonLines)) { Write-NSStatusNote -Text $reasonLine }
                 Write-NSStatusResult -Status SKIP
                 Write-NSACMECertificateLog Info 'CheckCertRenewal' "$($request.CN) skipped. $($renewalDecision.Summary)"
-                $results += [PSCustomObject]@{ CN = $request.CN; Domains = $domains; AcmeServer = $serverName; Production = [bool]$Production; ValidationMethod = $request.ValidationMethod; CertKeyName = $request.CertKeyNameToUpdate; PfxPath = $null; Thumbprint = $null; NotAfter = $renewalDecision.CertExpires; RenewAfter = $renewalDecision.RenewAfter; Status = 'Skipped'; Reason = $renewalDecision.Reason; LogFile = $script:NSACMECertificateLogFile }
+                $results += [PSCustomObject]@{ CN = $request.CN; Domains = $domains; AcmeServer = $serverName; Production = [bool]$Production; ValidationMethod = $request.ValidationMethod; CertKeyName = $request.CertKeyNameToUpdate; PfxPath = $null; Thumbprint = $null; NotAfter = $renewalDecision.CertExpires; RenewAfter = $renewalDecision.RenewAfter; Status = 'Skipped'; Reason = $renewalDecision.Reason; ReasonLines = $renewalDecision.ReasonLines; LogFile = $script:NSACMECertificateLogFile }
                 continue
             }
             Write-NSStatusResult -Status OK -Detail 'renewal required'
@@ -1352,7 +1352,7 @@
                 Write-NSStatusItem -Label 'Renewal action' -Value $request.CN
                 Write-NSStatusResult -Status SKIP -Detail 'not performed'
                 Write-NSACMECertificateLog Info 'CheckCertRenewal' "$($request.CN) would be renewed. $($renewalDecision.Reason)"
-                $results += [PSCustomObject]@{ CN = $request.CN; Domains = $domains; AcmeServer = $serverName; Production = [bool]$Production; ValidationMethod = $request.ValidationMethod; CertKeyName = $request.CertKeyNameToUpdate; PfxPath = $null; Thumbprint = $null; NotAfter = $renewalDecision.CertExpires; Status = 'WhatIf'; Reason = $renewalDecision.Reason; RenewalSource = $renewalDecision.Source; LogFile = $script:NSACMECertificateLogFile }
+                $results += [PSCustomObject]@{ CN = $request.CN; Domains = $domains; AcmeServer = $serverName; Production = [bool]$Production; ValidationMethod = $request.ValidationMethod; CertKeyName = $request.CertKeyNameToUpdate; PfxPath = $null; Thumbprint = $null; NotAfter = $renewalDecision.CertExpires; Status = 'WhatIf'; Reason = $renewalDecision.Reason; ReasonLines = $renewalDecision.ReasonLines; RenewalSource = $renewalDecision.Source; LogFile = $script:NSACMECertificateLogFile }
                 continue
             }
             if ($request.ValidationMethod -eq 'http' -and $request.EnableVipBefore) {
@@ -1770,8 +1770,8 @@
 # SIG # Begin signature block
 # MII6AgYJKoZIhvcNAQcCoII58zCCOe8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCEEJOBbq/mb5+Y
-# KbBhhJS3o4+s2ESikQzu+aqg0lDqCKCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAlIXrMQ3yi5rWH
+# F5LMbOGJmhMkcBzPIP/6YH1ioWG2yaCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
 # lUgTecgRwIeZMA0GCSqGSIb3DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
 # ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVu
 # dGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAy
@@ -1957,20 +1957,20 @@
 # CzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzAp
 # BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDMCEzMABTtU
 # QaiXHbdEqJcAAAAFO1QwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
-# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgsWnQ
-# pWOgDqORH1xQ5ViNRtWKUIGEEjaAE75+lFOpAHkwDQYJKoZIhvcNAQEBBQAEggGA
-# I9OsvPZebCidlGFDmiABSMvqJp07qQ4oh2WCEUYzy5v4Bhj9KgMaMp2aGfsRlpk1
-# 5xTizlEccR+ztQYzSYGrCnAIDHK5FGNw7s3P0YkYHDTU2PtBBOMi9Orxu7nSJKQJ
-# Pvumwj2yIuZg9qAAZaYlHSegqFvWD3u57gKS5StC+O/3Dyu7/mLkfo0g0dAmjZRc
-# /w3XP1Ommd3jnCahinrzNgi9c0JKjamzzviQnZ9uTCdYVvKMonIZRx79FV0TqUyE
-# /fSICU/5+Gec42hfXM7kTo87YxulNJgP3TPFHcX53haCK1gsAxDDgwXf1KfAMc89
-# TAcfHtSfJ2S6CnOTq8kw32nsno2nzJMoBzHUtcwAZuXvLlQL59hRuO5UIUAr1eFH
-# Y6h6OlplltwctnA+4MJlcPsZ+JXj1RIEK29aTqGFkukBog3AiGvUyt/cbBmCcMNL
-# 3lTegLDLzeMvA9k4Yu13uxxPRi74k69hs3cLCUVM1DoQX0g0BXic0JCVvmKr+SmL
+# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgbSTu
+# aQqV34q/RG66r2IfYlHpDbC5ly6Rysh3xo96zhUwDQYJKoZIhvcNAQEBBQAEggGA
+# bjZUcJnVAyeds8/LRlR7SKb4ijuJ04xSYiSFvFqpshgzBMrOs6rC1CcxHpQEJCPF
+# c97OL+3oF3fD2CHn/N0GSzQd2xjBQuoP8MPKM+94ofE1enWm+KLypIcNwB9r0m6a
+# Io+c1qIFewUTjAUFTfJVwznuQq3U1/qtwnqD7VfcIxQ4TjA2jsA+H1f2z+W/it6J
+# wonaWPEcFXhLSNrrry4Hm8dfG1ewGD0+DUTccX2SQ6Yrk6YO7yVJA0QpXNui5phE
+# 3/0S2Upf9RlXL5yFhTsuEEbd/6wSc4KaacmQPZ+teUZhzKBDpV5E2F3qt+2lijAy
+# aI93h02WhqDwIlYj80X+3SwAhvVgCzR72M00GLmoGSaJMfkw64f4kBBBHmV/XXbk
+# R+N2e5qzLy7bgbBt6k9v4gxS3qmnA+9XcbKnbKIj+DX5migiStXGXVMso/EZtOdL
+# CKpjSA/0zDjvM0JE7Bm4F96yaD2BxvIQoJUWIfzK4MEMDfibjEh+GT+zFD70l2Gd
 # oYIUsjCCFK4GCisGAQQBgjcDAwExghSeMIIUmgYJKoZIhvcNAQcCoIIUizCCFIcC
 # AQMxDzANBglghkgBZQMEAgEFADCCAWoGCyqGSIb3DQEJEAEEoIIBWQSCAVUwggFR
-# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIEwsVBliSMqGnKMR7bST
-# QvPcFfOA7idELDS/Ji2/dyV1AgZqg90fvyYYEzIwMjYwODI0MTU0MjUzLjAyMVow
+# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIOa6a0VUfxwgT03wCeC0
+# u1sdsbup+GnVPf+mKS4vBziqAgZqg90gLsAYEzIwMjYwODI0MTgxMTU2LjM3N1ow
 # BIACAfSggemkgeYwgeMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xLTArBgNVBAsTJE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRl
@@ -2061,21 +2061,21 @@
 # b3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGltZXN0
 # YW1waW5nIENBIDIwMjACEzMAAABbSrWNQTJt3HQAAAAAAFswDQYJYIZIAWUDBAIB
 # BQCgggEtMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQx
-# IgQgT4/xf3pBHbeT9t8DnXrAR1tmx8HqCyX/2PDPb8jHcqMwgd0GCyqGSIb3DQEJ
+# IgQgLJ6rdbqW00lxhYyyPMI9v/ZzHFjKVZ5KiYIWXDMGK0wwgd0GCyqGSIb3DQEJ
 # EAIvMYHNMIHKMIHHMIGgBCAvMQNVXZ0b0xxlGw8X/3IEybObuT6a5W1d61CW+cGD
 # 7zB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
 # cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3RhbXBp
-# bmcgQ0EgMjAyMAITMwAAAFtKtY1BMm3cdAAAAAAAWzAiBCAVu5ck9x2wgI9/eDMZ
-# kkZUoAiPfBjjohe+prFgrmKKkDANBgkqhkiG9w0BAQsFAASCAgA4e6dXailjdyry
-# oGBSXnG1M3llvOo6c47tMYfQ3CanCYWiQJnVegeMsvYP++sjgMIy6XM+RtA7we+i
-# fVhNPU0k1LRHRK0nyLPb0QB1us85pWDAylQGy4Fx3QwcEDkjzULv2/C4cjabZSlO
-# C1pOAbwk8KfAvoiBrOR/HoXqme2z6LuRdaRlSpyySCtFTTXWcT6chwz8FIZU2I/X
-# SeoIqPpYpW3SLpu8rpeTxDgZyjIxnIhUF/vQTJgcmA9a7GXpLIK/wM6uMsKHkINq
-# oFLDnZUw3eehwlhE8XGn+Ic2ew/r/XrUA0PTB0Rj1OZ4KV4OkhA9bbHH8CDbAHoe
-# Vm4PGYxQoqBZ2v55fGwjaUjQ8XYaPzd6PQLOWHstQOwofpSPJUwSjUR7JaV4i0q7
-# nwfyRPWXhejpaZav40hehXeIQJBJL4Vg2hbNrWvq3BElLpejHIEgQcRw0uQ1FTn7
-# eCTSAP3hzfCJ1QF+EjjwR++U3wScdk3lZ2wOwbQFrlB4D7gQC0ngeItSV1/EJyUQ
-# 2JiVzDb23JFCDNEYCsgx4vxBIcT6sWmEaWGVQhL3MGfJPqnbZJRJl3naQ3twFdkQ
-# syiK2Il3O9meT5WvvaSabSbS/EEs/sbWwnWXSP2sxALEShUGL3oI8owMuRD+fHoZ
-# 1FD38TpaE2m+HLTTum81CSHJ38/Dgw==
+# bmcgQ0EgMjAyMAITMwAAAFtKtY1BMm3cdAAAAAAAWzAiBCBlRHXwUZVxwivPk9dG
+# iVcSmvge/0wT8CuN4lHY5JBEzzANBgkqhkiG9w0BAQsFAASCAgAsloaKAymKPWhs
+# IUE4ApI8jem4liLXjQqfteRrOE3dMJ/n45oadBb/y/bcbwINw+dMYCxYelJ2BGeS
+# j1cNMln4fCpJtnjkCvWr+m8eqnZe/bnqMj0WkXrtqDHSMU838lDfD2hP9gzhspIT
+# P76mmX7g/lk84M6ORLvlZvk1WbRXXXF1KzcTxhNStS9UzuciYFuMog7pSeRqIhT2
+# k5Z2HlT4VXmvOVynynNqCG4S4LYRu6zcQoT9u8Zqq+TC3k0lzQzoWYoENsvNARYm
+# fowxDpy/FQ7ipXrmINlV641OiGWpHMohd+8P5cgg0YGZjnL5Qp8HNIIV2tghEFdv
+# DjcbRfHaxqBp775jx+hF+D+tuVvkK1IJe7r9HVJ0ulVHl4QjdqW1Ml4bRYtdKYiy
+# 5mxUahheaQj9XG1tZqXxO6K3BG/y/pmxm1E4GcldxwqB7O3uxVORXzMlyoKAx7Bj
+# wgWYx1vFKIIey5m7eGVja0xShDU0VMqfVII6zLY96oB9vF3lWZ45rX6M+Jh2lqOY
+# U/u3bOEBtIIO9kQxuMI1nX3lVF95wlW8HmaS7XA8whvdZpH4JrDoF1qF6e2DkuAs
+# 0+1MGmneWYwNa3EoIqGZwgOxaWBrO3TxMcJ6h9ZuwLYN7KXYmFMf4opJ8UVxo2WT
+# 0t9/8TrYSDvra/pprVs4vsrVvZNg9A==
 # SIG # End signature block
