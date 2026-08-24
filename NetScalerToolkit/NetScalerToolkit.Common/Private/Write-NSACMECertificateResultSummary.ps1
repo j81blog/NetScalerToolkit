@@ -58,9 +58,10 @@
             }
             'Skipped' {
                 Write-NSStatusItem -Label $result.CN -Value $itemValue
-                # One note line per sentence. The date is in there already, so no detail beside it.
-                foreach ($reasonLine in (Get-NSACMECertificateResultReasonLine -Result $result)) { Write-NSStatusNote -Text $reasonLine }
-                Write-NSStatusResult -Status SKIP -NoRecord
+                # The reason already printed under this certificate's own section, so the recap
+                # stays a single line and only names the date.
+                $skipDetail = if ($result.RenewAfter) { 'renew after {0}' -f $result.RenewAfter.ToString('yyyy-MM-dd HH:mm') } else { $result.Reason }
+                Write-NSStatusResult -Status SKIP -Detail $skipDetail -NoRecord
                 Write-NSACMECertificateLog Info 'Result' 'Certificate request skipped.'
                 Write-NSACMECertificateLog Info 'Result' ('{0,-16} {1}' -f 'Common name', $result.CN)
                 Write-NSACMECertificateLog Info 'Result' ('{0,-16} {1}' -f 'Reason', $result.Reason)
@@ -68,7 +69,6 @@
             }
             'WhatIf' {
                 Write-NSStatusItem -Label $result.CN -Value $itemValue
-                foreach ($reasonLine in (Get-NSACMECertificateResultReasonLine -Result $result)) { Write-NSStatusNote -Text $reasonLine }
                 Write-NSStatusResult -Status SKIP -Detail 'would be renewed, not performed' -NoRecord
                 Write-NSACMECertificateLog Info 'Result' 'Certificate request not performed (WhatIf).'
                 Write-NSACMECertificateLog Info 'Result' ('{0,-16} {1}' -f 'Common name', $result.CN)
@@ -98,8 +98,8 @@
 # SIG # Begin signature block
 # MII6AgYJKoZIhvcNAQcCoII58zCCOe8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCB5Egrvox+Tl4YU
-# AC557aGMNWOD2NNhCi7fEiK5GsoZyaCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDlRQAAvrasbvfF
+# AaWN5JwhwnO12pY2RwKWtvALiS9GLKCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
 # lUgTecgRwIeZMA0GCSqGSIb3DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
 # ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVu
 # dGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAy
@@ -285,20 +285,20 @@
 # CzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzAp
 # BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDMCEzMABTtU
 # QaiXHbdEqJcAAAAFO1QwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
-# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgCst0
-# 0T0RKqNk0ItmLzkHie0QaviVr3csSQUg7zVVsyowDQYJKoZIhvcNAQEBBQAEggGA
-# eog61sfDiajWre8iwKeRRPGdsLFWwInlyWrkNy55u4EbuFsvpPTFbgEvWQ4GShvC
-# 5rKzTEMZJhx1f841W8h92r76OTiuuSG1XrXvYkczv4Ry8ZZU/G5gj8k/oMEiyetc
-# ReoTsESjktZd7+9qUq911dCpfYmNN/m0nOnTLsiy6YZRIwJYw4q1SsjJX8EuY2hh
-# Bh4QfBoPd4CYTC+BchmCSnHIkIsNrUsDbworJ0jXVKMYmFKZIcIDTncqsd8gq8d9
-# BmrQ9+bkJO3Da9haYZDgCBh4iNgDRo5tG10P8xnq+rYtza6J9fnDiancCFbjpj6c
-# ig1HGpVhNF/h/KsP3u1Zl67X4S9I3Q2qUJvdK2rHaC7q9fBJaha4nxS2bes5e2BF
-# tPe0Jdwka+Yb/z7WR9ksDCuS2clTMr0TFmGEvRJwwWPZWDNJXa1Gz1+h5+u0HwM/
-# +YlmWduwX+rCu9dRaE+cB1yZA/K1M0yUFlY40whRYCr13dBBj+F+fMcbxly4Maz5
+# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgpeW2
+# qDk6RgVPaVSzuTJqDGIUAfd9LuUR4uFnMgpYCgUwDQYJKoZIhvcNAQEBBQAEggGA
+# bUnmZJvp6JSCgBvqlWoa8LFgcLiPwTSHjFEFfj5w1u9W00kdtklf3atTbN/RKjVd
+# IxdTRlFllZC7r54N+1m9EQVgDusNKHNDL92tyycDHBNYx9zvZN4Y4U7b53SJmBz9
+# 1Yr3srcNaJdDWPumjo6p+CeHX97d9QIaD7HcnYY1yPzxgDrqph63vzGRqTAYOlMx
+# WeZlkQQ7GnM1Cx4Fvtihny2w1CxwKYcE1X0lLh/z60XVSiPIzm8azZBr2M0PWU2r
+# DUiEGrDKV4rJ87EWPdBeVGAsNAC4ZkBnkzMvg6KZs4+GDtRqErE8jnI5Zs6mHcJy
+# qrzxg40Lr/pnYHn4eV9EuUuJax5jLbvbblXro6LsJ5zIFbUJVmrBFoo21KTbBUGi
+# oQ79l2eYwNAux8xXc/bXlv41n/XeeqpJ+a8c6NlgI5jq2pa5KVH8jcig9j0GNdN6
+# EeakNKz8FRVcmgmDgA7OAeSzC5mSP0hWnY1F7B0MkCG/QTGG8mOX4rBMV9LjWcmw
 # oYIUsjCCFK4GCisGAQQBgjcDAwExghSeMIIUmgYJKoZIhvcNAQcCoIIUizCCFIcC
 # AQMxDzANBglghkgBZQMEAgEFADCCAWoGCyqGSIb3DQEJEAEEoIIBWQSCAVUwggFR
-# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIHd0e4/935No/VFp8oWX
-# i1TGOlm7s2cYWpncGKeLSFnUAgZqNTCV4+YYEzIwMjYwODI0MTgxMTUzLjE5Nlow
+# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIAUgNG1vB8CFtz0lXyLY
+# d6mlRN3NfBn5NPEX8viMnDj4AgZqNTCV6ZEYEzIwMjYwODI0MTgyNTU5Ljk2NVow
 # BIACAfSggemkgeYwgeMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xLTArBgNVBAsTJE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRl
@@ -389,21 +389,21 @@
 # b3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGltZXN0
 # YW1waW5nIENBIDIwMjACEzMAAABa9g1njIXt3QgAAAAAAFowDQYJYIZIAWUDBAIB
 # BQCgggEtMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQx
-# IgQg9ockzxs8imCPj08DrFhAeiWedUy/s1hWTdUj4ta71/kwgd0GCyqGSIb3DQEJ
+# IgQgG3tOYqMMckW0Oq7oWtqLd6S185bEtczUN83F5mP8Hpkwgd0GCyqGSIb3DQEJ
 # EAIvMYHNMIHKMIHHMIGgBCBiuWRAi+p96PRsBt3TwW3jNozgPQS+Qco1CVm/NaU0
 # QzB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
 # cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3RhbXBp
 # bmcgQ0EgMjAyMAITMwAAAFr2DWeMhe3dCAAAAAAAWjAiBCBuaA/SFfBiNweGO/+a
-# CRtAs06Pr8a2NoGJlT41YSSsYTANBgkqhkiG9w0BAQsFAASCAgAFmFtp0ibQmm5T
-# qdnRZESnenglsrrDdzWF0Hi+Ld0iB1GCUECtssB3DkZhZcp4P4eSOYc7rk+JcENR
-# CHTmaH90JbxPwbs4O5OIuTAqUDWVWCWgBoEkujT9kp0wmqEXyBNdKToFAhdoV8yj
-# WRkyHYHFlv4136ZlAXTEs0/3ECkk5Y2liUdY9zyZbfhzxfQXZqjUWk5W0aaSG2oF
-# nMMASNyQG4u8YnKCi+WGL8pscmzwHHJOGogzJcGXJtXyZVvakE8Ku45ouz0g6bgt
-# SXjnLWWfBlhxsDsgvc/uTlhSHmXJ5YJSs/eEcsKZeFXjU99fm2mJ+RIl8xFsLimi
-# iEKEH89EJWGbP/BYCA9XYzggdGEQlwkbdO2IaEEFBAeZ20rWO5keWbbe4Xvd/bRg
-# 8s5jSh24n7o/3fPD+F2DXAJexSFSGJcRhaTFrBKBfH8kLhWCVxAiibykV3tckWpB
-# n2sImkQ4bmYOU02fiRb0oxEaiB9Hj368eYqYa9Hl2/07/4HZbBeaU1aPD9SKNiGJ
-# NMWF4YAk+wqVRML1T/Q9CRNpLF+nL0Abo/w0pFSiGzryKX2XH4XEUCHn9MFJaGas
-# sKCJcJcpLbdh2oY0qEX9eYYdhCoxRztv+/l561QyJOOQQSWkHsnoAsiLnfwLuk2e
-# cEJQ7ywcrHHKwr87nKJH+tTPSGSW9g==
+# CRtAs06Pr8a2NoGJlT41YSSsYTANBgkqhkiG9w0BAQsFAASCAgAUDuAvn9iGqm8h
+# /fAL89MruW0Ih7GxiirmJiSQEo9FQ30by7uxwhPTSx9Td4h11t9+LWEiXRQVGFLp
+# uVhlUTKKXDaSl1pwwH7FgFJy64VcGOGQUqJtLwIIn6PCKcClAKmt0g3qV9P4ufvB
+# 2EAw8DWCWLbp0XtcY33007Pck+3GR0m6mtFdG4tWGyel9SGQdDE4IPzjepYbePcp
+# v+BsylrQODewRGWgZtMbC5M8QO5EU5DwcPYrmr1d57CoJoHZbm+RoEG3Il3QcqOj
+# 5Fj9A2swvJ5j+73T/bHht5BAmHMeHslOHqeJf7USE4vvjiPU8AIhFilaJiueGQd/
+# rvh16kb3QPa2GhrrEAmiYmzENshRoBJvPpYXkbmgjIG1+HGQ8H8IbQi8WAXWwFBW
+# DgiPZQWI2lImHpetVLzQ0GpvD2bqsvtIvaRZJ4+xi2nVJtg6SBo70cBChCKaVtSO
+# 5iqE15injCJVRSnPLAmp+VQe8tYjhcGni+9cQ1jp9InR2Lms1VW5jMSLOPB7E+10
+# CbxbHMEo1nCk8vUgHNP+xK+oijfLN64GztyfNo/gU0SX3qQzD63C+rNGe5urm+f5
+# TTLSVKl9d/LU3ySxLZCCIYAvEzJQeM4hdokgwW3VQ2q0OW2mcW9YUCYb6rXEhlP6
+# po7OU9Dkm/IL8SNAX0YsWQ+LxQyGrw==
 # SIG # End signature block
