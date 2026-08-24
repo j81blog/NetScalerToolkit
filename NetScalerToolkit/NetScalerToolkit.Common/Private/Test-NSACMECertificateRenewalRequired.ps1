@@ -191,7 +191,7 @@
             [bool]$ShouldRenew,
 
             [Parameter(Mandatory)]
-            [string]$Reason,
+            [string[]]$Reason,
 
             [Parameter(Mandatory)]
             [string]$Summary,
@@ -212,7 +212,8 @@
         $now = Get-Date
         [PSCustomObject]@{
             ShouldRenew    = $ShouldRenew
-            Reason         = $Reason
+            Reason         = (@($Reason) -join ' ')
+            ReasonLines    = @($Reason)
             Summary        = $Summary
             CertExpires    = $CertExpires
             RenewAfter     = $RenewAfter
@@ -245,7 +246,7 @@
         }
 
         if ($now -lt $RenewAfter) {
-            return New-NSACMECertificateRenewalDecision -ShouldRenew $false -Reason "Certificate is still valid and outside the renewal window. Renewal can start after $($RenewAfter.ToString('yyyy-MM-dd HH:mm:ss')). Use -ForceCertRenew (or -Force) to renew now." -Summary 'Outside renewal window. Use -ForceCertRenew to renew now.' -CertExpires $CertExpires -RenewAfter $RenewAfter -Source $Source -Strategy $Strategy
+            return New-NSACMECertificateRenewalDecision -ShouldRenew $false -Reason @('Certificate is still valid and outside the renewal window.', "Renewal can start after $($RenewAfter.ToString('yyyy-MM-dd HH:mm:ss')).", 'Use -ForceCertRenew (or -Force) to renew now.') -Summary 'Outside renewal window. Use -ForceCertRenew to renew now.' -CertExpires $CertExpires -RenewAfter $RenewAfter -Source $Source -Strategy $Strategy
         }
 
         New-NSACMECertificateRenewalDecision -ShouldRenew $true -Reason "Renewal window has started ($($RenewAfter.ToString('yyyy-MM-dd HH:mm:ss')))." -Summary 'Renewal window started.' -CertExpires $CertExpires -RenewAfter $RenewAfter -Source $Source -Strategy $Strategy
@@ -376,8 +377,8 @@
 # SIG # Begin signature block
 # MII6AgYJKoZIhvcNAQcCoII58zCCOe8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCA1Jt+vVMdY4ft5
-# 2mmf1r4g3Oh4/TL3PglyXm/eLKdiiqCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDVQ5LhQ0RDbbTg
+# 5duh4bWiJrAbSOyUtVAuKdYpzhErA6CCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
 # lUgTecgRwIeZMA0GCSqGSIb3DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
 # ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVu
 # dGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAy
@@ -563,20 +564,20 @@
 # CzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzAp
 # BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDMCEzMABTtU
 # QaiXHbdEqJcAAAAFO1QwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
-# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgDfYi
-# xUTaJL+Hgpbax0oJgoQjefNq3Ne8uaXwaiHbNwowDQYJKoZIhvcNAQEBBQAEggGA
-# M+396lGC4kzoxZkBBVtt/xsjlLMhqDsGoFrE0RvRFzxGnLEa9zXPIcndirkEd2pl
-# CBxh+P2S8C5fwdtE8/KXhex/tnWAjZUVj2AriP8ls7o8ogjfFLiT3vrWO+5E5LS8
-# UnbpXPs8ZZN7Zp7GKjG6jijHuaPD/6afH79T/0mofelYMIKbXpD+Y4sRfBGJEce7
-# dUfQy2HJXcPYRObm0T8T8TBmFeq5YghkPAoK4NDLcT0XYzhFk823iai9OyeM8AEZ
-# KaPWSzPV8RznDsCb6MznZsp9FwpGWPiUMuhIxy1A+PylzWoCeXdU6fCVRfgP3G9c
-# vbTBUOJy0lj8GREGrl5FTkJru3/POxZi8soJdItPsJ6JtbiCrekGcp2SSW98m8QT
-# 9uS31YU3oyFZWDniSzLeounsNaeaXzU+f5PR7o0NuMq7Par2dDuU/n2Wbr8qwc27
-# SFzXdWdNWRQpbeefmqo7xz00RGor5uldP9obQL095Q86GQzVPhBuqIAXkcgOHWLN
+# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgQAwt
+# MSKR6txCF4vg6m3qLWbsN0BClH5TAQFXBVjPX1cwDQYJKoZIhvcNAQEBBQAEggGA
+# KJdmA/JXwIJXapuH00OlxTgmOd2PAZFeAS7B4dpJsvYM/8YKA5wZhm6MNNQRQVdc
+# ojL5Rz2a0SRulwAQD8jKOk73wjRzrmw1iY1p6TFyJi+Ae3hllb+FsLQTWQoUnj2f
+# cirz/WuwdoCwkY/1KV0rUYeVtrzrv0DzJKjhdXQAauZTOAcrXm2swTmu2F+ym2hy
+# HbwsLDN/Y8Z3APu9Aoul7Kw+cKLNIjL0aUdNqc20vEH5WUBwLMKScs2cr4JIZ3ED
+# hhVHVQ6M9mGV3BjKOeEdSmExnNloegXpRwSyg0fUXKGBkMFv+0uX4a6hrl0/taKX
+# y2tD8qLyGz7g2k3aGLv0kYr6WmnR5exjoJQFGxiuTFotGpI/m+Sn9+t84wTFvvNY
+# aFEE8vRpZ9q7OaYiB7MoEMx4H8eN7s5N6ITC+hECvy+j7NR7xOcFgD5rAVhf2XY6
+# RoSsAESgUgya77t6JbaCtaMPg48mK64kTQpylpgW6Me6m7/Y692y0bBF3/IfLXy+
 # oYIUsjCCFK4GCisGAQQBgjcDAwExghSeMIIUmgYJKoZIhvcNAQcCoIIUizCCFIcC
 # AQMxDzANBglghkgBZQMEAgEFADCCAWoGCyqGSIb3DQEJEAEEoIIBWQSCAVUwggFR
-# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIBeIG4D/g9BKaeOLzICR
-# NwrQSY8K0kxEkyqeUSvBsY1qAgZqg90eJGYYEzIwMjYwODI0MDgwOTQzLjg0M1ow
+# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIKU60IzcSEpZ3P6OoH58
+# 6hBg6Q6fjoHOyZ88JKoboso9AgZqg90fvwAYEzIwMjYwODI0MTU0MjQ4LjY1Mlow
 # BIACAfSggemkgeYwgeMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xLTArBgNVBAsTJE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRl
@@ -667,21 +668,21 @@
 # b3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGltZXN0
 # YW1waW5nIENBIDIwMjACEzMAAABbSrWNQTJt3HQAAAAAAFswDQYJYIZIAWUDBAIB
 # BQCgggEtMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQx
-# IgQgvWMuf9C6TL03nKqx4DUpDIenZ5sNskR6W44tY9Wkuqkwgd0GCyqGSIb3DQEJ
+# IgQgHVRejcIfWwpy933h0sM0/k71ndjV9HFKVD/AByqeJy8wgd0GCyqGSIb3DQEJ
 # EAIvMYHNMIHKMIHHMIGgBCAvMQNVXZ0b0xxlGw8X/3IEybObuT6a5W1d61CW+cGD
 # 7zB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
 # cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3RhbXBp
 # bmcgQ0EgMjAyMAITMwAAAFtKtY1BMm3cdAAAAAAAWzAiBCAVu5ck9x2wgI9/eDMZ
-# kkZUoAiPfBjjohe+prFgrmKKkDANBgkqhkiG9w0BAQsFAASCAgB62kNfUhOrydGB
-# Ovl3IrxtKG3sNPrmA5qiy76Ew2wYZ+lhB1mK1kP1/zfpVyna4J20L6wBXKFj0U64
-# H2iOjyYgLFHqd3UwXvgwere3U1TRxG4KlJwotxrRq6b9GY3fP8++Mu/YZdtiLJ/r
-# NwkA62sXXpozhn6ydsHZxJOKonaa5fDEPKTcOpd8xsNlJAoL2rNJCk28z7mbRo24
-# p9Z+rpOzfGxPRbnVm6WHb6Wb7B2XzV35LhgMK9qu8PLRkZAXuKZg8BV23W+qfE5K
-# Vb5oaOvsHXeyDwQ0nZksKtj4rj5tlVrYsa/EFhofYc8yVNjbulgV9MxGIFc9UiU9
-# lS9fE9i8LvpsbUDVXYwRU1gsxJAyCIyh5r1NxD4av3v5cJQtaYMm+AmcFO6eNw35
-# mcOjPOGHo0mNehh7+GdIDQp0eusJFa+EzOhIhgtmJnuuSI7GCPm+2sZxT9yN0tPP
-# SdBzHoyRl26KMBOLwjzQUma6/nrhx9cU0SxQyAEmWvjxqtTpyecJnx9FXGnP3F74
-# FJzJtMd+8LSnof2xFGyW0GjXaSO5SWeOshEmbuS4hZevWoBJ0SysnL05BriiZK7P
-# nIutUDhrBHnUQcEoWa5sKnsVIVxqZtTtgtPkcTTvnY31SwtwyxFPWhGq2caib6v4
-# OmR2nHf2Aa+Qbn81VaauOw/f4qZtEQ==
+# kkZUoAiPfBjjohe+prFgrmKKkDANBgkqhkiG9w0BAQsFAASCAgB7jHah0WOVywto
+# WNoLJuyGJ8mwrFyMjpED3d0quJUc5Yun2s9600yoBls0NjZMTQ6OwvvQokkUCaHv
+# ySM1MPfQB03XmDEtFljyco+rGM2afHF6JXShWAfjwJkK4P0QPKOv2XfQIxocZHKw
+# 6g/PVjuaiZ2b2JiZhujfjDnG4ViDyDci5ugdJwez5tDWoYuLYe4QdXsQ/YerpAJz
+# HXil0PixZf4BBc/BFRXztU095B8p80XUCl7oQKdMELviu+V7ZnkidbIyRqES8x7d
+# JHHTnNLCcOU1HdV7mCdffLwHX/MuuyzcU0eufej/6cROdic8+3BdDDhLYV2E6gEQ
+# dRHtxAbjSRxLhGZKCNghd+SyjjB6D2zIt2sRjXZhaCfVSGOGxedCo65FfkxGl/BD
+# pLuy3eSVmfBgGmbwujUO0b6FQEnwBjdxdbVd9kzyw2AglbeHjOfLDt3ZuuFYitU7
+# vi2onJecDVVqhe3wygGWEXfuVYlrvmyOcio6r1prd+0+URxf9NG7s1v6/Q/5XDJU
+# VfKvTvMsxu0PIyt6o/4OOrx3ZagtPG/Vt9gGNhEmZbUrq+icr5h61NqT22h0aa3d
+# cWL8BcJT6MJYkdlEbm+kbcPgJavKU0O2w5LxoKqGsl6G4LjQh6riiTaEFkMqMOBS
+# v243HuLPhVM1WiHF+yT2aDSmd9YY/Q==
 # SIG # End signature block
