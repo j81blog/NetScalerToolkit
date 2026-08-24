@@ -1,6 +1,6 @@
-# Release Notes
+﻿# Release Notes
 
-## v2026.817.2045
+## v2026.824.2030
 
 ### New
 - NEW: A request is renewed when it no longer matches the certificate it last produced: added or removed SANs, a changed key length, or a move between staging and production. Tracked in the JSON config with `LastIssuedSerial`, `LastIssuedDomains`, `LastIssuedAcmeServer` and `LastIssuedKeyLength`, written only after a successful deploy and only trusted while the serial still matches the deployed certkey, so a first run after upgrading renews nothing on this basis
@@ -23,6 +23,11 @@
 - IMPROVED: The log header reports NetScalerToolkit, Posh-ACME and ConsoleStatus through one resolver. It distinguishes a loaded version from an installed one, since the header is written before those two modules are imported, and previously reported the highest installed Posh-ACME version as though it were the one in use
 - IMPROVED: A `Loaded ConsoleStatus v<version>` line matches the existing Posh-ACME one, and a warning is logged when ConsoleStatus is unavailable and console output falls back to plain text
 - IMPROVED: The Setup section reports `Load ConsoleStatus` alongside `Load Posh-ACME`, so both dependencies are shown the same way. The header line above it names the NetScalerToolkit version
+- FIX: A warning raised while an item line was open printed straight to the host, splitting that line and stranding its dotted filler and status block. Connecting to a NetScaler whose secondary HA node is unreachable did exactly that. Such a warning is now attached to the open item as a note, and the item reports WARN instead of OK
+- IMPROVED: A skipped request prints its reason as three lines rather than one wrapped sentence: what the state is, when renewal opens, and how to override it. The decision now carries `ReasonLines` beside `Reason`, so the log and the notification mail keep the single sentence they had
+- CHANGE: ConsoleStatus 2026.824.1230 is now the minimum. `Add-ConsoleStepNote` from that build is what puts each note on its own line, and the import check looks for it
+- IMPROVED: Several warnings raised while one item is open now each get their own marked line instead of being glued into one paragraph separated by `; `. Uses `Add-ConsoleStepNote` from ConsoleStatus 2026.824.1230, detected at import rather than required, so the toolkit keeps working against older builds and the two modules can be published in either order
+- IMPROVED: The Results recap fits one line per certificate. The label and value columns widened from 26 and 24 to 32, so a common name such as `ows-emssapi-test.vgmdiensten.nl` is no longer truncated, the value column is left empty when the certkey is named after the common name rather than printing the same name twice, and a skipped entry shows its renew date instead of repeating the full reason that already appeared under that certificate's own section. The complete reason is still written to the log
 - IMPROVED: Disabled certificate requests are logged by name instead of only counted, so a request excluded by `Enabled: false` is visible in the log
 - IMPROVED: The certkey renewal source logs status, validity, serial and issuer
 - IMPROVED: `CurrentCertIsProduction` is retired and removed from a request when it is next saved. `LastIssuedAcmeServer` carries the same information

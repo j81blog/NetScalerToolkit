@@ -1,197 +1,49 @@
-﻿function Connect-NSNode {
-    <#
+﻿function Write-NSStatusWarning {
+<#
     .SYNOPSIS
-        Connects to a NetScaler node.
+        Reports a warning without breaking an open ConsoleStatus item.
 
     .DESCRIPTION
-        Authenticates against the NITRO API and stores the resulting session as the
-        module default, so later commands can be called without passing -Session. The
-        appliance version is queried during connect and used to select the matching
-        NITRO metadata set.
+        Write-Warning prints straight to the host, so calling it while an item line is open splits
+        that line in half and leaves the dotted filler and the status block stranded. This attaches
+        the text to the open item as a note instead, and falls back to the warning stream when no
+        item is open or when ConsoleStatus is not in use.
 
-        Authentication uses a session cookie by default, which creates a server-side
-        session that Disconnect-NSNode logs out. Use -UseNitroHeader to send credentials
-        with every request instead, which creates no server-side session.
-
-        With -HA the high availability pair is inspected and sessions to both nodes are
-        attached to the returned object, so commands can target the primary node.
-
-    .PARAMETER ManagementUrl
-        Management address of the NetScaler, for example https://192.168.1.10.
-
-    .PARAMETER Credential
-        Credential used to authenticate. Use New-NSACMECertificateUser to create an
-        account limited to the commands this module needs.
-
-    .PARAMETER UseSessionCookie
-        Authenticates once and reuses a session cookie. This is the default.
-
-    .PARAMETER UseNitroHeader
-        Sends the credentials as NITRO headers on every request instead of creating a
-        server-side session. Useful when session limits are a concern.
-
-    .PARAMETER SkipCertificateCheck
-        Skips TLS validation of the management certificate. Use this for self-signed or
-        private CA certificates.
-
-    .PARAMETER HA
-        Inspects the high availability configuration and attaches sessions for the
-        primary and secondary nodes.
-
-    .PARAMETER PassThru
-        Returns the session object. Without this the session is stored as the module
-        default but nothing is written to the pipeline.
+    .PARAMETER Message
+        Warning text.
 
     .EXAMPLE
-        Connect-NSNode -ManagementUrl https://192.168.1.10 -Credential (Get-Credential)
+        Write-NSStatusWarning -Message 'Unable to attach secondary HA session.'
 
-        Connects and stores the session as the module default.
-
-    .EXAMPLE
-        $session = Connect-NSNode -ManagementUrl https://192.168.1.10 -Credential $cred -SkipCertificateCheck -PassThru
-
-        Connects to a NetScaler with a self-signed management certificate and keeps the
-        session object for later use.
-
-    .EXAMPLE
-        Connect-NSNode -ManagementUrl https://192.168.1.10 -Credential $cred -HA -PassThru
-
-        Connects and inspects the HA pair, so the returned session knows which node is
-        primary.
-
-    .LINK
-        https://netscalertoolkit.j81.nl/module/reference/common/nsnode/connect/
-
-    .LINK
-        https://netscalertoolkit.j81.nl/
-    #>
-    [CmdletBinding(DefaultParameterSetName = 'Session')]
+    .NOTES
+        Function  : Write-NSStatusWarning
+        Author    : John Billekens
+        Copyright : Copyright (c) John Billekens Consultancy
+        Version   : 2026.0824.2100
+#>
+    [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [uri] $ManagementUrl,
-
-        [Parameter(Mandatory)]
-        [pscredential] $Credential,
-
-        [Parameter(ParameterSetName = 'Session')]
-        [switch] $UseSessionCookie,
-
-        [Parameter(ParameterSetName = 'NitroHeader')]
-        [switch] $UseNitroHeader,
-
-        [Parameter()]
-        [switch] $SkipCertificateCheck,
-
-        [Parameter()]
-        [switch] $HA,
-
-        [Parameter(DontShow)]
-        [switch] $SuppressHAWarning,
-
-        [Parameter()]
-        [switch] $PassThru
+        [AllowEmptyString()]
+        [string]$Message
     )
 
-    $session = [PSCustomObject] @{
-        PSTypeName = 'NetScalerToolkit.NSSession'
-        ManagementUrl = $ManagementUrl.AbsoluteUri.TrimEnd('/')
-        Version = $null
-        ApplianceVersion = $null
-        VersionText = $null
-        VersionRaw = $null
-        VersionInfo = $null
-        MetadataVersion = $null
-        SupportedMetadataVersions = @('13.1', '14.1')
-        MetadataVersionWarningKey = $null
-        NitroApiVersion = 'v1'
-        HAInfo = $null
-        IsHA = $false
-        IsStandalone = $false
-        ConnectedNodeIP = $null
-        ConnectedNodeState = $null
-        IsPrimary = $false
-        IsSecondary = $false
-        PrimaryIP = $null
-        SecondaryIP = $null
-        PrimarySession = $null
-        SecondarySession = $null
-        AuthenticationMode = if ($UseNitroHeader) { 'NitroHeader' } else { 'SessionCookie' }
-        Credential = $Credential
-        WebSession = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
-        SkipCertificateCheck = [bool] $SkipCertificateCheck
-        DefaultHeaders = @{
-            Accept = 'application/json'
-            'Content-Type' = 'application/json'
-        }
-        LastResponse = $null
-    }
+    if ([string]::IsNullOrWhiteSpace($Message)) { return }
 
-    if ($UseNitroHeader) {
-        $versionResult = Get-NSNodeVersionInfo -Session $session
-        $session.Version = $versionResult.Version
-        $session.ApplianceVersion = $versionResult.Version
-        $session.VersionText = $versionResult.VersionText
-        $session.VersionRaw = $versionResult.VersionRaw
-        $session.VersionInfo = $versionResult.VersionInfo
-        Resolve-NSMetadataVersion -Session $session -SupportedVersion $session.SupportedMetadataVersions | Out-Null
-        $haInfo = Get-NSHAInfo -Session $session
-        Set-NSHASessionInfo -Session $session -HAInfo $haInfo | Out-Null
-
-        if ($session.IsSecondary -and -not $HA -and -not $SuppressHAWarning) {
-            Write-NSStatusWarning -Message ('Connected to secondary NetScaler node {0}. Primary node is {1}. Reconnect with -HA to automatically use the primary session and attach the secondary session.' -f $session.ConnectedNodeIP, $session.PrimaryIP)
-        }
-
-        if ($HA) {
-            $session = Connect-NSHANodeSessions -Session $session -Credential $Credential -SkipCertificateCheck:$SkipCertificateCheck -UseNitroHeader:$UseNitroHeader
-        }
-
-        Set-NSSession -Session $session | Out-Null
-
-        if ($PassThru) {
-            return $session
-        }
-
+    if ($script:NSConsoleStatusEnabled -and (ConsoleStatus\Get-ConsoleStatusState).ItemOpen) {
+        Write-NSStatusNote -Text $Message
+        $script:NSStatusItemHadWarning = $true
         return
     }
 
-    $loginPayload = @{
-        login = @{
-            username = $Credential.UserName
-            password = $Credential.GetNetworkCredential().Password
-        }
-    }
-
-    Invoke-NSRestRequest -Session $session -Method POST -NitroPath 'nitro/v1/config/login' -Payload $loginPayload -RawResponse | Out-Null
-    $versionResult = Get-NSNodeVersionInfo -Session $session
-    $session.Version = $versionResult.Version
-    $session.ApplianceVersion = $versionResult.Version
-    $session.VersionText = $versionResult.VersionText
-    $session.VersionRaw = $versionResult.VersionRaw
-    $session.VersionInfo = $versionResult.VersionInfo
-    Resolve-NSMetadataVersion -Session $session -SupportedVersion $session.SupportedMetadataVersions | Out-Null
-    $haInfo = Get-NSHAInfo -Session $session
-    Set-NSHASessionInfo -Session $session -HAInfo $haInfo | Out-Null
-
-    if ($session.IsSecondary -and -not $HA -and -not $SuppressHAWarning) {
-        Write-NSStatusWarning -Message ('Connected to secondary NetScaler node {0}. Primary node is {1}. Reconnect with -HA to automatically use the primary session and attach the secondary session.' -f $session.ConnectedNodeIP, $session.PrimaryIP)
-    }
-
-    if ($HA) {
-        $session = Connect-NSHANodeSessions -Session $session -Credential $Credential -SkipCertificateCheck:$SkipCertificateCheck -UseNitroHeader:$UseNitroHeader
-    }
-
-    Set-NSSession -Session $session | Out-Null
-
-    if ($PassThru) {
-        return $session
-    }
+    Write-Warning $Message
 }
 
 # SIG # Begin signature block
 # MII6AgYJKoZIhvcNAQcCoII58zCCOe8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAUbAWKXVgkaavO
-# RW/k7roV5iFmxeNWt+o/QzBh6gjUp6CCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBQsnDzYZ1ssR/t
+# 5Cv3aTxVNgOp/d1lu3p3ZjmiGk/qUqCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
 # lUgTecgRwIeZMA0GCSqGSIb3DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
 # ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVu
 # dGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAy
@@ -377,20 +229,20 @@
 # CzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzAp
 # BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDMCEzMABTtU
 # QaiXHbdEqJcAAAAFO1QwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
-# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgj9pI
-# /7wCDtzCZea4bW88UZ5aKdOvhq+GJ/uae7FR8AQwDQYJKoZIhvcNAQEBBQAEggGA
-# g8xnHLzPGtH49sV3MXgzs64xZtz0Cvr4FplBJDLzea8VPPlzK8ZHrR82ijAjo1eb
-# LlI/gcJXOxB1ISUYYpS3ctMhl0lXUxXXy4+c/9aIpEPgJlrKSlpmOtvRkS56yspU
-# FM0cdM4rRRawKQ3yABpesN4G41bpPLyXOgNt1B4Bj+Kp91NmZYQKmJBUKz54atac
-# epdGYw6n3HtSyZUz62GrBAfe10+RhBKU8gwlzQjSmRLsaLHMv2bV+PtXbfZtCPQN
-# RqVix3xEQEud7PGcKReSQEzdGfbViO1zcDsfOgaFHEToWv0bz+kX7OCDeef113HV
-# O6+Z1SHBCm9CkznAC33ldlEH95WsbdTZWJ6Z5T/REkovbAP1Db9KyWL0kQ2LiEzr
-# qZMd0zxPQcSIYkUxS3TJbIRutz1tyvCxQuFscMTxiODw4l4wpxbrSD6q0Xjd6cRk
-# cznVeJqzN/MnjLTFE1XkkLTT42Ihn74i19A89hsr+DuOJ5KwzNaHcVPMlSuoiiKj
+# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgPbr0
+# giq8aUL2VyCVOR4enGWn2OuyRQeis+0Vd2EttZYwDQYJKoZIhvcNAQEBBQAEggGA
+# aDES3ikvC/vWzEGj49/M5jbEJikSdV7oQM3B5wkWUpkDujWuOkPyxppsljiM2G9D
+# Uy8lU9Pw34CXpdkjX1lAavZPDxXKHC6Uv6JrUQFaAnW4jvNvpESf4WB1kLM7/oNO
+# 1ngZPTAH9NXigPzwtCNRoiZHMNmWhQx1yvVeH4X0iglD/WSsc7lzTkBItoYfSk3J
+# XDLLE6ypHlUQE6BsCE3juiw/xXwG5dBlohWKNv60dGtPRUnCOv61gUJwH1GzpVfP
+# IZfaRWMgA7qZcFYzt58zCQOGy7QigtjVQMEnfek57fM9EKpjSAyYnComsfuLFzAO
+# /TE6XWO+H4h5xGRyj1Ja1yVUHo8COP+W7knHyDCX0ifi1c9FUYPmmjd0Y2o5vFGh
+# xTgEyUtmnrEv/HB3H1eyCcrkxl9yHEl2Jk6RFij/wIWweslYCo9zD4rxyJ4k2bH1
+# iO4yAO4B2WC/nA4Szzt8KONs4JhR0x/SuFR7yS/A5Yq2x9LtT+urjm02hY268WXx
 # oYIUsjCCFK4GCisGAQQBgjcDAwExghSeMIIUmgYJKoZIhvcNAQcCoIIUizCCFIcC
 # AQMxDzANBglghkgBZQMEAgEFADCCAWoGCyqGSIb3DQEJEAEEoIIBWQSCAVUwggFR
-# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEILYSqp93UyldBwzXRJTw
-# ZLWkR+bDpsvaMnvCUVvNM4BtAgZqNTCV6aQYEzIwMjYwODI0MTgyNjA0LjEzMlow
+# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIPldKIS6uUhEfPwKu+g8
+# e3lHBF1INmouK76i+1BcScFqAgZqNTCV6ZkYEzIwMjYwODI0MTgyNjAyLjE2N1ow
 # BIACAfSggemkgeYwgeMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xLTArBgNVBAsTJE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRl
@@ -481,21 +333,21 @@
 # b3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGltZXN0
 # YW1waW5nIENBIDIwMjACEzMAAABa9g1njIXt3QgAAAAAAFowDQYJYIZIAWUDBAIB
 # BQCgggEtMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQx
-# IgQgk8MxOQ6uXf8E+2KxQuW7UwrDxOZGKRffQ/u7rOP7jUEwgd0GCyqGSIb3DQEJ
+# IgQg7Bwf1d5I6rMSndq10nsgvuI7obLOE1zhskzb+44V+0Qwgd0GCyqGSIb3DQEJ
 # EAIvMYHNMIHKMIHHMIGgBCBiuWRAi+p96PRsBt3TwW3jNozgPQS+Qco1CVm/NaU0
 # QzB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
 # cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3RhbXBp
 # bmcgQ0EgMjAyMAITMwAAAFr2DWeMhe3dCAAAAAAAWjAiBCBuaA/SFfBiNweGO/+a
-# CRtAs06Pr8a2NoGJlT41YSSsYTANBgkqhkiG9w0BAQsFAASCAgBQdPB/FCnVe2ss
-# Sb6tnzMQJNxK1KVkul5WPExtz/yWc4H84YoiM35BxHBFVL9SedEQFXzHz3Q1TKPf
-# sr2y2xfzwQ+kthiDPprA59TCca5MI5U3di+Y9RrVxlwDXlty6yWrp4RnhyscjLml
-# jYYlKREhga3poVMnEW9pxa2Pk8yIMolIPZTn5/R+GQzrtZirRsjTpTiHGgeNX2tw
-# niPo2M8wi46DxYvnLpP/DVwiiOl6l9ZDi8IJ8ji5K+5BNXCDYjanKFiiqshe71Bq
-# 0hjZ/3fGP4j7J/4EgR7HO3SYmjFgnFM3e+og46IjC8Em3+tfmBTar8PSZqIaVt2B
-# L8MG6jGUnFl6Hvtfzm666NiTQ3VhVFMe03B/+0EVgVXURaEi9wmZ6NyFLxUq2nfE
-# /jYaYoLZwmCucBKCCRXi+vEGTMgWJ3cjknMrjcwCpIDaTfZK27tiWNw45QE1PijB
-# u7yr/qTevuaa/lGfB8dy529MF176p+ukxOWmtCY0uQnkcYwLyYlwhDcgSRaDCPgQ
-# F4LNyetbGz5GYFllGOmjWXALy4nBmIhwavf2BK5gAzrluq3APEOdbwCK0BTnWos6
-# tsMriF+GdmHwlYv0G12NFTK11s54TJImWpndF1ytThQkQ4KJeSdN/AwDdlHQxJ7G
-# KiTeOkfQOwG4qr/BwkNrpjsxaX3dDg==
+# CRtAs06Pr8a2NoGJlT41YSSsYTANBgkqhkiG9w0BAQsFAASCAgDB533agT6qm8lT
+# dbFF64BbqUtaV6rnNNm0vFaXMWmxttFa//y+jIZggoraygBkZuMcqXvjkML7ebGe
+# dGdPaG0AUB3RRc98Ly/rIBPKmZqssT7EC9+9Niy1xTYoafpD81WMk3jQlPoUal91
+# Fz2Ee4tbEhp790X4AQF28Sg/vh4JtrEJAUkWs4c4N68p458Qa0bBF5x6dy2Xu1Ah
+# umn5tkkt0XEgNk9Ml0IB40I7f2whGVspbdI4qs9W+vJt24+QIs4E6dr6oUBsaDgf
+# 7/jX4Tzu0l5oipEeB/JkJ6Fxn6fy8300FB1sTkdFeECbSX6fz/wrOj+YC93RzGIu
+# 2SUMr7qOrIeLl/y8AlIJdQw74gkXtAPChnhAc+5BbE0dbWNNVzAWAmV7toaKKOY1
+# OAhH/78Lm69/e+Kqj0wQeHmjt1bbnDR+XvAhW1RdP3R2jhjZZThP/CCh38D2kwOz
+# bbXgwHKbeHrpKW9pEf6T0tPFCYnJvQHJcV0CLBoO1YV3A9lyZKJSnYPnmnHFvRMW
+# OPSa1RrYMix/fQPMuBlAZNO5yuBkS0oxSMACtNwrjEyyrOt2YTucVDUJDVKNXj+b
+# /bTGUq0JnoH21ZarHytloyLRMADW/rwNSCF+KmYy8sKQQXB5nCB8KI4T5bTVtDVC
+# AQwB8YbC7WjbeCEsAfZ6MnE2r+Bx/g==
 # SIG # End signature block
