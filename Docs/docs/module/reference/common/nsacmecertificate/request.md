@@ -22,7 +22,7 @@ Request-NSACMECertificate [-CleanPoshACMEStorage] -ManagementURL <String> [-User
  [-SMTPFrom <String>] [-SMTPCredential <PSCredential>] [-SMTPServer <String>] [-SMTPPort <Int32>] [-SMTPUseSSL]
  [-LogAsAttachment] [-DisableIPCheck] [-IPv6] [-UpdateIIS] [-UpdateGlobalVPNCertBinding]
  [-UnbindGlobalVPNCertOnUpdate] [-GlobalVPNCertBindingIncludeCA] [-GlobalVPNCertBindingCrlCheck <String>]
- [-GlobalVPNCertBindingOcspCheck <String>] [-IISSiteToUpdate <String>] [-PostPoSHScriptFilename <String>]
+ [-GlobalVPNCertBindingOcspCheck <String>] [-IISSiteToUpdate <String>] [-PostPoSHScriptFilename <String>] [-PostPoSHScriptDir <String>]
  [-PostPoSHScriptExtraParameters <Hashtable>] [-CsVipName <String[]>] [-UseLbVip] [-CspName <String>]
  [-CsaName <String>] [-CsVipBinding <String>] [-SvcName <String>] [-SvcDestination <String>] [-LbName <String>]
  [-TrafficDomain <Int32>] [-RspName <String>] [-RsaName <String>] [-Partitions <String[]>] [-EnableVipBefore]
@@ -69,7 +69,7 @@ Request-NSACMECertificate [-CleanPoshACMEStorage] -ManagementURL <String> [-User
  [-SMTPFrom <String>] [-SMTPCredential <PSCredential>] [-SMTPServer <String>] [-SMTPPort <Int32>] [-SMTPUseSSL]
  [-LogAsAttachment] [-DisableIPCheck] [-IPv6] [-UpdateIIS] [-UpdateGlobalVPNCertBinding]
  [-UnbindGlobalVPNCertOnUpdate] [-GlobalVPNCertBindingIncludeCA] [-GlobalVPNCertBindingCrlCheck <String>]
- [-GlobalVPNCertBindingOcspCheck <String>] [-IISSiteToUpdate <String>] [-PostPoSHScriptFilename <String>]
+ [-GlobalVPNCertBindingOcspCheck <String>] [-IISSiteToUpdate <String>] [-PostPoSHScriptFilename <String>] [-PostPoSHScriptDir <String>]
  [-PostPoSHScriptExtraParameters <Hashtable>] [-CsVipName <String[]>] [-UseLbVip] [-CspName <String>]
  [-CsaName <String>] [-CsVipBinding <String>] [-SvcName <String>] [-SvcDestination <String>] [-LbName <String>]
  [-TrafficDomain <Int32>] [-RspName <String>] [-RsaName <String>] [-Partitions <String[]>] [-EnableVipBefore]
@@ -106,7 +106,7 @@ Request-NSACMECertificate -ManagementURL <String> [-Username <String>] [-Passwor
 
 ### AutoRun
 ```
-Request-NSACMECertificate [-CertDir <String>] [-Production] -ConfigFile <String> [-AutoRun] [-ForceCertRenew]
+Request-NSACMECertificate [-CertDir <String>] [-Production] [-LogFile <String>] [-PostPoSHScriptDir <String>] -ConfigFile <String> [-AutoRun] [-ForceCertRenew]
  [-StopOnError] [-NoConsoleOutput] [-AutoUpdate] [-SkipCertificateCheck] [-CertificateProvider <String>]
  [-AcmeDirectoryUrl <String>] [-ExternalAccountBindingKeyId <String>] [-ExternalAccountBindingHmacKey <Object>]
  [-ExternalAccountBindingAlgorithm <String>] [-UseModernPfxEncryption] [-CertificateChainValidation <String>]
@@ -601,12 +601,16 @@ Accept wildcard characters: False
 
 ### -LogFile
 Path of the log file.
-The default resolves to GenLE-Log.txt in the certificate
-directory.
+Overrides LogFile in the AutoRun config file.
+The default
+name is Request-NSACMECertificate.log (.jsonl for LogType jsonl).
+A relative path
+or bare file name is placed in CertDir, or in %LOCALAPPDATA%\NetScalerToolkit when
+no CertDir is given.
 
 ```yaml
 Type: String
-Parameter Sets: LECertificatesHTTP, CleanADC, CleanTestCertificate, LECertificatesDNS, CommandPolicyUser, CommandPolicy
+Parameter Sets: LECertificatesHTTP, CleanADC, CleanTestCertificate, AutoRun, LECertificatesDNS, CommandPolicyUser, CommandPolicy
 Aliases: LogLocation
 
 Required: False
@@ -932,10 +936,31 @@ Accept wildcard characters: False
 ### -PostPoSHScriptFilename
 Path to a PowerShell script executed after a certificate is deployed, for
 distributing the certificate to other systems.
+A file name or relative path is
+resolved against PostPoSHScriptDir.
+Without PostPoSHScriptDir a full path is
+required.
 
 ```yaml
 Type: String
 Parameter Sets: LECertificatesHTTP, LECertificatesDNS
+Aliases:
+
+Required: False
+Position: Named
+Default value: None
+Accept pipeline input: False
+Accept wildcard characters: False
+```
+
+### -PostPoSHScriptDir
+Full path of the folder that holds the post scripts.
+Overrides PostPoSHScriptDir
+in the AutoRun config file.
+
+```yaml
+Type: String
+Parameter Sets: LECertificatesHTTP, LECertificatesDNS, AutoRun
 Aliases:
 
 Required: False
