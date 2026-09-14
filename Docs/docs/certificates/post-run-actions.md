@@ -25,6 +25,24 @@ $requestParams = @{
 Request-NSACMECertificate @requestParams
 ```
 
+`PostPoSHScriptFilename` can also be a file name or a relative path. It is then resolved against `PostPoSHScriptDir`, which must be a full path. Without `PostPoSHScriptDir` the script path must be a full path. In an AutoRun config, set `PostPoSHScriptDir` once under `settings`. `-PostPoSHScriptDir` on the command line overrides it.
+
+```json
+{
+    "settings": {
+        "PostPoSHScriptDir": "C:\\Scripts"
+    },
+    "certrequests": [
+        {
+            "CN": "portal.example.com",
+            "PostPoSHScriptFilename": "Publish-Certificate.ps1"
+        }
+    ]
+}
+```
+
+The script path is checked before the certificate is ordered, so a wrong path fails the request without spending an ACME order.
+
 ## Email Notification
 
 Use the SMTP parameters to send a result email.
