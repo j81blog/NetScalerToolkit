@@ -534,6 +534,89 @@ Describe 'ACME helper functions' {
                 } | Should -Throw -ExpectedMessage "*does not have a configured staging environment*"
             }
 
+            It 'writes a log without a full path to CertDir, not the module directory' -ForEach @(
+                @{ LogFile = $null; ExpectedName = 'Request-NSACMECertificate.log' }
+                @{ LogFile = 'custom.log'; ExpectedName = 'custom.log' }
+            ) {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    $logParameter = if ($LogFile) { @{ LogFile = $LogFile } } else { @{} }
+                    {
+                        Request-NSACMECertificate `
+                            -ManagementURL 'https://ns-01.domain.local' `
+                            -Username 'nsroot' `
+                            -Password 'Sup3rS3cretP@ssw0rd' `
+                            -CN 'example.com' `
+                            -CsVipName 'cs_example_http' `
+                            -CertDir $dir `
+                            -EmailAddress 'hostmaster@example.com' `
+                            -CertificateProvider ZeroSSL `
+                            -NoConsoleOutput @logParameter
+                    } | Should -Throw -ExpectedMessage '*does not have a configured staging environment*'
+
+                    $script:NSACMECertificateLogFile | Should -Be (Join-Path $dir $ExpectedName)
+                    Join-Path $dir $ExpectedName | Should -Exist
+                } finally {
+                    $script:NSACMECertificateLogFile = $null
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            It 'places an AutoRun config log name in LOCALAPPDATA when no CertDir is given' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                $originalLocalAppData = $env:LOCALAPPDATA
+                try {
+                    $env:LOCALAPPDATA = $dir
+                    $configPath = Join-Path $dir 'GenLe-Config.json'
+                    [PSCustomObject]@{
+                        settings     = [PSCustomObject]@{
+                            ManagementURL         = 'https://ns-01.domain.local'
+                            ADCCredentialUsername = 'nsroot'
+                            ADCCredentialPassword = ConvertTo-NSACMECertificateLegacySecret -Object 'Sup3rS3cretP@ssw0rd'
+                            LogFile               = 'autorun.log'
+                        }
+                        certrequests = @([PSCustomObject]@{ Enabled = $true; CN = 'example.com'; CsVipName = @('cs_example_http') })
+                    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+                    { Request-NSACMECertificate -ConfigFile $configPath -AutoRun -CertificateProvider ZeroSSL -NoConsoleOutput } |
+                        Should -Throw -ExpectedMessage '*does not have a configured staging environment*'
+
+                    Join-Path $dir 'NetScalerToolkit\autorun.log' | Should -Exist
+                } finally {
+                    $env:LOCALAPPDATA = $originalLocalAppData
+                    $script:NSACMECertificateLogFile = $null
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            It 'lets -LogFile on the command line override the AutoRun config LogFile' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    $configPath = Join-Path $dir 'GenLe-Config.json'
+                    [PSCustomObject]@{
+                        settings     = [PSCustomObject]@{
+                            ManagementURL         = 'https://ns-01.domain.local'
+                            ADCCredentialUsername = 'nsroot'
+                            ADCCredentialPassword = ConvertTo-NSACMECertificateLegacySecret -Object 'Sup3rS3cretP@ssw0rd'
+                            LogFile               = Join-Path $dir 'config.log'
+                        }
+                        certrequests = @([PSCustomObject]@{ Enabled = $true; CN = 'example.com'; CsVipName = @('cs_example_http') })
+                    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+                    { Request-NSACMECertificate -ConfigFile $configPath -AutoRun -LogFile (Join-Path $dir 'cli.log') -CertificateProvider ZeroSSL -NoConsoleOutput } |
+                        Should -Throw -ExpectedMessage '*does not have a configured staging environment*'
+
+                    Join-Path $dir 'cli.log' | Should -Exist
+                    Join-Path $dir 'config.log' | Should -Not -Exist
+                } finally {
+                    $script:NSACMECertificateLogFile = $null
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
             It 'requires CertDir for AutoRun requests when not provided in config or command line' {
                 $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
                 New-Item -ItemType Directory -Path $dir | Out-Null
@@ -571,6 +654,69 @@ Describe 'ACME helper functions' {
                 } finally {
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                 }
+            }
+
+            It 'rejects a post script path before the order: <Name>' -ForEach @(
+                @{ Name = 'file name without PostPoSHScriptDir'; Filename = 'post.ps1'; JsonDir = $null; CliDir = $null; Expected = '*is not a full path*' }
+                @{ Name = 'missing script'; Filename = 'missing.ps1'; JsonDir = 'json'; CliDir = $null; Expected = "*not found: '{0}\json\missing.ps1'*" }
+                @{ Name = 'command line dir overrides config'; Filename = 'post.ps1'; JsonDir = 'json'; CliDir = 'cli'; Expected = "*not found: '{0}\cli\post.ps1'*" }
+                @{ Name = 'full path ignores PostPoSHScriptDir'; Filename = 'other\missing.ps1'; FullPath = $true; JsonDir = 'json'; CliDir = $null; Expected = "*not found: '{0}\other\missing.ps1'*" }
+            ) {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path (Join-Path $dir 'json'), (Join-Path $dir 'cli') | Out-Null
+                Set-Content -LiteralPath (Join-Path $dir 'json\post.ps1') -Value 'param($Thumbprint, $PFXfilename, $PFXPassword)' -Encoding ASCII
+                try {
+                    $configPath = Join-Path $dir 'GenLe-Config.json'
+                    $settings = [PSCustomObject]@{
+                        ManagementURL         = 'https://ns-01.domain.local'
+                        ADCCredentialUsername = 'nsroot'
+                        ADCCredentialPassword = ConvertTo-NSACMECertificateLegacySecret -Object 'Sup3rS3cretP@ssw0rd'
+                        LogFile               = Join-Path $dir 'run.log'
+                    }
+                    if ($JsonDir) { $settings | Add-Member -NotePropertyName PostPoSHScriptDir -NotePropertyValue (Join-Path $dir $JsonDir) }
+                    [PSCustomObject]@{
+                        settings     = $settings
+                        certrequests = @([PSCustomObject]@{
+                                Enabled                = $true
+                                CN                     = 'example.com'
+                                ValidationMethod       = 'http'
+                                CsVipName              = @('cs_example_http')
+                                CertDir                = $dir
+                                PostPoSHScriptFilename = $(if ($FullPath) { Join-Path $dir $Filename } else { $Filename })
+                            })
+                    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+                    Mock Import-Module {} -ParameterFilter { $Name -eq 'Posh-ACME' }
+                    Mock Set-NSACMEPoshACMEServer {}
+                    Mock Get-PAServer { [pscustomobject]@{ renewalInfo = 'https://example.com/acme/renewal-info'; DisableARI = $false } }
+                    Mock Connect-NSNode { [pscustomobject]@{ IsHA = $false; IsPrimary = $true } }
+                    Mock Invoke-NSGetSSLCertKey {}
+
+                    $cliParameter = if ($CliDir) { @{ PostPoSHScriptDir = (Join-Path $dir $CliDir) } } else { @{} }
+                    { Request-NSACMECertificate -ConfigFile $configPath -AutoRun -Production -StopOnError -NoConsoleOutput @cliParameter } |
+                        Should -Throw -ExpectedMessage ($Expected -f $dir)
+                    Should -Invoke Invoke-NSGetSSLCertKey -Times 0
+                } finally {
+                    $script:NSACMECertificateLogFile = $null
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            It 'rejects a PostPoSHScriptDir that is not a full path' {
+                {
+                    Request-NSACMECertificate `
+                        -ManagementURL 'https://ns-01.domain.local' `
+                        -Username 'nsroot' `
+                        -Password 'Sup3rS3cretP@ssw0rd' `
+                        -CN 'example.com' `
+                        -CsVipName 'cs_example_http' `
+                        -CertDir 'C:\Certs' `
+                        -EmailAddress 'hostmaster@example.com' `
+                        -PostPoSHScriptFilename 'post.ps1' `
+                        -PostPoSHScriptDir 'scripts' `
+                        -DisableLogging `
+                        -NoConsoleOutput
+                } | Should -Throw -ExpectedMessage "*PostPoSHScriptDir must be a full path: 'scripts'*"
             }
 
             It 'reports intent and changes nothing under WhatIf' {
@@ -642,6 +788,62 @@ Describe 'ACME helper functions' {
                     Test-Path -LiteralPath $logPath | Should -BeTrue
                     (Get-Content -LiteralPath $logPath -Raw) | Should -Match 'would be renewed'
                 } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            It 'accepts a post script file name found in the config PostPoSHScriptDir' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                $scriptDir = Join-Path $dir 'scripts'
+                New-Item -ItemType Directory -Path $scriptDir -Force | Out-Null
+                Set-Content -LiteralPath (Join-Path $scriptDir 'post.ps1') -Value 'param($Thumbprint, $PFXfilename, $PFXPassword)' -Encoding ASCII
+                try {
+                    $configPath = Join-Path $dir 'GenLe-Config.json'
+                    [PSCustomObject]@{
+                        settings     = [PSCustomObject]@{
+                            ManagementURL         = 'https://ns-01.domain.local'
+                            ADCCredentialUsername = 'nsroot'
+                            ADCCredentialPassword = ConvertTo-NSACMECertificateLegacySecret -Object 'Sup3rS3cretP@ssw0rd'
+                            LogFile               = Join-Path $dir 'run.log'
+                            PostPoSHScriptDir     = $scriptDir
+                        }
+                        certrequests = @([PSCustomObject]@{
+                                Enabled                = $true
+                                CN                     = 'example.com'
+                                ValidationMethod       = 'http'
+                                CsVipName              = @('cs_example_http')
+                                CertDir                = $dir
+                                EmailAddress           = 'hostmaster@example.com'
+                                KeyLength              = '2048'
+                                CertKeyNameToUpdate    = 'example-cert'
+                                PostPoSHScriptFilename = 'post.ps1'
+                            })
+                    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+                    Mock Import-Module {} -ParameterFilter { $Name -eq 'Posh-ACME' }
+                    Mock Set-NSACMEPoshACMEServer {}
+                    Mock Connect-NSNode { [pscustomobject]@{ IsHA = $false; IsPrimary = $true } }
+                    Mock Invoke-NSGetSSLCertKey {
+                        [pscustomobject]@{
+                            certkey             = 'example-cert'
+                            subject             = 'CN=example.com'
+                            status              = 'Valid'
+                            clientcertnotbefore = '{0} GMT' -f (Get-Date).AddDays(-120).ToUniversalTime().ToString('MMM d HH:mm:ss yyyy', [System.Globalization.CultureInfo]::InvariantCulture)
+                            clientcertnotafter  = '{0} GMT' -f (Get-Date).AddDays(-5).ToUniversalTime().ToString('MMM d HH:mm:ss yyyy', [System.Globalization.CultureInfo]::InvariantCulture)
+                        }
+                    }
+                    function Get-PAServer { param($DirectoryUrl) [pscustomobject]@{ renewalInfo = $null; DisableARI = $true } }
+                    function Get-PACertificate { param($MainDomain) $null }
+                    function Get-PAAccount { param($ID, $Contact, $KeyLength, $Status, [switch]$List, [switch]$Refresh) [pscustomobject]@{ ID = '12345' } }
+                    function Set-PAAccount { param($ID, [switch]$Force) }
+                    function Get-PAOrder { param($MainDomain, [switch]$Refresh) $null }
+                    function New-PAOrder { param($Domain, $KeyLength, $FriendlyName, $PfxPassSecure, [switch]$AlwaysNewKey, [switch]$Force) }
+
+                    $result = Request-NSACMECertificate -ConfigFile $configPath -AutoRun -Production -SkipCertificateCheck -NoConsoleOutput -WhatIf
+
+                    $result.Status | Should -Be 'WhatIf'
+                } finally {
+                    $script:NSACMECertificateLogFile = $null
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                 }
             }
@@ -1091,7 +1293,7 @@ Describe 'ACME helper functions' {
                 New-Item -ItemType Directory -Path $targetRoot | Out-Null
                 try {
                     $orderDir = Join-Path $sourceRoot '3416058976'
-                    $domainDir = Join-Path $orderDir 'topdesk-va-upgr.vgmdiensten.nl'
+                    $domainDir = Join-Path $orderDir 'portal.example.com'
                     New-Item -ItemType Directory -Path $domainDir -Force | Out-Null
                     Set-Content -LiteralPath (Join-Path $domainDir 'fullchain.pfx') -Value 'pfx' -Encoding ASCII
                     Set-Content -LiteralPath (Join-Path $domainDir 'cert.pfx') -Value 'pfx' -Encoding ASCII
@@ -1109,9 +1311,9 @@ Describe 'ACME helper functions' {
                         FullChainFile = (Join-Path $domainDir 'fullchain.cer')
                     }
 
-                    $result = Copy-NSACMECertificateArtifactsToCertDir -Certificate $certificate -CertDir $targetRoot -CommonName 'topdesk-va-upgr.vgmdiensten.nl'
+                    $result = Copy-NSACMECertificateArtifactsToCertDir -Certificate $certificate -CertDir $targetRoot -CommonName 'portal.example.com'
 
-                    $expectedDir = Join-Path $targetRoot 'LECRT-20260523-020149-topdesk-va-upgr.vgmdiensten.nl'
+                    $expectedDir = Join-Path $targetRoot 'LECRT-20260523-020149-portal.example.com'
                     (Test-Path -LiteralPath (Join-Path $expectedDir 'fullchain.pfx')) | Should -BeTrue
                     (Test-Path -LiteralPath (Join-Path $expectedDir 'cert.pfx')) | Should -BeTrue
                     (Test-Path -LiteralPath (Join-Path $expectedDir 'chain.cer')) | Should -BeTrue
@@ -1130,17 +1332,17 @@ Describe 'ACME helper functions' {
                 $certDir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
                 New-Item -ItemType Directory -Path $certDir | Out-Null
                 try {
-                    New-Item -ItemType Directory -Path (Join-Path $certDir 'LECRT-20250101-010101-topdesk-va-upgr.vgmdiensten.nl') | Out-Null
-                    New-Item -ItemType Directory -Path (Join-Path $certDir 'LECRT-20260501-010101-topdesk-va-upgr.vgmdiensten.nl') | Out-Null
-                    New-Item -ItemType Directory -Path (Join-Path $certDir 'LECRT-20250101-010101-other.vgmdiensten.nl') | Out-Null
+                    New-Item -ItemType Directory -Path (Join-Path $certDir 'LECRT-20250101-010101-portal.example.com') | Out-Null
+                    New-Item -ItemType Directory -Path (Join-Path $certDir 'LECRT-20260501-010101-portal.example.com') | Out-Null
+                    New-Item -ItemType Directory -Path (Join-Path $certDir 'LECRT-20250101-010101-other.example.com') | Out-Null
 
                     Mock Get-Date { [datetime]'2026-06-08T15:00:00' }
-                    $result = Remove-NSACMECertificateExpiredDiskCertificate -CertDir $certDir -Days 100 -CN 'topdesk-va-upgr.vgmdiensten.nl'
+                    $result = Remove-NSACMECertificateExpiredDiskCertificate -CertDir $certDir -Days 100 -CN 'portal.example.com'
 
                     $result.Removed | Should -Be 1
-                    (Test-Path -LiteralPath (Join-Path $certDir 'LECRT-20250101-010101-topdesk-va-upgr.vgmdiensten.nl')) | Should -BeFalse
-                    (Test-Path -LiteralPath (Join-Path $certDir 'LECRT-20260501-010101-topdesk-va-upgr.vgmdiensten.nl')) | Should -BeTrue
-                    (Test-Path -LiteralPath (Join-Path $certDir 'LECRT-20250101-010101-other.vgmdiensten.nl')) | Should -BeTrue
+                    (Test-Path -LiteralPath (Join-Path $certDir 'LECRT-20250101-010101-portal.example.com')) | Should -BeFalse
+                    (Test-Path -LiteralPath (Join-Path $certDir 'LECRT-20260501-010101-portal.example.com')) | Should -BeTrue
+                    (Test-Path -LiteralPath (Join-Path $certDir 'LECRT-20250101-010101-other.example.com')) | Should -BeTrue
                 } finally {
                     Remove-Item -LiteralPath $certDir -Recurse -Force -ErrorAction SilentlyContinue
                 }
