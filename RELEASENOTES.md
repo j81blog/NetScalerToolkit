@@ -1,39 +1,83 @@
 ﻿# Release Notes
 
+## v2026.1103.2130
+
+### New
+- NEW: Example post script `Examples\PostScripts\Update-ExchangeCertificate.ps1`. It installs the renewed certificate on one or more Exchange servers and enables it for IIS and SMTP by default. A custom RBAC role with `Get-`, `Import-` and `Enable-ExchangeCertificate` is sufficient
+- NEW: `-RemovePreviousCertificate` on the Exchange example removes older certificates with the same subject. It needs `Remove-ExchangeCertificate` in the role
+
+### Changed
+- CHANGED: Status output is now part of the toolkit. The ConsoleStatus module is no longer installed or imported. You can remove it if no other tool uses it
+- CHANGED: The plain-text console fallback is removed. `Invoke-NSCleanCertKeyFiles` writes expired and expiring certkeys and failed deletes as WARN status lines only
+
+### Fixed
+- FIX: The post script step always showed OK. It now shows WARN with the error when the script is missing, throws, or rejects the parameters
+- FIX: Post script output is logged as it arrives. Output and `Write-Host` go to Info, verbose and debug to Debug, warnings and errors to Warning. Warnings, errors and a non-zero exit code set the step to WARN
+- FIX: The Results recap in the log file uses one line per certificate. The log path is written once at the end
+- FIX: `-NoConsoleOutput` showed status lines after an earlier run in the same session
+- FIX: The Posh-ACME "renewed AS SOON AS POSSIBLE" warning split the status line. It is now logged at Debug
+- FIX: A post script on a UNC path is logged without the `Microsoft.PowerShell.Core\FileSystem::` prefix
+
+### Improved
+- IMPROVED: The details of a renewed certificate show at the end of its own section, not in the Results recap
+- IMPROVED: The Results recap uses one line per certificate and the `yyyy-MM-dd HH:mm` date format
+- IMPROVED: Tests added for post script output, the recap log lines, the Posh-ACME warning and `-NoConsoleOutput`
+
+### Known Issues
+- None at the moment
+
+## v2026.914.1645
+
+### New
+- NEW: `-PostPoSHScriptDir` sets the folder for post scripts, so `PostPoSHScriptFilename` can be a file name only. Set it on the command line or under `settings` in an AutoRun config. The command line value wins. The value must be a full path
+
+### Fixed
+- FIX: The default log file went to the module's `Public` folder. A log path without a directory now goes to `CertDir`, or to `%LOCALAPPDATA%\NetScalerToolkit` when there is no `CertDir`. A full path is used as given
+- FIX: `-LogFile` now works with `-AutoRun` and overrides `LogFile` in the config file
+- FIX: A relative `PostPoSHScriptFilename` was resolved against a module folder that does not exist. It now resolves against `PostPoSHScriptDir`. A missing script now fails the request before the certificate is ordered
+
+### Improved
+- IMPROVED: Documentation for the log file location and the post script folder. The `-LogFile` help no longer names the unused `GenLE-Log.txt` default
+- IMPROVED: Tests added for the log path, `-LogFile` precedence and the post script path rules
+
+### Known Issues
+- None at the moment
+
 ## v2026.824.2030
 
 ### New
-- NEW: A request is renewed when it no longer matches the certificate it last produced: added or removed SANs, a changed key length, or a move between staging and production. Tracked in the JSON config with `LastIssuedSerial`, `LastIssuedDomains`, `LastIssuedAcmeServer` and `LastIssuedKeyLength`, written only after a successful deploy and only trusted while the serial still matches the deployed certkey, so a first run after upgrading renews nothing on this basis
-- NEW: A staging certificate found on the appliance during a production run is replaced, even when it is still inside its validity window
-- NEW: A certkey the NetScaler does not report as `Valid`, or one issued to a different common name than the request, is replaced
-- NEW: `Request-NSACMECertificate` supports `-WhatIf` and `-Confirm`. A `-WhatIf` run connects, reads the installed certkeys and ACME metadata, and makes the real renewal decision for every request, then stops before requesting anything from the provider, changing anything on the NetScaler, or writing the config. The log is still written, so the decision and its reason are recorded for every request. It is not a simulation of the ACME exchange, which would publish challenges the provider cannot validate and report failures that mean nothing
+- NEW: A request renews when it no longer matches its last certificate: changed SANs, changed key length, or a switch between staging and production. The config stores this in `LastIssuedSerial`, `LastIssuedDomains`, `LastIssuedAcmeServer` and `LastIssuedKeyLength`. The first run after an upgrade does not renew on this basis
+- NEW: A production run replaces a staging certificate on the appliance, also when it is still valid
+- NEW: A certkey that is not `Valid` on the NetScaler, or that has a different common name, is replaced
+- NEW: `Request-NSACMECertificate` supports `-WhatIf` and `-Confirm`. `-WhatIf` makes the real renewal decision and logs it, then stops before it requests or changes anything
+
+### Changed
+- CHANGED: ConsoleStatus 2026.824.1230 is the minimum version
 
 ### Fixed
-- FIX: The renewal decision now treats the certificate installed on the NetScaler as the primary source. Local Posh-ACME state is a per-machine cache, so a stale order left by another machine or an older ACME account could claim a certificate had expired while the appliance was serving a valid one, renewing certificates that did not need it. Provider renewal information such as ARI can still move renewal earlier, but only when the ACME order describes the certificate that is actually installed
-- FIX: The NetScaler certkey renewal source never worked. The sslcertkey validity fields were read under names NITRO does not use, and the NITRO date format (`Jul 16 18:51:18 2020 GMT`, including a space padded day) could not be parsed. `daystoexpiration` alone is now enough to establish expiry
-- FIX: `CertExpires` and `RenewAfter` were written as local time carrying a literal `Z`, so every run reparsed them as UTC and shifted the stored values by the local offset. They are now stored as true UTC and survive any number of runs unchanged
-- FIX: Renewal metadata is no longer written from the pre-flight decision. Values describing an issued certificate are written after a successful deploy, so a failed renewal can no longer replace accurate dates with a guess taken from whichever source the decision happened to use
-- FIX: `ForceCertRenew` set on a request in a JSON config is reset after the certificate is successfully deployed. It previously persisted and renewed the same certificate on every subsequent run. The reset happens after the deploy, not after issuance, so a failed NetScaler update still retries next run
-- FIX: Posh-ACME orders are scoped to the current ACME account, but the renewal check read them before the account was selected. Which orders were visible therefore depended on whichever account happened to be active and changed partway through a run, so the same request could be skipped in one run and renewed in the next on identical input. The account is now selected before the order metadata is read, and is never registered for a request that only gets checked
-- FIX: `RenewalSource` and `RenewalStrategy` were overwritten with a fixed `ACME order` value after every successful deploy, so a forced or definition driven renewal was recorded as an ACME order decision. They now keep what the renewal check decided
-- FIX: The config file is saved by merging into the file as it stands rather than overwriting it with the copy loaded at run start. Only fields the run owns are replaced, and only on requests it processed, so an edit made while a run is in progress is no longer discarded. The write goes through a temporary file and keeps the previous version as `<config>.bak`
+- FIX: The renewal decision uses the certificate on the NetScaler first. Local Posh-ACME state no longer causes unnecessary renewals. ARI can still make renewal earlier when the ACME order matches the installed certificate
+- FIX: The NetScaler certkey renewal source did not work. The validity field names and the NITRO date format are now read correctly
+- FIX: `CertExpires` and `RenewAfter` are stored as UTC. They no longer shift by the local offset on every run
+- FIX: Renewal metadata is written only after a successful deploy
+- FIX: `ForceCertRenew` in a JSON config resets after a successful deploy. Before, it renewed the certificate on every run
+- FIX: The ACME account is selected before the renewal check reads the orders. Before, the same request could skip in one run and renew in the next
+- FIX: `RenewalSource` and `RenewalStrategy` keep the value from the renewal check. Before, a deploy set them to `ACME order`
+- FIX: The config save merges into the current file. Edits made during a run are kept. The save uses a temporary file and keeps the previous version as `<config>.bak`
+- FIX: A warning during an open status line split the line. The warning now shows as a note and the item shows WARN
 
 ### Improved
-- IMPROVED: The console header reports the running NetScalerToolkit version. Which build actually ran is the first thing needed when a run behaves unexpectedly, and it was previously only in the log file
-- IMPROVED: The log header reports NetScalerToolkit, Posh-ACME and ConsoleStatus through one resolver. It distinguishes a loaded version from an installed one, since the header is written before those two modules are imported, and previously reported the highest installed Posh-ACME version as though it were the one in use
-- IMPROVED: A `Loaded ConsoleStatus v<version>` line matches the existing Posh-ACME one, and a warning is logged when ConsoleStatus is unavailable and console output falls back to plain text
-- IMPROVED: The Setup section reports `Load ConsoleStatus` alongside `Load Posh-ACME`, so both dependencies are shown the same way. The header line above it names the NetScalerToolkit version
-- FIX: A warning raised while an item line was open printed straight to the host, splitting that line and stranding its dotted filler and status block. Connecting to a NetScaler whose secondary HA node is unreachable did exactly that. Such a warning is now attached to the open item as a note, and the item reports WARN instead of OK
-- IMPROVED: A skipped request prints its reason as three lines rather than one wrapped sentence: what the state is, when renewal opens, and how to override it. The decision now carries `ReasonLines` beside `Reason`, so the log and the notification mail keep the single sentence they had
-- CHANGE: ConsoleStatus 2026.824.1230 is now the minimum. `Add-ConsoleStepNote` from that build is what puts each note on its own line, and the import check looks for it
-- IMPROVED: Several warnings raised while one item is open now each get their own marked line instead of being glued into one paragraph separated by `; `. Uses `Add-ConsoleStepNote` from ConsoleStatus 2026.824.1230, detected at import rather than required, so the toolkit keeps working against older builds and the two modules can be published in either order
-- IMPROVED: The Results recap fits one line per certificate. The label and value columns widened from 26 and 24 to 32, so a common name such as `api-test.example.com` is no longer truncated, the value column is left empty when the certkey is named after the common name rather than printing the same name twice, and a skipped entry shows its renew date instead of repeating the full reason that already appeared under that certificate's own section. The complete reason is still written to the log
-- IMPROVED: Disabled certificate requests are logged by name instead of only counted, so a request excluded by `Enabled: false` is visible in the log
+- IMPROVED: The console header shows the NetScalerToolkit version
+- IMPROVED: The log header shows the loaded or installed version of NetScalerToolkit, Posh-ACME and ConsoleStatus
+- IMPROVED: The log and the Setup section show `Load ConsoleStatus` next to `Load Posh-ACME`
+- IMPROVED: A skipped request shows its reason in three lines: the state, the renewal date and how to override
+- IMPROVED: Each warning on an open item gets its own line
+- IMPROVED: The Results recap uses one line per certificate with wider columns
+- IMPROVED: The log names each disabled request
 - IMPROVED: The certkey renewal source logs status, validity, serial and issuer
-- IMPROVED: `CurrentCertIsProduction` is retired and removed from a request when it is next saved. `LastIssuedAcmeServer` carries the same information
-- IMPROVED: Test coverage added for the NITRO date format, the deployed certificate decision path, request definition drift, first run after upgrade, UTC round tripping, the config merge and backup, and the ACME account being selected before order metadata is read
-- IMPROVED: Documentation updated for the renewal decision order, the one shot `ForceCertRenew` flag, the `LastIssued*` config fields, and the merging config save
-- IMPROVED: `-UnbindGlobalVPNCertOnUpdate` is documented. It shipped in v2026.817.1230 but appeared in no page, including the generated command reference. Global VPN Binding now covers updating a certkey that is already bound, the NITRO 1541 message, and the alternative of moving the binding to a new certkey name
+- IMPROVED: `CurrentCertIsProduction` is removed from a request at the next save. `LastIssuedAcmeServer` replaces it
+- IMPROVED: Tests added for the NITRO date format, the renewal decision, definition changes, UTC storage, the config merge and the ACME account selection
+- IMPROVED: Documentation for the renewal decision, `ForceCertRenew`, the `LastIssued*` fields and the config save
+- IMPROVED: `-UnbindGlobalVPNCertOnUpdate` is documented, including the NITRO 1541 message and the option to bind a new certkey name
 
 ### Known Issues
 - None at the moment

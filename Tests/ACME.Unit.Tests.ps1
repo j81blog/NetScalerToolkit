@@ -1,4 +1,4 @@
-$modulePath = Join-Path -Path $PSScriptRoot -ChildPath '..\NetScalerToolkit\NetScalerToolkit.psd1'
+﻿$modulePath = Join-Path -Path $PSScriptRoot -ChildPath '..\NetScalerToolkit\NetScalerToolkit.psd1'
 Import-Module $modulePath -Force
 
 # Exception types whose Data dictionary is unusable, mirroring third-party exceptions
@@ -187,8 +187,8 @@ Describe 'ACME helper functions' {
             }
 
             It 'marks an installed but unloaded module instead of presenting it as in use' {
-                # The log header is written before Posh-ACME and ConsoleStatus are imported, so an
-                # installed version must not read as the running one.
+                # The log header is written before Posh-ACME is imported, so an installed version
+                # must not read as the running one.
                 Mock Get-Module { } -ParameterFilter { -not $ListAvailable }
                 Mock Get-Module { [pscustomobject]@{ Name = 'Posh-ACME'; Version = [version]'4.31.0' } } -ParameterFilter { $ListAvailable }
 
@@ -207,11 +207,11 @@ Describe 'ACME helper functions' {
                 $result.Display | Should -Be 'not installed'
             }
 
-            It 'resolves Posh-ACME and ConsoleStatus through the same code path' {
+            It 'resolves NetScalerToolkit and Posh-ACME through the same code path' {
+                $toolkit = Get-NSACMECertificateModuleVersion -Name 'NetScalerToolkit'
                 $poshACME = Get-NSACMECertificateModuleVersion -Name 'Posh-ACME'
-                $consoleStatus = Get-NSACMECertificateModuleVersion -Name 'ConsoleStatus'
 
-                foreach ($result in @($poshACME, $consoleStatus)) {
+                foreach ($result in @($toolkit, $poshACME)) {
                     $result.PSObject.Properties.Name | Should -Contain 'Loaded'
                     $result.PSObject.Properties.Name | Should -Contain 'Display'
                     $result.Display | Should -Not -BeNullOrEmpty
@@ -1057,6 +1057,116 @@ Describe 'ACME helper functions' {
 
         }
 
+        Context 'post script execution' {
+            BeforeAll {
+                function Invoke-TestPostScript {
+                    param([string]$Body)
+                    $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                    New-Item -ItemType Directory -Path $dir | Out-Null
+                    try {
+                        $path = Join-Path $dir 'post.ps1'
+                        Set-Content -LiteralPath $path -Value "param(`$Thumbprint, `$PFXfilename, `$PFXPassword)`r`n$Body" -Encoding ASCII
+                        Request-NSACMECertificatePostScript -ScriptPath $path -Thumbprint 'AB' -PfxPath 'C:\cert.pfx' -PfxPassword 'pw'
+                    } finally {
+                        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                    }
+                }
+            }
+
+            BeforeEach {
+                Mock Write-NSStatusItem {}
+                Mock Write-NSStatusResult {}
+                Mock Write-NSACMECertificateLog {}
+            }
+
+            It 'logs each output type at its own level and closes as WARN' {
+                $result = Invoke-TestPostScript -Body @'
+Write-Output 'plain output'
+Write-Host 'host output'
+Write-Warning 'warning output'
+Write-Error 'error output'
+Write-Verbose 'verbose output' -Verbose
+'@
+
+                $result.Status | Should -Be 'Warning'
+                $result.WarningCount | Should -Be 2
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Info' -and $Message -eq 'plain output' }
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Info' -and $Message -eq 'host output' }
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Warning' -and $Message -eq 'warning output' }
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Warning' -and $Message -eq 'error output' }
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Debug' -and $Message -eq 'verbose output' }
+                Should -Invoke Write-NSStatusResult -Times 1 -Exactly -ParameterFilter { $Status -eq 'WARN' }
+            }
+
+            It 'closes as OK when the script reports no problem' {
+                $result = Invoke-TestPostScript -Body "Write-Output 'done'"
+
+                $result.Status | Should -Be 'Completed'
+                Should -Invoke Write-NSStatusResult -Times 1 -Exactly -ParameterFilter { $Status -eq 'OK' }
+            }
+
+            It 'treats a non-zero exit code as a warning' {
+                $result = Invoke-TestPostScript -Body 'exit 3'
+
+                $result.Status | Should -Be 'Warning'
+                $result.ExitCode | Should -Be 3
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Warning' -and $Message -like '*exited with code 3*' }
+                Should -Invoke Write-NSStatusResult -Times 1 -Exactly -ParameterFilter { $Status -eq 'WARN' }
+            }
+
+            It 'closes as WARN with the error and keeps output written before a throw' {
+                $result = Invoke-TestPostScript -Body "Write-Output 'before'`r`nthrow 'post script broke'"
+
+                $result.Status | Should -Be 'Failed'
+                $result.Message | Should -Be 'post script broke'
+                Should -Invoke Write-NSACMECertificateLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Info' -and $Message -eq 'before' }
+                Should -Invoke Write-NSStatusResult -Times 1 -Exactly -ParameterFilter { $Status -eq 'WARN' -and $Detail -eq 'post script broke' }
+            }
+
+            It 'closes as WARN when the script does not accept the toolkit parameters' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    $path = Join-Path $dir 'noparam.ps1'
+                    Set-Content -LiteralPath $path -Value '[CmdletBinding()] param($Other)' -Encoding ASCII
+
+                    $result = Request-NSACMECertificatePostScript -ScriptPath $path -Thumbprint 'AB' -PfxPath 'C:\cert.pfx' -PfxPassword 'pw'
+
+                    $result.Status | Should -Be 'Failed'
+                    Should -Invoke Write-NSStatusResult -Times 1 -Exactly -ParameterFilter { $Status -eq 'WARN' -and $Detail -like '*Thumbprint*' }
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            It 'runs and logs a script on a PowerShell drive by its file system path' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    Set-Content -LiteralPath (Join-Path $dir 'post.ps1') -Value "param(`$Thumbprint, `$PFXfilename, `$PFXPassword)`r`n'done'" -Encoding ASCII
+                    New-PSDrive -Name NSPostTest -PSProvider FileSystem -Root $dir | Out-Null
+
+                    $result = Request-NSACMECertificatePostScript -ScriptPath 'NSPostTest:\post.ps1' -Thumbprint 'AB' -PfxPath 'C:\cert.pfx' -PfxPassword 'pw'
+
+                    $result.Status | Should -Be 'Completed'
+                    $result.ScriptPath | Should -Be (Join-Path $dir 'post.ps1')
+                    Should -Invoke Write-NSACMECertificateLog -Times 1 -Exactly -ParameterFilter { $Message -like 'Executing post script*' -and $Message -notlike '*::*' -and $Message -notlike '*NSPostTest:*' }
+                } finally {
+                    Remove-PSDrive -Name NSPostTest -ErrorAction SilentlyContinue
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            It 'closes as WARN when the script is missing' {
+                $path = Join-Path ([System.IO.Path]::GetTempPath()) ('{0}.ps1' -f [guid]::NewGuid().ToString('N'))
+
+                $result = Request-NSACMECertificatePostScript -ScriptPath $path -Thumbprint 'AB' -PfxPath 'C:\cert.pfx' -PfxPassword 'pw'
+
+                $result.Status | Should -Be 'NotFound'
+                Should -Invoke Write-NSStatusResult -Times 1 -Exactly -ParameterFilter { $Status -eq 'WARN' -and $Detail -like '*not found*' }
+            }
+        }
+
         Context 'ACME logging' {
             It 'redacts registered sensitive values and known secret fields' {
                 $script:NSACMECertificateSensitiveValues = [System.Collections.Generic.List[object]]::new()
@@ -1096,7 +1206,6 @@ Describe 'ACME helper functions' {
                     $script:NSACMECertificateLogFile = $logPath
                     $script:NSACMECertificateLogLevel = 'Debug'
                     $script:NSACMECertificateLogType = 'jsonl'
-                    $script:NSACMECertificateNoConsoleOutput = $true
                     $script:NSACMECertificateSensitiveValues = [System.Collections.Generic.List[object]]::new()
                     Add-NSACMECertificateSensitiveValue -Value 'JsonSecret123!' -Placeholder '<PfxPassword>'
 
@@ -1111,7 +1220,6 @@ Describe 'ACME helper functions' {
                 } finally {
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                     $script:NSACMECertificateLogFile = $null
-                    $script:NSACMECertificateNoConsoleOutput = $false
                 }
             }
 
@@ -1123,7 +1231,6 @@ Describe 'ACME helper functions' {
                     $script:NSACMECertificateLogFile = $logPath
                     $script:NSACMECertificateLogLevel = 'Info'
                     $script:NSACMECertificateLogType = 'txt'
-                    $script:NSACMECertificateNoConsoleOutput = $true
                     $script:NSACMECertificateSensitiveValues = [System.Collections.Generic.List[object]]::new()
 
                     Initialize-NSACMECertificateLog -Path $logPath -LogType txt
@@ -1135,7 +1242,6 @@ Describe 'ACME helper functions' {
                 } finally {
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                     $script:NSACMECertificateLogFile = $null
-                    $script:NSACMECertificateNoConsoleOutput = $false
                 }
             }
 
@@ -1147,7 +1253,6 @@ Describe 'ACME helper functions' {
                     $script:NSACMECertificateLogFile = $logPath
                     $script:NSACMECertificateLogLevel = 'Debug'
                     $script:NSACMECertificateLogType = 'txt'
-                    $script:NSACMECertificateNoConsoleOutput = $true
                     $script:NSACMECertificateSensitiveValues = [System.Collections.Generic.List[object]]::new()
                     Add-NSACMECertificateSensitiveValue -Value 'TextSecret123!' -Placeholder '<PfxPassword>'
 
@@ -1162,7 +1267,6 @@ Describe 'ACME helper functions' {
                 } finally {
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                     $script:NSACMECertificateLogFile = $null
-                    $script:NSACMECertificateNoConsoleOutput = $false
                 }
             }
 
@@ -1175,7 +1279,6 @@ Describe 'ACME helper functions' {
                     $script:NSACMECertificateLogFile = $logPath
                     $script:NSACMECertificateLogLevel = 'Info'
                     $script:NSACMECertificateLogType = 'txt'
-                    $script:NSACMECertificateNoConsoleOutput = $true
                     $script:NSACMECertificateSensitiveValues = [System.Collections.Generic.List[object]]::new()
 
                     Initialize-NSACMECertificateLog -Path $logPath -LogType txt
@@ -1186,7 +1289,6 @@ Describe 'ACME helper functions' {
                     if ($stream) { $stream.Dispose() }
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                     $script:NSACMECertificateLogFile = $null
-                    $script:NSACMECertificateNoConsoleOutput = $false
                 }
             }
 
@@ -1198,7 +1300,6 @@ Describe 'ACME helper functions' {
                     $script:NSACMECertificateLogFile = $logPath
                     $script:NSACMECertificateLogLevel = 'Info'
                     $script:NSACMECertificateLogType = 'txt'
-                    $script:NSACMECertificateNoConsoleOutput = $true
                     $script:NSACMECertificateSensitiveValues = [System.Collections.Generic.List[object]]::new()
                     Initialize-NSACMECertificateLog -Path $logPath -LogType txt
 
@@ -1221,7 +1322,6 @@ Describe 'ACME helper functions' {
                 } finally {
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                     $script:NSACMECertificateLogFile = $null
-                    $script:NSACMECertificateNoConsoleOutput = $false
                 }
             }
 
@@ -1229,7 +1329,6 @@ Describe 'ACME helper functions' {
                 $script:NSACMECertificateLogFile = $null
                 $script:NSACMECertificateLogLevel = 'Info'
                 $script:NSACMECertificateLogType = 'txt'
-                $script:NSACMECertificateNoConsoleOutput = $false
 
                 $output = Write-NSACMECertificateResultSummary -Results @([pscustomobject]@{
                         CN = 'example.com'
@@ -1245,11 +1344,53 @@ Describe 'ACME helper functions' {
                 $output | Should -BeNullOrEmpty
             }
 
-            It 'reports the certificate details in the result summary' {
+            It 'keeps a successful certificate to one line in the result summary' {
+                $script:SummaryItems = @()
+                $script:SummaryDetails = @()
+                Mock Write-NSACMECertificateLog {}
+                Mock Write-NSStatusSection {}
+                Mock Write-NSStatusItem { $script:SummaryItems += $Label }
+                Mock Write-NSStatusResult { $script:SummaryDetails += $Detail }
+
+                Write-NSACMECertificateResultSummary -Results @([pscustomobject]@{
+                        CN          = 'example.com'
+                        Domains     = @('example.com')
+                        Status      = 'Success'
+                        CertKeyName = 'example.com'
+                        NotAfter    = [datetime]'2026-11-22 18:41:09'
+                        Thumbprint  = 'ABC123'
+                        CertDir     = 'C:\Certs'
+                    })
+
+                $script:SummaryItems | Should -Be @('example.com')
+                $script:SummaryDetails | Should -Be @('expires 2026-11-22 18:41')
+            }
+
+            It 'logs one line per certificate in the summary and names the log file once' {
+                $script:SummaryLog = @()
+                Mock Write-NSACMECertificateLog { $script:SummaryLog += [pscustomobject]@{ Message = $Message } }
+                Mock Write-NSStatusSection {}
+                Mock Write-NSStatusItem {}
+                Mock Write-NSStatusResult {}
+
+                Write-NSACMECertificateResultSummary -Results @(
+                    [pscustomobject]@{ CN = 'ok.example.com'; Status = 'Success'; NotAfter = [datetime]'2027-02-01 20:03'; LogFile = 'C:\Logs\acme.log' }
+                    [pscustomobject]@{ CN = 'skip.example.com'; Status = 'Skipped'; RenewAfter = [datetime]'2026-12-16 00:24'; Reason = 'outside window'; LogFile = 'C:\Logs\acme.log' }
+                    [pscustomobject]@{ CN = 'fail.example.com'; Status = 'Failed'; Reason = 'DNS problem'; LogFile = 'C:\Logs\acme.log' }
+                )
+
+                $script:SummaryLog.Count | Should -Be 4
+                $script:SummaryLog[0].Message | Should -Be 'ok.example.com: completed. expires 2027-02-01 20:03'
+                $script:SummaryLog[1].Message | Should -Be 'skip.example.com: skipped, renew after 2026-12-16 00:24'
+                $script:SummaryLog[2].Message | Should -Be 'fail.example.com: failed. DNS problem'
+                $script:SummaryLog[3].Message | Should -Be 'Log file: C:\Logs\acme.log'
+            }
+
+            It 'reports the certificate details' {
                 $script:SummaryMessages = @()
                 Mock Write-NSACMECertificateLog { $script:SummaryMessages += $Message }
 
-                Write-NSACMECertificateResultSummary -Results @([pscustomobject]@{
+                Write-NSACMECertificateDetail -Result ([pscustomobject]@{
                         CN                      = 'example.com'
                         Domains                 = @('example.com', 'www.example.com')
                         Status                  = 'Success'
@@ -1273,6 +1414,7 @@ Describe 'ACME helper functions' {
                     })
 
                 $summary = $script:SummaryMessages -join "`n"
+                $summary | Should -Match 'Domains\s+example\.com, www\.example\.com'
                 $summary | Should -Match 'Certificate usage\s+test \(staging\)'
                 $summary | Should -Match 'Expires\s+\S+ \S+ \(90 days\)'
                 $summary | Should -Match 'Renew after\s+\S+ \S+ \(59 days\)'
@@ -1396,7 +1538,6 @@ Describe 'ACME helper functions' {
                     $script:NSACMECertificateLogFile = $logPath
                     $script:NSACMECertificateLogLevel = 'Info'
                     $script:NSACMECertificateLogType = 'jsonl'
-                    $script:NSACMECertificateNoConsoleOutput = $true
                     Initialize-NSACMECertificateLog -Path $logPath -LogType jsonl
 
                     $result = Test-NSACMECertificateChainValidation -Certificate ([pscustomobject]@{ CertFile = $certPath; ChainFile = $chainPath; Thumbprint = $leaf.Thumbprint }) -Mode None
@@ -1413,7 +1554,6 @@ Describe 'ACME helper functions' {
                 } finally {
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                     $script:NSACMECertificateLogFile = $null
-                    $script:NSACMECertificateNoConsoleOutput = $false
                 }
             }
 
@@ -1428,7 +1568,6 @@ Describe 'ACME helper functions' {
                     $script:NSACMECertificateLogFile = $logPath
                     $script:NSACMECertificateLogLevel = 'Info'
                     $script:NSACMECertificateLogType = 'jsonl'
-                    $script:NSACMECertificateNoConsoleOutput = $true
                     Initialize-NSACMECertificateLog -Path $logPath -LogType jsonl
 
                     $result = Test-NSACMECertificateChainValidation -Certificate ([pscustomobject]@{ CertFile = $certPath; Thumbprint = $leaf.Thumbprint }) -Mode Warn
@@ -1443,7 +1582,6 @@ Describe 'ACME helper functions' {
                 } finally {
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                     $script:NSACMECertificateLogFile = $null
-                    $script:NSACMECertificateNoConsoleOutput = $false
                 }
             }
 
@@ -1454,13 +1592,103 @@ Describe 'ACME helper functions' {
                 try {
                     $certPath = Join-Path $dir 'cert.cer'
                     Set-Content -LiteralPath $certPath -Value (ConvertTo-TestPem $leaf) -Encoding ASCII
-                    $script:NSACMECertificateNoConsoleOutput = $true
 
                     { Test-NSACMECertificateChainValidation -Certificate ([pscustomobject]@{ CertFile = $certPath; Thumbprint = $leaf.Thumbprint }) -Mode Fail } |
                         Should -Throw -ExpectedMessage '*Certificate chain validation*'
                 } finally {
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
-                    $script:NSACMECertificateNoConsoleOutput = $false
+                }
+            }
+
+            It 'logs the Posh-ACME renewal window warning instead of writing it to the warning stream' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    # See the chain validation wiring test below for why these are stubs, not mocks.
+                    function Get-PAServer { param($DirectoryUrl) [pscustomobject]@{ renewalInfo = $null; DisableARI = $true } }
+                    function Get-PAOrder {
+                        [CmdletBinding()]
+                        param($MainDomain, [switch]$Refresh)
+                        Write-Warning "The ACME Server has indicated this order's certificate should be renewed AS SOON AS POSSIBLE."
+                        [pscustomobject]@{ MainDomain = 'example.com'; status = 'valid' }
+                    }
+                    function Get-PACertificate { param($MainDomain) [pscustomobject]@{ CertFile = $null; Thumbprint = 'ABC123' } }
+                    function Get-PAAccount { param($ID, $Contact, $KeyLength, $Status, [switch]$List, [switch]$Refresh) [pscustomobject]@{ ID = '1'; contact = @('mailto:hostmaster@example.com') } }
+
+                    Mock Import-Module {} -ParameterFilter { $Name -eq 'Posh-ACME' }
+                    Mock Set-NSACMEPoshACMEServer {}
+                    Mock Connect-NSNode { [pscustomobject]@{ IsHA = $false; IsPrimary = $true } }
+                    Mock Invoke-NSGetSSLCertKey { $null }
+                    Mock Test-NSACMECertificateRenewalRequired {
+                        [pscustomobject]@{ ShouldRenew = $false; Reason = 'unit test skip'; Summary = 'unit test skip'; CertExpires = $null; RenewAfter = $null; Source = 'unit'; Strategy = 'unit test'; ExpireDays = 60; RenewAfterDays = 30 }
+                    }
+                    Mock Remove-NSACMECertificateHttpValidationConfig {}
+                    Mock Write-NSACMECertificateLog {}
+
+                    # The warning stream itself, not -WarningVariable: that also collects warnings a
+                    # nested command silenced.
+                    $streamOutput = Request-NSACMECertificate `
+                        -ManagementURL 'https://ns-01.domain.local' `
+                        -Username 'nsroot' `
+                        -Password 'Sup3rS3cretP@ssw0rd' `
+                        -CN 'example.com' `
+                        -ValidationMethod http `
+                        -CsVipName 'cs_example_http' `
+                        -CertKeyNameToUpdate 'san_example_com' `
+                        -CertDir $dir `
+                        -EmailAddress 'hostmaster@example.com' `
+                        -SkipCertificateCheck `
+                        -DisableLogging `
+                        -NoConsoleOutput 3>&1
+                    $requestResult = @($streamOutput | Where-Object { $_ -isnot [System.Management.Automation.WarningRecord] })
+                    $warnings = @($streamOutput | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
+
+                    $requestResult[0].Status | Should -Be 'Skipped'
+                    @($warnings | Where-Object { "$_" -like '*AS SOON AS POSSIBLE*' }) | Should -BeNullOrEmpty
+                    Should -Invoke Write-NSACMECertificateLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Debug' -and $Message -like 'Posh-ACME: *AS SOON AS POSSIBLE*' }
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+
+            It 'keeps -NoConsoleOutput silent after an earlier run left status output on' {
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                try {
+                    # See the chain validation wiring test below for why these are stubs, not mocks.
+                    function Get-PAServer { param($DirectoryUrl) [pscustomobject]@{ renewalInfo = $null; DisableARI = $true } }
+                    function Get-PAOrder { param($MainDomain, [switch]$Refresh) [pscustomobject]@{ MainDomain = 'example.com'; status = 'valid' } }
+                    function Get-PACertificate { param($MainDomain) [pscustomobject]@{ CertFile = $null; Thumbprint = 'ABC123' } }
+                    function Get-PAAccount { param($ID, $Contact, $KeyLength, $Status, [switch]$List, [switch]$Refresh) [pscustomobject]@{ ID = '1'; contact = @('mailto:hostmaster@example.com') } }
+
+                    Mock Import-Module {} -ParameterFilter { $Name -eq 'Posh-ACME' }
+                    Mock Set-NSACMEPoshACMEServer {}
+                    Mock Connect-NSNode { [pscustomobject]@{ IsHA = $false; IsPrimary = $true } }
+                    Mock Invoke-NSGetSSLCertKey { $null }
+                    Mock Test-NSACMECertificateRenewalRequired {
+                        [pscustomobject]@{ ShouldRenew = $false; Reason = 'unit test skip'; Summary = 'unit test skip'; CertExpires = $null; RenewAfter = $null; Source = 'unit'; Strategy = 'unit test'; ExpireDays = 60; RenewAfterDays = 30 }
+                    }
+                    Mock Remove-NSACMECertificateHttpValidationConfig {}
+
+                    Initialize-NSConsoleStatus
+                    $streamOutput = Request-NSACMECertificate `
+                        -ManagementURL 'https://ns-01.domain.local' `
+                        -Username 'nsroot' `
+                        -Password 'Sup3rS3cretP@ssw0rd' `
+                        -CN 'example.com' `
+                        -ValidationMethod http `
+                        -CsVipName 'cs_example_http' `
+                        -CertKeyNameToUpdate 'san_example_com' `
+                        -CertDir $dir `
+                        -EmailAddress 'hostmaster@example.com' `
+                        -SkipCertificateCheck `
+                        -DisableLogging `
+                        -NoConsoleOutput 6>&1
+
+                    @($streamOutput | Where-Object { $_ -is [System.Management.Automation.InformationRecord] }) | Should -BeNullOrEmpty
+                    $script:NSConsoleStatusEnabled | Should -BeFalse
+                } finally {
+                    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                 }
             }
 
@@ -1731,8 +1959,9 @@ Describe 'ACME helper functions' {
                             Found     = $true
                         }
                     }
+                    $script:CallOrder = @()
                     Mock Invoke-NSEnableCSVServer {}
-                    Mock Invoke-NSDisableCSVServer {}
+                    Mock Invoke-NSDisableCSVServer { $script:CallOrder += 'disable' }
                     Mock Publish-NSACMECertificateHttpChallenge { @() }
                     Mock Wait-NSACMECertificateAuthorization {}
                     Mock Wait-NSACMECertificateOrderFinal {}
@@ -1740,7 +1969,8 @@ Describe 'ACME helper functions' {
                     Mock Test-NSACMECertificateChainValidation { [pscustomobject]@{ Mode = 'Warn'; Validated = $true; IsValid = $true; Status = @(); Leaf = $null; Chain = @() } }
                     Mock Install-NSACMECertificateNetScalerCertificate { [pscustomobject]@{ CertKeyName = 'san_example_com'; PfxFileName = 'unit.pfx'; PfxPath = 'C:\Certs\unit.pfx'; ChainCertKeyName = @() } }
                     Mock Remove-NSACMECertificateHttpChallengeBinding {}
-                    Mock Remove-NSACMECertificateHttpValidationConfig {}
+                    Mock Remove-NSACMECertificateHttpValidationConfig { $script:CallOrder += 'cleanup' }
+                    Mock Write-NSACMECertificateDetail { $script:CallOrder += 'detail' }
 
                     $requestResult = Request-NSACMECertificate `
                         -ManagementURL 'https://ns-01.domain.local' `
@@ -1763,6 +1993,8 @@ Describe 'ACME helper functions' {
                     Should -Invoke Publish-NSACMECertificateHttpChallenge -Times 1
                     Should -Invoke Invoke-NSDisableCSVServer -Times 1
                     @($requestResult)[0].Status | Should -Be 'Success'
+                    # Details close the certificate's own section, before the run-wide cleanup.
+                    $script:CallOrder | Should -Be @('disable', 'detail', 'cleanup')
                 } finally {
                     Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
                 }

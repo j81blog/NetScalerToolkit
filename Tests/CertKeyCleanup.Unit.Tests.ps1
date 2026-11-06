@@ -1,4 +1,4 @@
-$modulePath = Join-Path -Path $PSScriptRoot -ChildPath '..\NetScalerToolkit\NetScalerToolkit.psd1'
+﻿$modulePath = Join-Path -Path $PSScriptRoot -ChildPath '..\NetScalerToolkit\NetScalerToolkit.psd1'
 Import-Module $modulePath -Force
 
 Describe 'CertKey cleanup' {
@@ -107,7 +107,7 @@ Describe 'CertKey cleanup' {
         It 'writes a status summary and returns the cleanup result with Summary' {
             $script:SystemFiles = @([pscustomobject] @{ filename = 'orphan.pem'; filelocation = '/nsconfig/ssl/'; filemode = 'FILE' })
             # Mocking the wrapper rather than the rendered output keeps the assertion independent of
-            # whether ConsoleStatus is installed on the machine running the tests.
+            # the console width of the machine running the tests.
             Mock Write-NSStatusItem { }
             Mock Write-NSStatusSummary { }
 
@@ -248,16 +248,15 @@ bind vpn vserver vpn_gateway -certkeyName gateway_cert
             )
             # Referenced so the cleanup keeps them and the final plan still reports on them.
             $script:RunningConfig = "bind ssl vserver vs -certkeyName expired-cert`nbind ssl vserver vs -certkeyName expiring-cert"
-            # The expiry notices only reach the warning stream when ConsoleStatus is the
-            # unavailable fallback, so pin that regardless of what the test host can load.
-            Mock Import-NSConsoleStatus { $script:NSConsoleStatusEnabled = $false; return $false }
+            Mock Write-NSStatusItem { }
+            Mock Write-NSStatusResult { }
 
-            Invoke-NSCleanCertKeyFiles -Session (New-TestNSSession) -NoSaveConfig -Confirm:$false -ExpirationDays 30 -WarningVariable cleanupWarnings -WarningAction SilentlyContinue | Out-Null
+            Invoke-NSCleanCertKeyFiles -Session (New-TestNSSession) -NoSaveConfig -Confirm:$false -ExpirationDays 30 -WarningAction SilentlyContinue | Out-Null
 
-            $warningText = @($cleanupWarnings) -join "`n"
-            @($cleanupWarnings | Where-Object { $_ -match 'expired-cert' }).Count | Should -Be 1
-            $warningText | Should -Match 'expired-cert is expired and remains configured'
-            $warningText | Should -Match 'expiring-cert expires in 5 day\(s\)'
+            Should -Invoke Write-NSStatusItem -Times 1 -Exactly -ParameterFilter { $Label -eq 'expired-cert' }
+            Should -Invoke Write-NSStatusItem -Times 1 -Exactly -ParameterFilter { $Label -eq 'expiring-cert' -and $Value -eq 'expiring' }
+            Should -Invoke Write-NSStatusResult -Times 1 -Exactly -ParameterFilter { $Status -eq 'WARN' -and $Detail -eq 'expired and still configured' }
+            Should -Invoke Write-NSStatusResult -Times 1 -Exactly -ParameterFilter { $Status -eq 'WARN' -and $Detail -eq 'expires in 5 day(s)' }
         }
 
         It 'skips file cleanup when listing certificate files fails' {
