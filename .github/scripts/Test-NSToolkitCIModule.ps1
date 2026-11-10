@@ -62,6 +62,28 @@ function Test-GeneratedFunctionMetadata {
     Write-Host "Validated generated bundle count: $($generatedFiles.Count)"
 }
 
+function Test-AuthenticodeSignature {
+    param([Parameter(Mandatory)][string[]] $Path)
+
+    # A CR stripped by git invalidates a signature, so check the bytes that would be packaged.
+    $files = @(Get-ChildItem -Path $Path -Include '*.ps1', '*.psm1', '*.psd1' -Recurse)
+    $invalid = @(
+        foreach ($file in $files) {
+            $signature = Get-AuthenticodeSignature -FilePath $file.FullName
+            if ($signature.Status -ne 'Valid') {
+                [PSCustomObject] @{ Path = $file.FullName; Status = $signature.Status }
+            }
+        }
+    )
+
+    if ($invalid.Count -gt 0) {
+        $invalid | Format-Table -AutoSize | Out-String -Width 300 | Write-Host
+        throw "$($invalid.Count) of $($files.Count) file(s) do not have a valid signature. Sign them and commit them with CRLF line endings."
+    }
+
+    Write-Host "Validated signatures: $($files.Count)"
+}
+
 function Test-ModuleImport {
     param(
         [Parameter(Mandatory)][string] $ManifestPath,
@@ -89,6 +111,8 @@ Get-ChildItem -Path $ModuleRoot -Filter '*.psd1' -Recurse | ForEach-Object {
 
 Test-PowerShellSyntax -Path $ModuleRoot
 Test-GeneratedFunctionMetadata -Path $ModuleRoot
+$signedPaths = @($ModuleRoot) + @(Get-ChildItem -Path . -Filter 'GenLeCertForNS.ps1' -File | ForEach-Object FullName)
+Test-AuthenticodeSignature -Path $signedPaths
 
 powershell.exe -NoProfile -NoLogo -ExecutionPolicy Bypass -Command @"
 `$ErrorActionPreference = 'Stop'

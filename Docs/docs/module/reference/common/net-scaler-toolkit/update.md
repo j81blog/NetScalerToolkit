@@ -60,7 +60,9 @@ Accept wildcard characters: False
 
 ### -Scope
 Installation scope used when a newer version is installed.
-Defaults to CurrentUser.
+Without it, CurrentUser is used when the CurrentUser module folder is on PSModulePath.
+When it is not, as for the SYSTEM account, an elevated session uses AllUsers so the new version is found by later sessions,
+and a session that is not elevated installs for CurrentUser and returns a warning with the fix.
 
 ```yaml
 Type: String
@@ -69,7 +71,7 @@ Aliases:
 
 Required: False
 Position: 2
-Default value: CurrentUser
+Default value: None
 Accept pipeline input: False
 Accept wildcard characters: False
 ```
