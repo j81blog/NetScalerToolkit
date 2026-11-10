@@ -6,11 +6,12 @@ General coding behavior (think before coding, simplicity first, surgical changes
 execution, writing style) lives in the personal global files: `~/.claude/CLAUDE.md` for Claude Code
 and `~/.codex/AGENTS.md` for Codex. Both tools load those on their own, so they are not repeated here.
 
-The PowerShell coding standard is copied into the section below, because the source path contains a
-space and an `@` import of it does not load. Source: `~/stack/AI Memory/global/powershell/powershell.md`.
-When the source changes, update the copy.
+The PowerShell coding standard is copied into the section below from a personal file. When the
+source changes, update the copy.
 
-This file and `CLAUDE.md` are gitignored, so they may hold local paths and lab details.
+This file is public. Local paths, signing details and the test lab live in `AGENTS.local.md`, which
+is gitignored. Read it when it exists. Never put local paths, lab details or customer names in this
+file.
 
 ## Preflight
 
@@ -113,8 +114,7 @@ Copy of the personal standard, project-relevant parts only.
 
 ## Deployment
 
-- Customer runs use Windows PowerShell 5.1 from a scheduled task, at least at one site. The module
-  can be copied by hand into `C:\Program Files\WindowsPowerShell\Modules`, so a build can be deployed under a version
+- Expect customer runs on Windows PowerShell 5.1 from a scheduled task. The module can be copied by hand into `C:\Program Files\WindowsPowerShell\Modules`, so a build can be deployed under a version
   number that was never published. Check the PowerShell Gallery before reusing a version number;
   bump with `Update-ModuleInfo.ps1` when the installed build differs.
 - Test on 5.1 as well as pwsh 7. Behavior that only breaks on 5.1 (for example `Import-PSSession`)
@@ -133,17 +133,26 @@ Copy of the personal standard, project-relevant parts only.
 
 - `.\Update-ModuleInfo.ps1` bumps all four manifests to a date version and signs the module tree.
   Run it at the end of a change set.
-- It only signs when `J81FunctionLibrary` is already imported in the session (it checks
+- It only signs when the signing module from `AGENTS.local.md` is already imported in the session (it checks
   `Get-Module`, not `-ListAvailable`). Import it first or signing is silently skipped.
+
+## Release notes
+
+`RELEASENOTES.md` follows ASD-STE100 (Simplified Technical English):
+
+- One fact per sentence, short sentences, active voice, present tense, simple words.
+- Say what changed, not why or how it was found. A short "Before, ..." is fine when it shows the old
+  failure.
+- One change per entry. Split an entry that covers two features.
+- Put each entry under its matching section (New, Changed, Fixed, Improved) with the matching prefix
+  (`NEW:`, `CHANGED:`, `FIX:`, `IMPROVED:`).
+- Keep the file UTF-8 with BOM and CRLF. No customer names.
 
 ## Signing
 
-- `Import-Module 'C:\Users\JohnBillekens\stack\Scripts\Powershell\J81FunctionLibrary\J81FunctionLibrary.psd1'`.
-  The module is not on `PSModulePath`, so import it by full path.
-- `Set-Signature -FilePath <path> -ValidatePS -UseAzureSigning -ArtifactProfile JOBICO`.
-  The parameter is `-FilePath`, not `-Path`.
-- Files with a valid signature are skipped unless `-Force`. Each signed file costs one Azure signing
-  operation against a 5000/month budget, so sign as you go rather than re-signing the tree.
+- The signing commands are in `AGENTS.local.md`.
+- Files with a valid signature are skipped unless `-Force`. Sign only what changed, not the whole
+  tree.
 - Module files are signed. `Tests\*.ps1` are not, by convention. `Examples\` is not signed so far.
 - Do not edit module files with `sed` from Git Bash: it rewrites CRLF to LF, and patterns ending in
   `\r$` silently fail to match. Use the Edit tool or PowerShell, then normalize to BOM + CRLF and
@@ -216,41 +225,6 @@ Copy of the personal standard, project-relevant parts only.
 - Example post scripts live in `Examples\PostScripts\`, outside the module. On 5.1, `Import-PSSession`
   re-validates the calling script's variables, so an optional parameter with a validation attribute
   and an empty value breaks it. Validate optional parameters in the script body instead.
-
-## NetScaler test lab
-
-A live test lab is available. The VMs are not always running; ask John to start them if a node is
-unreachable.
-
-| Address | Role |
-| --- | --- |
-| `https://10.254.0.10` | SNIP, always reaches the current primary. Use this one. |
-| `https://10.254.0.11` | Node 1, usually primary |
-| `https://10.254.0.12` | Node 2 |
-
-Credentials: `Import-Clixml '.\temp\NetScalerCredentials.xml'` (user `citrix`). The file is DPAPI
-bound to John's account on this machine and `temp\` is gitignored, so it never leaves the box. Never
-print the password or copy the file elsewhere.
-
-```powershell
-$cred = Import-Clixml '.\temp\NetScalerCredentials.xml'
-$s = Connect-NSNode -ManagementUrl 'https://10.254.0.10' -Credential $cred -SkipCertificateCheck -PassThru
-```
-
-Rules:
-
-- **Staging certificates only.** Production certificates are John's to test, and Let's Encrypt
-  production has rate limits that a wasted run burns for everyone on the domain.
-- Read-only inspection (certkeys, cert links, bindings, running config) needs no confirmation.
-- Anything that changes appliance configuration, including a full `Request-NSACMECertificate` run,
-  needs confirmation first even on staging.
-- Subagents may run read-only lab queries. They must not make configuration changes.
-
-## Reference implementation
-
-`C:\Users\JohnBillekens\GitHub\GenLeCertForNS\GenLeCertForNS.ps1` is the predecessor script this
-toolkit replaces. When ACME or NetScaler behavior differs from expectations, diff against it before
-theorizing.
 
 ## NetScaler behavior worth knowing
 
