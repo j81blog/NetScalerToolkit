@@ -1065,7 +1065,8 @@ Describe 'ACME helper functions' {
                     New-Item -ItemType Directory -Path $dir | Out-Null
                     try {
                         $path = Join-Path $dir 'post.ps1'
-                        Set-Content -LiteralPath $path -Value "param(`$Thumbprint, `$PFXfilename, `$PFXPassword)`r`n$Body" -Encoding ASCII
+                        # CI runs with a global ErrorActionPreference of Stop, which makes Write-Error terminate.
+                        Set-Content -LiteralPath $path -Value "param(`$Thumbprint, `$PFXfilename, `$PFXPassword)`r`n`$ErrorActionPreference = 'Continue'`r`n$Body" -Encoding ASCII
                         Request-NSACMECertificatePostScript -ScriptPath $path -Thumbprint 'AB' -PfxPath 'C:\cert.pfx' -PfxPassword 'pw'
                     } finally {
                         Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue

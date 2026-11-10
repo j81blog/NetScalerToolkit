@@ -179,6 +179,10 @@ Copy of the personal standard, project-relevant parts only.
   assert on rendered status lines, their width depends on the host; assert on state, mock
   invocations, or the warning stream.
 - On Windows PowerShell 5.1 the full-run tests need Posh-ACME on that edition's `PSModulePath`.
+  `powershell.exe` started from pwsh rebuilds `PSModulePath`, so add the folder inside the 5.1
+  process, and append it: a pwsh `PowerShellGet` earlier in the path breaks `Install-Module` on 5.1.
+- CI runs the suite in pwsh only, with a global `$ErrorActionPreference = 'Stop'`. A test must pass
+  under both `Stop` and `Continue`.
 - Do not hand `TestDrive:` paths to module code. `Test-Path -LiteralPath` fails on them from module
   scope. Use a real temp directory.
 - Mocking a third-party cmdlet that has `ValidateScript` (for example Posh-ACME `KeyLength`) fails,
