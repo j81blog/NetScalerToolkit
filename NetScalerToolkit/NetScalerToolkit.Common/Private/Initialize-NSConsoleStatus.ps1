@@ -1,125 +1,128 @@
-﻿if (-not $script:NSConsoleStatusTestedVersion) { $script:NSConsoleStatusTestedVersion = [version]'2026.824.1230' }
-# Requires Get-ConsoleStatusState, idempotent item close/tick, Add-ConsoleStepNote, Format-SingleLine -KeepSpaces.
-if (-not $script:NSConsoleStatusMinimumVersion) { $script:NSConsoleStatusMinimumVersion = [version]'2026.824.1230' }
-if (-not $script:NSConsoleStatusMaximumVersion) { $script:NSConsoleStatusMaximumVersion = [version]'2026.9999.9999' }
-
-# ASCII glyphs only; survives transcripts and consoles without UTF-8.
-if (-not $script:NSConsoleStatusStyle) {
-    $script:NSConsoleStatusStyle = @{
-        Mode        = 'Column'
-        Indent      = 2
-        LabelWidth  = 32
-        ValueWidth  = 32
-        StatusWidth = 8
-        MaxWidth    = 120
-        Unicode     = $false
-    }
-}
-
+﻿# Status output state shared by the Write-NSStatus* functions. Adapted from ConsoleStatus
+# 2026.824.1230 and reduced to the column layout this module uses. ASCII glyphs only.
 $script:NSConsoleStatusEnabled = $false
-$script:NSConsoleStatusWarned = $false
+$script:NSStatusItemHadWarning = $false
+$script:NSStatus = @{
+    Indent       = 2
+    LabelWidth   = 32
+    ValueWidth   = 32
+    StatusWidth  = 8
+    MinWidth     = 60
+    MaxWidth     = 120
+    MaxBarLines  = 3
+    TickChar     = '*'
+    FillChar     = '.'
+    RuleChar     = '-'
+    TitleChar    = '='
+    MoreChar     = '>'
+    NoColor      = $false
+    LogAction    = $null
+    LineWidth    = 80
+    FieldWidth   = 0
+    FieldStart   = 0
+    Ticks        = 0
+    Section      = ''
+    Note         = @()
+    CurrentLabel = ''
+    CurrentValue = ''
+    TotalSteps   = 0
+    DoneSteps    = 0
+    BarLines     = 1
+    Overflowed   = $false
+    Stopwatch    = $null
+    ItemOpen     = $false
+    RunStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+}
+$script:NSStatusLog = New-Object -TypeName 'System.Collections.Generic.List[PSObject]'
+$script:NSStatusTally = @{ OK = 0; WARN = 0; FAIL = 0; SKIP = 0 }
+$script:NSStatusLogActionWarned = $false
 
-function Import-NSConsoleStatus {
+function Initialize-NSConsoleStatus {
     <#
     .SYNOPSIS
-        Loads ConsoleStatus and applies the module wide output style.
+        Starts status output for a command run.
 
     .DESCRIPTION
-        Imports a compatible ConsoleStatus version, installing the tested version when nothing
-        usable is present, then applies the module wide style and wires LogAction so every
-        completed item is also written to the request-certificate support log.
-
-        ConsoleStatus only produces console decoration, so a failure here is never fatal. When the
-        module cannot be loaded a single warning is written, the NSStatus wrappers turn into no-ops
-        and the calling command keeps its previous output.
-
-    .PARAMETER SkipInstall
-        Does not install ConsoleStatus when no compatible version is present.
+        Measures the console, fits the label and value columns to it, clears the records and
+        counts of a previous run and turns the Write-NSStatus* functions on. Call it once at the
+        start of a command; without it every Write-NSStatus* function does nothing.
 
     .PARAMETER LogAction
         Scriptblock invoked with one record per completed item. Supplied by commands that have a
         support log to write the records into.
 
-    .OUTPUTS
-        System.Boolean. True when ConsoleStatus output is active.
+    .EXAMPLE
+        Initialize-NSConsoleStatus -LogAction { param($Record) Write-Verbose $Record.Label }
 
     .NOTES
-        Function  : Import-NSConsoleStatus
+        Function  : Initialize-NSConsoleStatus
         Author    : John Billekens
         Copyright : Copyright (c) John Billekens Consultancy
-        Version   : 2026.811.1452
+        Version   : 2026.1103.2230
     #>
     [CmdletBinding()]
     param(
-        [Switch]$SkipInstall,
-
-        [scriptblock]$LogAction
+        [AllowNull()]
+        [ScriptBlock]$LogAction
     )
 
-    $script:NSConsoleStatusEnabled = $false
-    $script:NSStatusItemHadWarning = $false
+    $cfg = $script:NSStatus
+    $cfg.LogAction = $LogAction
+    $cfg.NoColor = -not [string]::IsNullOrEmpty($env:NO_COLOR)
 
-    try {
-        $loadedModule = Get-Module -Name ConsoleStatus -ErrorAction SilentlyContinue |
-            Where-Object { $_.Version -ge $script:NSConsoleStatusMinimumVersion -and $_.Version -le $script:NSConsoleStatusMaximumVersion } |
-            Select-Object -First 1
-
-        if (-not $loadedModule) {
-            $availableModules = @(Get-Module -ListAvailable -Name ConsoleStatus -ErrorAction SilentlyContinue | Sort-Object Version -Descending)
-            $compatibleModules = @($availableModules | Where-Object {
-                    $_.Version -ge $script:NSConsoleStatusMinimumVersion -and
-                    $_.Version -le $script:NSConsoleStatusMaximumVersion
-                })
-
-            if (-not $compatibleModules) {
-                if ($SkipInstall -or $script:NSConsoleStatusInstallAttempted) {
-                    throw "ConsoleStatus $script:NSConsoleStatusMinimumVersion or newer is required for status output. Install it with: Install-Module -Name ConsoleStatus -RequiredVersion $script:NSConsoleStatusTestedVersion -Scope CurrentUser"
-                }
-
-                # Once per session; no gallery access must not cost an install timeout per command.
-                $script:NSConsoleStatusInstallAttempted = $true
-
-                try {
-                    Install-Module -Name ConsoleStatus -RequiredVersion $script:NSConsoleStatusTestedVersion -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
-                } catch {
-                    Write-Verbose "Installing ConsoleStatus with -AllowClobber failed: $($_.Exception.Message). Retrying without -AllowClobber."
-                    Install-Module -Name ConsoleStatus -RequiredVersion $script:NSConsoleStatusTestedVersion -Scope CurrentUser -Force -ErrorAction Stop
-                }
-
-                Import-Module -Name ConsoleStatus -RequiredVersion $script:NSConsoleStatusTestedVersion -ErrorAction Stop
-            } else {
-                Import-Module -Name ConsoleStatus -RequiredVersion @($compatibleModules)[0].Version -ErrorAction Stop
-            }
+    $detected = 0
+    foreach ($property in @('WindowSize', 'BufferSize')) {
+        try {
+            $detected = [int]$Host.UI.RawUI.$property.Width
+        } catch {
+            $detected = 0
         }
+        if ($detected -gt 0) { break }
+    }
+    if ($detected -lt 1) { $detected = 80 }
+    $cfg.LineWidth = [Math]::Min([Math]::Max($detected - 1, $cfg.MinWidth), $cfg.MaxWidth)
 
-        # Manifest version can lag its content, so check the command surface too.
-        if (-not (Get-Command -Name 'Add-ConsoleStepNote' -Module 'ConsoleStatus' -ErrorAction SilentlyContinue)) {
-            throw "The loaded ConsoleStatus build does not provide Add-ConsoleStepNote. Update to $script:NSConsoleStatusTestedVersion or newer with: Install-Module -Name ConsoleStatus -RequiredVersion $script:NSConsoleStatusTestedVersion -Scope CurrentUser -Force"
-        }
-
-
-        $styleParams = $script:NSConsoleStatusStyle.Clone()
-        if ($LogAction) { $styleParams.LogAction = $LogAction }
-
-        ConsoleStatus\Set-ConsoleStatusStyle @styleParams
-        ConsoleStatus\Reset-ConsoleStatusLog
-
-        $script:NSConsoleStatusEnabled = $true
-    } catch {
-        if (-not $script:NSConsoleStatusWarned) {
-            $script:NSConsoleStatusWarned = $true
-            Write-Warning "ConsoleStatus could not be loaded, falling back to plain output. $($_.Exception.Message)"
+    # The value column shrinks first. The -1 is the gap in front of the status block.
+    $cfg.LabelWidth = 32
+    $cfg.ValueWidth = 32
+    $available = $cfg.LineWidth - $cfg.Indent - $cfg.StatusWidth - 1
+    while (($cfg.LabelWidth + $cfg.ValueWidth + 6) -gt $available) {
+        if ($cfg.ValueWidth -gt 8) {
+            $cfg.ValueWidth--
+        } elseif ($cfg.LabelWidth -gt 12) {
+            $cfg.LabelWidth--
+        } else {
+            break
         }
     }
 
-    return $script:NSConsoleStatusEnabled
+    # An item left open by an earlier command ends its line before its state is cleared.
+    if ($cfg.ItemOpen) { Write-NSStatusHost -Text '' }
+
+    $cfg.ItemOpen = $false
+    $cfg.Ticks = 0
+    $cfg.Note = @()
+    $cfg.CurrentLabel = ''
+    $cfg.CurrentValue = ''
+    $cfg.TotalSteps = 0
+    $cfg.DoneSteps = 0
+    $cfg.BarLines = 1
+    $cfg.Overflowed = $false
+    $cfg.Stopwatch = $null
+    $cfg.RunStopwatch.Restart()
+
+    $script:NSStatusLog.Clear()
+    $script:NSStatusTally = @{ OK = 0; WARN = 0; FAIL = 0; SKIP = 0 }
+    $script:NSStatusLogActionWarned = $false
+    $script:NSStatusItemHadWarning = $false
+    $script:NSConsoleStatusEnabled = $true
 }
 
 # SIG # Begin signature block
 # MII6AgYJKoZIhvcNAQcCoII58zCCOe8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDHWyzZlDOAT6MV
-# urzrZ5i9TSg00p1XgNn946IUDq3K5aCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCY+IMKztzxL1oh
+# vXahNvzYwFptPpsMPSZsfsKY2YFlGKCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
 # lUgTecgRwIeZMA0GCSqGSIb3DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
 # ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVu
 # dGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAy
@@ -150,61 +153,61 @@ function Import-NSConsoleStatus {
 # uVxzmq/FdxeDWds3GhhyVKVB0rYjdaNDmuV3fJZ5t0GNv+zcgKCf0Xd1WF81E+Al
 # GmcLfc4l+gcK5GEh2NQc5QfGNpn0ltDGFf5Ozdeui53bFv0ExpK91IjmqaOqu/dk
 # ODtfzAzQNb50GQOmxapMomE2gj4d8yu8l13bS3g7LfU772Aj6PXsCyM2la+YZr9T
-# 03u4aUoqlmZpxJTG9F9urJh4iIAGXKKy7aIwggbAMIIEqKADAgECAhMzAAU7VEGo
-# lx23RKiXAAAABTtUMA0GCSqGSIb3DQEBDAUAMFoxCzAJBgNVBAYTAlVTMR4wHAYD
+# 03u4aUoqlmZpxJTG9F9urJh4iIAGXKKy7aIwggbAMIIEqKADAgECAhMzAApgcKRL
+# VXge2nhCAAAACmBwMA0GCSqGSIb3DQEBDAUAMFoxCzAJBgNVBAYTAlVTMR4wHAYD
 # VQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzApBgNVBAMTIk1pY3Jvc29mdCBJ
-# RCBWZXJpZmllZCBDUyBBT0MgQ0EgMDMwHhcNMjYwODIyMjAzOTQ3WhcNMjYwODI1
-# MjAzOTQ3WjCBgzELMAkGA1UEBhMCTkwxFjAUBgNVBAgTDU5vb3JkLUJyYWJhbnQx
+# RCBWZXJpZmllZCBDUyBBT0MgQ0EgMDMwHhcNMjYxMTAyMDE0MDE2WhcNMjYxMTA1
+# MDE0MDE2WjCBgzELMAkGA1UEBhMCTkwxFjAUBgNVBAgTDU5vb3JkLUJyYWJhbnQx
 # EjAQBgNVBAcTCVNjaGlqbmRlbDEjMCEGA1UEChMaSm9obiBCaWxsZWtlbnMgQ29u
 # c3VsdGFuY3kxIzAhBgNVBAMTGkpvaG4gQmlsbGVrZW5zIENvbnN1bHRhbmN5MIIB
-# ojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAhsdohjvxG6ieFsDfsRL5MY2W
-# DacAjM9Gu4JlNDTDjN+M2/NPylPinGzAYtdahZv0H07D6xRGHh/a13IGRr1lJkjF
-# dr57yFEnFIUhGvlWqrgWere4fXlesr+DRP5+qKZo+hUj/qz+1zZ3O2AXx7lDHTKY
-# RIlqI0n0ROUJiS+gWnB9o4frvFjmM+NZ6v6MXv3Uftqb0XxM7I5vzgTO1jMLLyw6
-# yuRIk5N+uzjniFdzDRSOLy0Ii5PITJVXRC+jDUBhAyp4I89KDh56ROUSjkroi0Eq
-# yoGYU4X4ic1DmBJz1jIzC0xZiSr9ktJzL+D6WO9e1IhaD4gwGt5XU84oAkMR300i
-# YN1rkf7vXD3IOmgX3JVkG7awDjn4ljPPHce/mge7vpZwmChLfyyMy+AAN/jYtoYP
-# luVJEac7Evb2SzoRuqQWJcsA51EcImRxF6zuuSUgqbxUyixpWpFXGOYSzwZpMhPy
-# vuNwNBAVA8YxQEfN3pUQzunbhzMmUEk9Jcj0AddvAgMBAAGjggHTMIIBzzAMBgNV
+# ojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAnVjyyGHEaSM5kPEj0PmXnrii
+# z+RQo0mfEhi4d1aRSj7ahqi75poWHhgv8MD8XzGLMM2PSjLvaxwgIlq86d9Xn3FD
+# 6AxxgBaTXGyHf6qwKsDVzfGehkOvsFT/mORiqhTkO6JgBHDRf8hijYA5cG6UnNsX
+# qS2bERxHFnEynYM8PL4ic3uTXBtTyq7Wf3ZipaZJKDrPpc3UlX6IV3O3geUCGw6z
+# 8Zi1tmeTlwy8TLiTMiI58PTpfKiQVO5ubk7qtMjEzqnQ3yvI7ye0B6SonuxU2ymi
+# 7sb3jI1ZoCBsPS2nWZaYKKi+xj8UFQmB0Gw1riLHcBFSUlV2ncRCiAkxX8eL6QZ5
+# wexCg0FRt0GLziR424t4R//k+jllgA7+JlXVYr8csulwG7rBeDe6b/1zKZ8ni5vW
+# k5bwOETJ5Ct1kJ2+VccOFOlV+Y9qlgXxU1FtJVsnNrfOjpHrT82vRx5SqutLgCic
+# UuIu2p0VsPImH4JDp19p+KsdyyqYoQ1siHzSJ4yzAgMBAAGjggHTMIIBzzAMBgNV
 # HRMBAf8EAjAAMA4GA1UdDwEB/wQEAwIHgDA6BgNVHSUEMzAxBgorBgEEAYI3YQEA
 # BggrBgEFBQcDAwYZKwYBBAGCN2HK9PELgrHSgxH33KNOluu6MTAdBgNVHQ4EFgQU
-# vG6fUuRN3JHAKzu9tZUsxqMfZuEwHwYDVR0jBBgwFoAUpEMMf3ZapYXnPo0oDwwX
+# glf3Q5bglH9qb4svXMaZtVFl/ZswHwYDVR0jBBgwFoAUpEMMf3ZapYXnPo0oDwwX
 # okVpcMYwZwYDVR0fBGAwXjBcoFqgWIZWaHR0cDovL3d3dy5taWNyb3NvZnQuY29t
 # L3BraW9wcy9jcmwvTWljcm9zb2Z0JTIwSUQlMjBWZXJpZmllZCUyMENTJTIwQU9D
 # JTIwQ0ElMjAwMy5jcmwwdAYIKwYBBQUHAQEEaDBmMGQGCCsGAQUFBzAChlhodHRw
 # Oi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2NlcnRzL01pY3Jvc29mdCUyMElE
 # JTIwVmVyaWZpZWQlMjBDUyUyMEFPQyUyMENBJTIwMDMuY3J0MFQGA1UdIARNMEsw
 # SQYEVR0gADBBMD8GCCsGAQUFBwIBFjNodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20v
-# cGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wDQYJKoZIhvcNAQEMBQADggIBAJX0
-# 7v1xFsUfJqEuQpSMqFHYvSKiFe3D5/skVk1vya8w837tXtrEcnUTwAVgh+/we92R
-# HRRewEkZyP66sv5iDuu6BrpgTio5KxyjTSpgYkZ3OsI0N2gSMxeDlHgUlFv1h6FX
-# Nf/S/MkqwtIONAUC/WqYVxcc5T/+0ZDkfWcIUKKV32CvaMdXAIRJ9ckNqpKL9tog
-# gCWINkvxaP6C1Kgi0nXUUGUyrkhTN0GARPqjOL3JjPem0M0oLurq/rlLUBCkRe55
-# jB/9DnVQPOBO4XS1XbshwD8U3qKyVwFb7nL1HQahl5ewaCPE0Y5VroYfO2Mr9tCQ
-# s0H1Ou3+HZMY6Ec4V9Z3gDzHsYEU6mOuqair6b7Rzr4/3lLYe6/5xf5uvnKJa8BD
-# QPu4jUMTEtwb+j3/jM4b/xpckNmnzFzTOGvjumeSW3Pl58qL9tS4GeWbK+u3qD4c
-# Kjk9ei9r3gtfonM5T9m+PqlTehNdBHGiUMx00ZvjH8C1GrHGxjRIZ6gCqRYRw9bY
-# d2wN+GPKbLLgaPOevH0u+DvTwh9njmALiXrrxjBd6YGwNGSrkFndylNqLUQQqcSt
-# FHBx6iJFl9DF/ozjQE0HS8RphbSEnbw+Szk94cdjbOQE7cs/T8Y/GgOQFRZTBFap
-# QEDmijvqq2LdAXKwal9Sc3wEXw81HxJfnGycGLWGMIIGwDCCBKigAwIBAgITMwAF
-# O1RBqJcdt0SolwAAAAU7VDANBgkqhkiG9w0BAQwFADBaMQswCQYDVQQGEwJVUzEe
+# cGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wDQYJKoZIhvcNAQEMBQADggIBAL+z
+# xJ+kw96Z5Llix/Cnd4qd5kZubh0Btp1nvi+j2BJ8XK5ciMxbEEfEiO+gRpxuPBSI
+# ngvW95eTBWqH1PN18jfWJBjtR7jIJXqP9DnT6xmYBTTZyL7RYG9DvUGCOzQdrFzZ
+# h+31eYJAKzgye6Wjt5KGZB2/njvG0eeF/lIrW8tYBlB9J6kahfl0/2EFYifcbg52
+# a/fKUpGWOP0zD3GvjjZd0Y9H6/vGjeEJdXydNB4DbbG+iphkGFu5upMzzkwD9xLT
+# Dn5iqySH0myL9orfZ3Oqfoy8/VeA0EL9jPIVFaoxevdexSs315nltThXfRz3A78s
+# 7wfo51yALvIhEBirJP2GWh9oP4j9Y9ed+Wwzvo+ZRiLYv3YyLZWDMCFD684W3Cl+
+# ATGhu3hpwN4O9MNuE/xHqxNA54zxuf56UIDSCHRbjv0DYuLj4Okwt7er2V/62miH
+# p/TPAK2N9+D6CbgCHRxDMVPfheRTh6lnQujdjq09EtYl5kYSjS6sMLfHlXJM4IJn
+# 1l5L+yyZ8hcYJ10QLmJc/Se6LboxV4sS1Euw9Ns7YvcHQNBmICLVyOc1N3Hfke2i
+# U+p22jyimMPCvWTDs3A4Jzc/HuC1VmLiTBE/YNKQdQKnXKuCAbRps1en4ZuFvHSr
+# vudGdIKuSdm0jM3wWXvwf0y/S18N/9jKSNPeFY4cMIIGwDCCBKigAwIBAgITMwAK
+# YHCkS1V4Htp4QgAAAApgcDANBgkqhkiG9w0BAQwFADBaMQswCQYDVQQGEwJVUzEe
 # MBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSswKQYDVQQDEyJNaWNyb3Nv
-# ZnQgSUQgVmVyaWZpZWQgQ1MgQU9DIENBIDAzMB4XDTI2MDgyMjIwMzk0N1oXDTI2
-# MDgyNTIwMzk0N1owgYMxCzAJBgNVBAYTAk5MMRYwFAYDVQQIEw1Ob29yZC1CcmFi
+# ZnQgSUQgVmVyaWZpZWQgQ1MgQU9DIENBIDAzMB4XDTI2MTEwMjAxNDAxNloXDTI2
+# MTEwNTAxNDAxNlowgYMxCzAJBgNVBAYTAk5MMRYwFAYDVQQIEw1Ob29yZC1CcmFi
 # YW50MRIwEAYDVQQHEwlTY2hpam5kZWwxIzAhBgNVBAoTGkpvaG4gQmlsbGVrZW5z
 # IENvbnN1bHRhbmN5MSMwIQYDVQQDExpKb2huIEJpbGxla2VucyBDb25zdWx0YW5j
-# eTCCAaIwDQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBAIbHaIY78RuonhbA37ES
-# +TGNlg2nAIzPRruCZTQ0w4zfjNvzT8pT4pxswGLXWoWb9B9Ow+sURh4f2tdyBka9
-# ZSZIxXa+e8hRJxSFIRr5Vqq4Fnq3uH15XrK/g0T+fqimaPoVI/6s/tc2dztgF8e5
-# Qx0ymESJaiNJ9ETlCYkvoFpwfaOH67xY5jPjWer+jF791H7am9F8TOyOb84EztYz
-# Cy8sOsrkSJOTfrs454hXcw0Uji8tCIuTyEyVV0Qvow1AYQMqeCPPSg4eekTlEo5K
-# 6ItBKsqBmFOF+InNQ5gSc9YyMwtMWYkq/ZLScy/g+ljvXtSIWg+IMBreV1POKAJD
-# Ed9NImDda5H+71w9yDpoF9yVZBu2sA45+JYzzx3Hv5oHu76WcJgoS38sjMvgADf4
-# 2LaGD5blSRGnOxL29ks6EbqkFiXLAOdRHCJkcRes7rklIKm8VMosaVqRVxjmEs8G
-# aTIT8r7jcDQQFQPGMUBHzd6VEM7p24czJlBJPSXI9AHXbwIDAQABo4IB0zCCAc8w
+# eTCCAaIwDQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBAJ1Y8shhxGkjOZDxI9D5
+# l564os/kUKNJnxIYuHdWkUo+2oaou+aaFh4YL/DA/F8xizDNj0oy72scICJavOnf
+# V59xQ+gMcYAWk1xsh3+qsCrA1c3xnoZDr7BU/5jkYqoU5DuiYARw0X/IYo2AOXBu
+# lJzbF6ktmxEcRxZxMp2DPDy+InN7k1wbU8qu1n92YqWmSSg6z6XN1JV+iFdzt4Hl
+# AhsOs/GYtbZnk5cMvEy4kzIiOfD06XyokFTubm5O6rTIxM6p0N8ryO8ntAekqJ7s
+# VNspou7G94yNWaAgbD0tp1mWmCiovsY/FBUJgdBsNa4ix3ARUlJVdp3EQogJMV/H
+# i+kGecHsQoNBUbdBi84keNuLeEf/5Po5ZYAO/iZV1WK/HLLpcBu6wXg3um/9cymf
+# J4ub1pOW8DhEyeQrdZCdvlXHDhTpVfmPapYF8VNRbSVbJza3zo6R60/Nr0ceUqrr
+# S4AonFLiLtqdFbDyJh+CQ6dfafirHcsqmKENbIh80ieMswIDAQABo4IB0zCCAc8w
 # DAYDVR0TAQH/BAIwADAOBgNVHQ8BAf8EBAMCB4AwOgYDVR0lBDMwMQYKKwYBBAGC
 # N2EBAAYIKwYBBQUHAwMGGSsGAQQBgjdhyvTxC4Kx0oMR99yjTpbrujEwHQYDVR0O
-# BBYEFLxun1LkTdyRwCs7vbWVLMajH2bhMB8GA1UdIwQYMBaAFKRDDH92WqWF5z6N
+# BBYEFIJX90OW4JR/am+LL1zGmbVRZf2bMB8GA1UdIwQYMBaAFKRDDH92WqWF5z6N
 # KA8MF6JFaXDGMGcGA1UdHwRgMF4wXKBaoFiGVmh0dHA6Ly93d3cubWljcm9zb2Z0
 # LmNvbS9wa2lvcHMvY3JsL01pY3Jvc29mdCUyMElEJTIwVmVyaWZpZWQlMjBDUyUy
 # MEFPQyUyMENBJTIwMDMuY3JsMHQGCCsGAQUFBwEBBGgwZjBkBggrBgEFBQcwAoZY
@@ -212,17 +215,17 @@ function Import-NSConsoleStatus {
 # MjBJRCUyMFZlcmlmaWVkJTIwQ1MlMjBBT0MlMjBDQSUyMDAzLmNydDBUBgNVHSAE
 # TTBLMEkGBFUdIAAwQTA/BggrBgEFBQcCARYzaHR0cDovL3d3dy5taWNyb3NvZnQu
 # Y29tL3BraW9wcy9Eb2NzL1JlcG9zaXRvcnkuaHRtMA0GCSqGSIb3DQEBDAUAA4IC
-# AQCV9O79cRbFHyahLkKUjKhR2L0iohXtw+f7JFZNb8mvMPN+7V7axHJ1E8AFYIfv
-# 8HvdkR0UXsBJGcj+urL+Yg7ruga6YE4qOSsco00qYGJGdzrCNDdoEjMXg5R4FJRb
-# 9YehVzX/0vzJKsLSDjQFAv1qmFcXHOU//tGQ5H1nCFCild9gr2jHVwCESfXJDaqS
-# i/baIIAliDZL8Wj+gtSoItJ11FBlMq5IUzdBgET6ozi9yYz3ptDNKC7q6v65S1AQ
-# pEXueYwf/Q51UDzgTuF0tV27IcA/FN6islcBW+5y9R0GoZeXsGgjxNGOVa6GHztj
-# K/bQkLNB9Trt/h2TGOhHOFfWd4A8x7GBFOpjrqmoq+m+0c6+P95S2Huv+cX+br5y
-# iWvAQ0D7uI1DExLcG/o9/4zOG/8aXJDZp8xc0zhr47pnkltz5efKi/bUuBnlmyvr
-# t6g+HCo5PXova94LX6JzOU/Zvj6pU3oTXQRxolDMdNGb4x/AtRqxxsY0SGeoAqkW
-# EcPW2HdsDfhjymyy4Gjznrx9Lvg708IfZ45gC4l668YwXemBsDRkq5BZ3cpTai1E
-# EKnErRRwceoiRZfQxf6M40BNB0vEaYW0hJ28Pks5PeHHY2zkBO3LP0/GPxoDkBUW
-# UwRWqUBA5oo76qti3QFysGpfUnN8BF8PNR8SX5xsnBi1hjCCBygwggUQoAMCAQIC
+# AQC/s8SfpMPemeS5Ysfwp3eKneZGbm4dAbadZ74vo9gSfFyuXIjMWxBHxIjvoEac
+# bjwUiJ4L1veXkwVqh9TzdfI31iQY7Ue4yCV6j/Q50+sZmAU02ci+0WBvQ71Bgjs0
+# Haxc2Yft9XmCQCs4Mnulo7eShmQdv547xtHnhf5SK1vLWAZQfSepGoX5dP9hBWIn
+# 3G4Odmv3ylKRljj9Mw9xr442XdGPR+v7xo3hCXV8nTQeA22xvoqYZBhbubqTM85M
+# A/cS0w5+Yqskh9Jsi/aK32dzqn6MvP1XgNBC/YzyFRWqMXr3XsUrN9eZ5bU4V30c
+# 9wO/LO8H6OdcgC7yIRAYqyT9hlofaD+I/WPXnflsM76PmUYi2L92Mi2VgzAhQ+vO
+# FtwpfgExobt4acDeDvTDbhP8R6sTQOeM8bn+elCA0gh0W479A2Li4+DpMLe3q9lf
+# +tpoh6f0zwCtjffg+gm4Ah0cQzFT34XkU4epZ0Lo3Y6tPRLWJeZGEo0urDC3x5Vy
+# TOCCZ9ZeS/ssmfIXGCddEC5iXP0nui26MVeLEtRLsPTbO2L3B0DQZiAi1cjnNTdx
+# 35HtolPqdto8opjDwr1kw7NwOCc3Px7gtVZi4kwRP2DSkHUCp1yrggG0abNXp+Gb
+# hbx0q77nRnSCrknZtIzN8Fl78H9Mv0tfDf/YykjT3hWOHDCCBygwggUQoAMCAQIC
 # EzMAAAAYDeuRVamKAJgAAAAAABgwDQYJKoZIhvcNAQEMBQAwYzELMAkGA1UEBhMC
 # VVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjE0MDIGA1UEAxMrTWlj
 # cm9zb2Z0IElEIFZlcmlmaWVkIENvZGUgU2lnbmluZyBQQ0EgMjAyMTAeFw0yNjAz
@@ -303,26 +306,26 @@ function Import-NSConsoleStatus {
 # 7Yww94lDf+8oG2oZmDh5O1Qe38E+M3vhKwmzIeoB1dVLlz4i3IpaDcR+iuGjH2Td
 # aC1ZOmBXiCRKJLj4DT2uhJ04ji+tHD6n58vhavFIrmcxghcyMIIXLgIBATBxMFox
 # CzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzAp
-# BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDMCEzMABTtU
-# QaiXHbdEqJcAAAAFO1QwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
-# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgt5Sw
-# t7WjAU05S/30iZ1nqgtUtGD0So2AhWA7ncBe0uwwDQYJKoZIhvcNAQEBBQAEggGA
-# Huo2qRlfNyhXOlqVx+lpkTHda52VU6/Os5S7NXfp02gQhFYV00xznKaTn/6Uz10O
-# fmm1i508CdwphLH5nkgb14mJ8UEUCjUi6IboiRWRNvhXSu0eKsCBHjL1r5bOcTgv
-# oHdhZlwE87CJ7SbhNNBQL8GqLmMq6WpIvZ96XOIriSc4a4jj4Jgxt6NJzsgLbE9F
-# w9ceib+7x5yUybpWbxugalVshoQxXsXAxvEaDJJX4+FyYsqlWGd0SknT92XelyMp
-# Lf7rdB845dZljR5qT2k7ABanWGycuToZglZjEl7Om1uc7o7SbHsC1zu+EtddGLFt
-# slmQfd2hrDN3zrh2ZbbI3boK9I4w3/D0ADR5BzQTnMdOiDPrnxhuNOMn2jk7du51
-# 5NUPf8DbZ2tv66dT+0T2x/lcbswP6MZqJJiGIBOoCcQ946ZJVXBe4MlUBAaCqqk8
-# 2SM+YzovWGEWATF7M630LakJWVozOfMLuqc2hdS0brxfVHZPqaCuBM/l4HfZmJcn
+# BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDMCEzMACmBw
+# pEtVeB7aeEIAAAAKYHAwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
+# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgO9qf
+# sB/ZeOfZYVHiE8898P0pjAN/NPyXfr1wsEJoHgowDQYJKoZIhvcNAQEBBQAEggGA
+# DceYcI0eqwl2oWPf/07nOJGkIuGMenBzEKOI+jEKHSgBHWVNU74b79IqOv61D30Q
+# wE0LKykvPVx5uvuWpdZIb55DOZeq98tP0f0r26+TvG1lwYnTQiArrEuFX6FhlNVi
+# 3rvFQSXvJjNneoY1MHxe+6ZwCf8depVfg5FPBJUUTrMJ0+K/DEe5XjCjVARQQ8+n
+# 13bR9REQr7MdkICCZ4ewtMjdan4bMLd2+xWaSZF0SHVsfnRP0aOdnV9hyYWlZ4S9
+# xk8RdlQj9Rqhu9/CY/SoIfnfGjrZsEhIZzWuP9CezrEsjvSUwEzXErA1ao3yK3Xi
+# 9xkQ31JH01RdxCetEfus509bI5wYzapwhynpwlIjS6v+vW76IYYKnDjOfYqAjX+5
+# C0gBBiy3v7d6odLIzOiuEl2llXSLUboeO1PqNhSMiwhsySlFXC5asvlUUYwu/VP6
+# vV9AN39cAPP29Zej2bfe7mV8rSa/JxFcjolkDkBolL2LCOgjIazi3jgvv//YQnQw
 # oYIUsjCCFK4GCisGAQQBgjcDAwExghSeMIIUmgYJKoZIhvcNAQcCoIIUizCCFIcC
 # AQMxDzANBglghkgBZQMEAgEFADCCAWoGCyqGSIb3DQEJEAEEoIIBWQSCAVUwggFR
-# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEICUQUbsTO1gmevGbbSRE
-# H9LYugIWARp5ca7GuESsZ2/PAgZqNTCVdqsYEzIwMjYwODI0MTU0MjQ2LjA3OVow
+# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIEliCkRDhS7Ggw95N4ZD
+# mAPfEXP1Mf/SJWA5XkBCBpoJAgZqwF8JGsgYEzIwMjYxMTAzMjA0OTM2LjI2OFow
 # BIACAfSggemkgeYwgeMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xLTArBgNVBAsTJE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRl
-# ZDEnMCUGA1UECxMeblNoaWVsZCBUU1MgRVNOOjQ5MUEtMDVFMC1EOTQ3MTUwMwYD
+# ZDEnMCUGA1UECxMeblNoaWVsZCBUU1MgRVNOOjdBMUEtMDVFMC1EOTQ3MTUwMwYD
 # VQQDEyxNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lIFN0YW1waW5nIEF1dGhvcml0
 # eaCCDykwggeCMIIFaqADAgECAhMzAAAABeXPD/9mLsmHAAAAAAAFMA0GCSqGSIb3
 # DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9y
@@ -364,28 +367,28 @@ function Import-NSConsoleStatus {
 # k4MhF/KgaXn0GxdH8elEa2Imq45gaa8D+mTm8LWVydt4ytxYP/bqjN49D9NZ81co
 # E6aQWm88TwIf4R4YZbOpMKN0CyejaPNN41LGXHeCUMYmBx3PkP8ADHD1J2Cr/6tj
 # uOOCztfp+o9Nc+ZoIAkpUcA/X2gSMkgHAPUvIdtoSAHEUKiBhI6JQivRepyvWcl+
-# JYbYbBh7pmgAXVswggefMIIFh6ADAgECAhMzAAAAWvYNZ4yF7d0IAAAAAABaMA0G
+# JYbYbBh7pmgAXVswggefMIIFh6ADAgECAhMzAAAAW0q1jUEybdx0AAAAAABbMA0G
 # CSqGSIb3DQEBDAUAMGExCzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQg
 # Q29ycG9yYXRpb24xMjAwBgNVBAMTKU1pY3Jvc29mdCBQdWJsaWMgUlNBIFRpbWVz
-# dGFtcGluZyBDQSAyMDIwMB4XDTI2MDEwODE4NTkwM1oXDTI3MDEwNzE4NTkwM1ow
+# dGFtcGluZyBDQSAyMDIwMB4XDTI2MDEwODE4NTkwNVoXDTI3MDEwNzE4NTkwNVow
 # geMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9uMRAwDgYDVQQHEwdS
 # ZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xLTArBgNVBAsT
 # JE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRlZDEnMCUGA1UECxMe
-# blNoaWVsZCBUU1MgRVNOOjQ5MUEtMDVFMC1EOTQ3MTUwMwYDVQQDEyxNaWNyb3Nv
+# blNoaWVsZCBUU1MgRVNOOjdBMUEtMDVFMC1EOTQ3MTUwMwYDVQQDEyxNaWNyb3Nv
 # ZnQgUHVibGljIFJTQSBUaW1lIFN0YW1waW5nIEF1dGhvcml0eTCCAiIwDQYJKoZI
-# hvcNAQEBBQADggIPADCCAgoCggIBAO/0O0eWjgUb9rnHcQLRdfWPN4H+91a3Ynla
-# P46E1m4uD+JKx6csWMStX79fxLJUAqHJqQWE19UlNMhS9jEB32dAJ4yuWsHyUuM+
-# dphjDz4E5jl4gYGZEmaOrKvNt+KqlFayyg/oTg3BlLRu4aBq8668A5qlHcfsuh6D
-# dSqFID1ixJFZzHrZFG1iGBG7U1Bn2ONLDo7jbwX5rMcPduTAUw/c7M3WhSxQBuZp
-# Qiz8RQGKIqCKfIxgQkKdzpCpU0SWQOE/DgTXbz3c15KMRCdkGlL2zb+lnuSV4sse
-# Qm3qflZiZckLyn2xJI8ZXDkq+Ig+b/rsPPIfI8di228WvK1j67JXpyeVCaSUO9Er
-# zlLnTrnjQkeXVQIp73xuVBVrmvoTf/v4a7MnrmuKSyIXc5vJUHEGB345+O8omFt1
-# w8b+Xg9D9PKIRqDPEv7HRk0C+Yvxu8FvHJvSocSIZK+v/FmKFOipYnpP76yAmJNn
-# yheucShOgk8QiU53USn/+AyMb7xW905gZnyNqb29HeVdQ175pDHJGEz8Cx5wiHeV
-# liGz5hABucFDylR9z3LSTmB6+3ZuIxeG9BZS46P6ANPkuVuD5m8wgc7GLLzg73Cs
-# DF09ukt8Uf8dTcMBX3ro+7/k9M6Xt8WPG7IL9v/4DvyMY03tkb9Y9Ri6HWavXRPY
-# RCUePspPAgMBAAGjggHLMIIBxzAdBgNVHQ4EFgQUjmOyQ6twMcP1ZbRytJxI4fnX
-# mcIwHwYDVR0jBBgwFoAUa2koOjUvSGNAz3vYr0npPtk92yEwbAYDVR0fBGUwYzBh
+# hvcNAQEBBQADggIPADCCAgoCggIBAJBUzBbbnlDXee0B0KD5G4/475thFyfctCyu
+# ESTWQXvlLi4Wx/td2qUdeq4ideeg6VWhiOHfu3wJV4TUGSRtqh9Ccr1BmiBKv9iu
+# FpgHyIBu5Qx38ZsxwlFeXVS+ZqJJKnXRbDNQdcYSoC/6c0hQJ/PH50DBRDQkPXVw
+# yFizLrRH9AlrJeUg7BKeT23zftS8/KOJLvEEbHOF6pSOY3ZVprZUWbWjWwRTmoHa
+# Q/E8vrWtLNyEJ+b089VW1Ikra3t4GTB5Wby3CL1K2zYnAxBIvafsKMFyj9OuXHcT
+# PKMDoFSMeamG9MKOMb6uoG1PjdnDgsLP6EOMRSzrLL7jED1mbB9RSd9fhty+HQr6
+# vZgsBn6oUy+YTpNVLskwdtUM82WYAkPztlOt3AiL0qyV7/U3j/uq3vHMjPM0w034
+# 0M57Nei0g4BCcMt0dbqoc91VgCb3/36sHQANontn1HOF2oLk8190QRS43isHVra8
+# H8sf5+GlqIYsYiCKX04HZiOzZW826nVI6d++8lyTeWmpj90Ua9uPbJhVjwE3oh6t
+# O510ySqmSMSLEN07p3Ibe3E6BAb2w93rWzb26+dpSthbKF4kApofqBsWPX4MEtHK
+# SOftPmVTCQ47tghrVuHia9jY+Hsj01m4KW4WtkmVm3L6hMZECMa4sjMxAXz+bX/A
+# JhWTe6TZAgMBAAGjggHLMIIBxzAdBgNVHQ4EFgQU7/LqUlWWYhXJdXwgYKx4b8Gv
+# 0rYwHwYDVR0jBBgwFoAUa2koOjUvSGNAz3vYr0npPtk92yEwbAYDVR0fBGUwYzBh
 # oF+gXYZbaHR0cDovL3d3dy5taWNyb3NvZnQuY29tL3BraW9wcy9jcmwvTWljcm9z
 # b2Z0JTIwUHVibGljJTIwUlNBJTIwVGltZXN0YW1waW5nJTIwQ0ElMjAyMDIwLmNy
 # bDB5BggrBgEFBQcBAQRtMGswaQYIKwYBBQUHMAKGXWh0dHA6Ly93d3cubWljcm9z
@@ -394,36 +397,36 @@ function Import-NSConsoleStatus {
 # JQEB/wQMMAoGCCsGAQUFBwMIMA4GA1UdDwEB/wQEAwIHgDBmBgNVHSAEXzBdMFEG
 # DCsGAQQBgjdMg30BATBBMD8GCCsGAQUFBwIBFjNodHRwOi8vd3d3Lm1pY3Jvc29m
 # dC5jb20vcGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wCAYGZ4EMAQQCMA0GCSqG
-# SIb3DQEBDAUAA4ICAQCAlM8r+t3hIb2h1lDTAx+iYkQlxFuU7QONeyIFIBZ29xvG
-# l8pehKxErDzIniOpIX/eluUAwQKoaI0zwuKAdR0mrSHXCniMoLNko5W+5r7sXNam
-# KX7QMV3BfGOX3gi9qVfxyUe7AHXbqQ8KBQHNYCnNFtQQHgARrlYhtyAKol5ctM0C
-# Ac/y3oY7bTMsVJvnA5u7DVWPeXoST2KEMDeLBvJYq0IJZ6yMpDOWLZ4UP82bksyS
-# hIB/XdawirIGLdseudryRxVMk313mAcjGRb59+Ittt6otVvYQWqH+PGrTUzEcez8
-# aQuO3umoNZjKuFoX5VsPP/gSZse+orhG3zfZk9IDyE3DfUFrhvkv6H0tijK1D0uI
-# GhwMBWSm9ktQ6oeU+aurZFx3MI+LODnHsbRFZAy11uMvwKq+ZNC1Se4tIM1u9piW
-# AhnTPoh6mULKikHOVhHaO953tkzDCtjsse5GUKOx9yg9nqHKWMgnODp62/uPPzC/
-# yDEISrXCcU7UB7tATr3zWNEdtM4d009iXWI6dV/SdcIIX44rpoLyCLw+nXjxp+fY
-# /dygLO7UdSQaVaUFVj3K2nVyuujPspt5Lunc5FvuYPqmi/z8kASmmwbiF+W0P0UT
-# WFaC84MWfU2h6MDg5s0oxmdNFK76jXr3wZfdSoV7FCKfq5GdeGoy5UwDQwMC0DGC
+# SIb3DQEBDAUAA4ICAQAAH+zd+XKh4OxXYMWFmtgilXAQGctOjCUB1w/uBiC/OXcH
+# 3Ia4/XbdUhKzFbaiTbIE6vYZKd1p4u7nKOLkawymAMVyuO7LSl6rLKttZIyLhWjT
+# K0zXOz0u4xLq9+bRtBEKJvA6sD5nJwH1IO6z1YizyuIRoalMCnbrUixfWxQn4TAm
+# N7t9uk+X2FUThEa3ewzRwhtG+xwaAbLMkxRmR24JnfXd1VxKo90+m7Wzuov96Uug
+# x5wZdewiIIm1ZWTj4lCJHup679LcOa7tAxJMipVaSltQH9fm9TOKczlfxtWuBcLU
+# 4duZfqwgsILsH7PMkcX1zwQzQD0yAtPhnYz9KNG125bX+iilOe1S8RHqv2bbBpMp
+# ao4kcUvQI6dMgKRvFmm1eLbhSNOQplDMTGD1tNVdNGkI96jUu+troUjWMMi46TQf
+# BAHxtDTpRhIu/87vAVQ8Z6RHhFxesz4Ed5JThaIQRAy6GcO/Jk+QzDzoZ0arRIkI
+# sGJ7rZgOVAjx9ctfw8lH9RfjcwB3wdGBYNMNVJqQpUai2Taddf5pXzTZEHIqLEF5
+# 3SrBjIeInoQrP7U5VlXiMQsxewLdINrAE2l2TR3KBikb+RQRygbTp8jj2yiC0NCU
+# wG+K+ndglN5RMbXjFW6aKa59Xq+b8XzK/DK+AJtgOpHgJv8Qrk62A+twOVLOpjGC
 # A9QwggPQAgEBMHgwYTELMAkGA1UEBhMCVVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBD
 # b3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGltZXN0
-# YW1waW5nIENBIDIwMjACEzMAAABa9g1njIXt3QgAAAAAAFowDQYJYIZIAWUDBAIB
+# YW1waW5nIENBIDIwMjACEzMAAABbSrWNQTJt3HQAAAAAAFswDQYJYIZIAWUDBAIB
 # BQCgggEtMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQx
-# IgQgwrqWXt5qKM07VAMORkhSko3OMBR73ImwOE2Fjd7QYTswgd0GCyqGSIb3DQEJ
-# EAIvMYHNMIHKMIHHMIGgBCBiuWRAi+p96PRsBt3TwW3jNozgPQS+Qco1CVm/NaU0
-# QzB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
+# IgQgfsc9C3Jukiuy8zeZqCKRdsdJv6QoAK39C/TWCkdqU30wgd0GCyqGSIb3DQEJ
+# EAIvMYHNMIHKMIHHMIGgBCAvMQNVXZ0b0xxlGw8X/3IEybObuT6a5W1d61CW+cGD
+# 7zB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
 # cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3RhbXBp
-# bmcgQ0EgMjAyMAITMwAAAFr2DWeMhe3dCAAAAAAAWjAiBCBuaA/SFfBiNweGO/+a
-# CRtAs06Pr8a2NoGJlT41YSSsYTANBgkqhkiG9w0BAQsFAASCAgAU0M0s46fhk3fl
-# EtBr4ezmBczQE+QUfJbWh9Mz/mGoPQWleef6dCZt6zXPmKwJdtzt8DxPfeIR45hq
-# 75nLZNBgNuTqLrdS59yZd3L9HAv5zCtoBURwPAgn3cbj+brEHL1iYy7gDmV3Aryn
-# +HHJ+cz7UwPljTvneJs4KzTmNehzoORRryyBavt1o+ioD5pCa7NOXFKvM7jBzKwi
-# +Pc+7+LYGHP73L88bkSXZYHZiGzHEq/z3KEZYocO4Dt70YhNaEJweOjOBTRy54qd
-# OHY96BJEHaZ1vNP6p0kY9VQ/08s1Y/7YJyRCyGdhtiFrV1Dc5VxX0vous9OUjj9Q
-# mZ0a6bUUU1eaCjiJuC3XXA9mdBjZWnTJPTo3hRvcOVckpHcyrL1UdzQOqhO37EjM
-# 2KDOtWbaKogeH83Lhl4z2V3dyWXG4dS2vLoRVpDBdBn+UOAowFJsnEtb++kuL5Xh
-# JcxdOvNAjcV2KPHsVK4tn0QfsvaKnuEhtb5QGqQ/tdUmn0S71UcbdM9woJO0q1BQ
-# Awt1avF/64TqqDmeXS2e7YHlwC49Z7e1DK4iBukOxZcOqJZJvSVQx/lI1qtDIv5Z
-# leK84+qnkoag6u0iahabLa1H3UW1if5RlmmDk0lf+/KviANEquckJNTqZzRUbRLQ
-# f2QrSx5P28fTPWRtbWGDAwpoNp+VxA==
+# bmcgQ0EgMjAyMAITMwAAAFtKtY1BMm3cdAAAAAAAWzAiBCAmI6QXVhYDibnbvHCL
+# I2uQNkiOcfzvn5ERMwNwpuLq/TANBgkqhkiG9w0BAQsFAASCAgCCjoGBXVuQS4IW
+# vBTWqCoaJPwwChTyhCe6yb2eCkh7JYzzIgPfAygQUbIdJ/1nM3GVgVRt4y8KQDgI
+# CntMJ+j2eTy7Mxw8NRdBnJQOnE/mLKwM3hCfxasxelvwc/lWpDUOZSod4HBFdftn
+# rVQZ8t3LzW4Z2FXqxOiEVKIx72z2qNO7Ss/AUrCJtz3rYqE3FjKB0C1sf6yxiOe9
+# Y63BhWTnouajQgYlwDEmpPPTwZmKTx9E3t9KXJzt4wIL2olxvI5RT8g+PVp9P/u6
+# AwIUAbapaogGTr8V9Z1Wl0zRdJNseSQvid99eGsQ93pEJi8+h+oonhNRw1JHDobq
+# ZrBWMnaxBiKPveN0rKr6Zady+SGQLSsqu2T3p81U8W8jk/+YOpZGc61WO1QzhdBh
+# PXFQu2A9txeiSV0wQoZhz8dzu2B99i7vrcb7AALgAnUqW5UalW8soZ3tJAYFEwzG
+# B4WHxGA2KX7W5NgmKphryrjv0MhkcwxiI9KkjT51PHtKIIbHTLqEBXcravBTsk/y
+# Im5GQGLOqsh9IgiKtL6Ln+cH2Tmaevv48s/nX4gD0A+KkkrXAWtLe9d7kUqaPuV6
+# HqweLnhd6LT/oN3jlbDzJoC3fbkDmQikP5rVr53gZUFnLYwIIBtPnllouWhzV0wf
+# wh/+mRcRemat5tq/OXIU4T8WDx20Xg==
 # SIG # End signature block

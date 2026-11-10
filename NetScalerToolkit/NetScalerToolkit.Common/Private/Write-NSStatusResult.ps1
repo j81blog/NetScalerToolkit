@@ -1,11 +1,13 @@
 ﻿function Write-NSStatusResult {
     <#
     .SYNOPSIS
-        Closes a ConsoleStatus item with a status.
+        Closes a status item with a status.
 
     .DESCRIPTION
-        Thin wrapper around Write-ConsoleResult that does nothing when ConsoleStatus output is not
-        active.
+        Fills the rest of the item line, writes the status block and the notes collected while the
+        item was open, and records the item for the summary and the LogAction. Closing is
+        idempotent: without an open item nothing is written or recorded. Does nothing when status
+        output is not active.
 
     .PARAMETER Status
         Item status.
@@ -18,7 +20,7 @@
         are appended to it, and an OK item that collected one is reported as WARN instead.
 
     .PARAMETER ErrorRecord
-        Error record used for the detail and the record when no explicit detail is given.
+        Error record used for the detail of a FAIL item when no explicit detail is given.
 
     .PARAMETER ShowDuration
         Prints the elapsed time for this item.
@@ -27,11 +29,14 @@
         Draws the line but keeps it out of the records and the summary counts. Used for items that
         restate an outcome already counted elsewhere.
 
+    .EXAMPLE
+        Write-NSStatusResult -Status OK -Detail 'v4.35.0'
+
     .NOTES
         Function  : Write-NSStatusResult
         Author    : John Billekens
         Copyright : Copyright (c) John Billekens Consultancy
-        Version   : 2026.811.1452
+        Version   : 2026.1103.2230
     #>
     [CmdletBinding()]
     param(
@@ -57,26 +62,102 @@
 
     if (-not $script:NSConsoleStatusEnabled) { return }
 
+    $cfg = $script:NSStatus
+    if (-not $cfg.ItemOpen) { return }
+
     # OK degrades to WARN when a warning was logged during the item.
     if ($Status -eq 'OK' -and $script:NSStatusItemHadWarning) { $Status = 'WARN' }
+    if ($Note) { Write-NSStatusNote -Text $Note }
 
-    $resultParams = @{ Status = $Status }
-    if ($PSBoundParameters.ContainsKey('Detail')) { $resultParams.Detail = $Detail }
-    if ($PSBoundParameters.ContainsKey('Note') -and $Note) {
-        Write-NSStatusNote -Text $Note
+    $cfg.ItemOpen = $false
+    $milliseconds = 0
+    if ($null -ne $cfg.Stopwatch) {
+        $cfg.Stopwatch.Stop()
+        $milliseconds = [int]$cfg.Stopwatch.ElapsedMilliseconds
+        $cfg.Stopwatch = $null
     }
-    if ($ErrorRecord) { $resultParams.ErrorRecord = $ErrorRecord }
-    if ($ShowDuration) { $resultParams.ShowDuration = $true }
-    if ($NoRecord) { $resultParams.NoRecord = $true }
 
-    ConsoleStatus\Write-ConsoleResult @resultParams
+    $detailText = if ($PSBoundParameters.ContainsKey('Detail')) {
+        Format-NSStatusSingleLine -Text $Detail
+    } elseif ($Status -eq 'FAIL' -and $null -ne $ErrorRecord) {
+        Format-NSStatusSingleLine -Text $ErrorRecord.Exception.Message
+    } else {
+        ''
+    }
+    $noteLines = @($cfg.Note)
+
+    $text = $detailText
+    if ($ShowDuration -and -not $NoRecord) {
+        $duration = Format-NSStatusDuration -Milliseconds $milliseconds
+        $text = if ([string]::IsNullOrEmpty($text)) { $duration } else { "$text $duration" }
+    }
+
+    # One fill character in front of the inline text, one space behind it.
+    $room = $cfg.FieldWidth - $cfg.Ticks - 2
+    $inline = ''
+    $notes = @()
+    if ($room -ge 4 -and -not [string]::IsNullOrEmpty($text) -and $text.Length -le $room) {
+        $inline = $text
+    } elseif ($room -ge 4 -and -not [string]::IsNullOrEmpty($detailText) -and $detailText.Length -le $room) {
+        $inline = $detailText
+    } elseif (-not [string]::IsNullOrEmpty($detailText)) {
+        # Neither fits: the detail becomes the first note and takes the duration with it.
+        $notes += $text
+    }
+    $notes += $noteLines
+
+    $fill = $cfg.FieldWidth - $cfg.Ticks
+    if (-not [string]::IsNullOrEmpty($inline)) {
+        Write-NSStatusHost -Text ($cfg.FillChar * ($fill - $inline.Length - 1)) -NoNewline -Color 'DarkGray'
+        Write-NSStatusHost -Text " $inline" -NoNewline -Color 'Gray'
+    } elseif ($fill -gt 0) {
+        Write-NSStatusHost -Text ($cfg.FillChar * $fill) -NoNewline -Color 'DarkGray'
+    }
+
+    $colors = @{ OK = 'Green'; FAIL = 'Red'; WARN = 'Yellow'; SKIP = 'DarkGray' }
+    $inner = $cfg.StatusWidth - 2
+    $left = [int][Math]::Floor(($inner - $Status.Length) / 2)
+    Write-NSStatusHost -Text ' [' -NoNewline -Color 'DarkGray'
+    Write-NSStatusHost -Text $Status.PadLeft($Status.Length + $left).PadRight($inner) -NoNewline -Color $colors[$Status]
+    Write-NSStatusHost -Text ']' -Color 'DarkGray'
+    foreach ($entry in $notes) {
+        Write-NSStatusNoteBlock -Text $entry
+    }
+    $cfg.Note = @()
+
+    if ($NoRecord) { return }
+
+    $script:NSStatusTally[$Status]++
+    $record = [PSCustomObject]@{
+        Timestamp  = (Get-Date).ToString('o')
+        Section    = $cfg.Section
+        Label      = $cfg.CurrentLabel
+        Value      = $cfg.CurrentValue
+        Detail     = $detailText
+        Note       = $noteLines -join '; '
+        Status     = $Status
+        DurationMs = $milliseconds
+        Error      = if ($null -ne $ErrorRecord) { Format-NSStatusSingleLine -Text $ErrorRecord.Exception.Message } else { '' }
+    }
+    $script:NSStatusLog.Add($record)
+
+    if ($null -ne $cfg.LogAction) {
+        try {
+            $null = & $cfg.LogAction $record
+        } catch {
+            if (-not $script:NSStatusLogActionWarned) {
+                $script:NSStatusLogActionWarned = $true
+                Write-Warning -Message "LogAction threw an exception and will be reported only once: $($_.Exception.Message)"
+            }
+        }
+    }
 }
 
 # SIG # Begin signature block
 # MII6AgYJKoZIhvcNAQcCoII58zCCOe8CAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCYvlu1apf8j5Vl
-# tpCcEjlNG7byP84CCMQfaLgJxUZQR6CCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCAFna9X41+zbhf
+# hLygtNKpdNLq85O55kQMeOBS78vJMKCCIiYwggXMMIIDtKADAgECAhBUmNLR1FsZ
 # lUgTecgRwIeZMA0GCSqGSIb3DQEBDAUAMHcxCzAJBgNVBAYTAlVTMR4wHAYDVQQK
 # ExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xSDBGBgNVBAMTP01pY3Jvc29mdCBJZGVu
 # dGl0eSBWZXJpZmljYXRpb24gUm9vdCBDZXJ0aWZpY2F0ZSBBdXRob3JpdHkgMjAy
@@ -107,61 +188,61 @@
 # uVxzmq/FdxeDWds3GhhyVKVB0rYjdaNDmuV3fJZ5t0GNv+zcgKCf0Xd1WF81E+Al
 # GmcLfc4l+gcK5GEh2NQc5QfGNpn0ltDGFf5Ozdeui53bFv0ExpK91IjmqaOqu/dk
 # ODtfzAzQNb50GQOmxapMomE2gj4d8yu8l13bS3g7LfU772Aj6PXsCyM2la+YZr9T
-# 03u4aUoqlmZpxJTG9F9urJh4iIAGXKKy7aIwggbAMIIEqKADAgECAhMzAAU7VEGo
-# lx23RKiXAAAABTtUMA0GCSqGSIb3DQEBDAUAMFoxCzAJBgNVBAYTAlVTMR4wHAYD
+# 03u4aUoqlmZpxJTG9F9urJh4iIAGXKKy7aIwggbAMIIEqKADAgECAhMzAApgcKRL
+# VXge2nhCAAAACmBwMA0GCSqGSIb3DQEBDAUAMFoxCzAJBgNVBAYTAlVTMR4wHAYD
 # VQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzApBgNVBAMTIk1pY3Jvc29mdCBJ
-# RCBWZXJpZmllZCBDUyBBT0MgQ0EgMDMwHhcNMjYwODIyMjAzOTQ3WhcNMjYwODI1
-# MjAzOTQ3WjCBgzELMAkGA1UEBhMCTkwxFjAUBgNVBAgTDU5vb3JkLUJyYWJhbnQx
+# RCBWZXJpZmllZCBDUyBBT0MgQ0EgMDMwHhcNMjYxMTAyMDE0MDE2WhcNMjYxMTA1
+# MDE0MDE2WjCBgzELMAkGA1UEBhMCTkwxFjAUBgNVBAgTDU5vb3JkLUJyYWJhbnQx
 # EjAQBgNVBAcTCVNjaGlqbmRlbDEjMCEGA1UEChMaSm9obiBCaWxsZWtlbnMgQ29u
 # c3VsdGFuY3kxIzAhBgNVBAMTGkpvaG4gQmlsbGVrZW5zIENvbnN1bHRhbmN5MIIB
-# ojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAhsdohjvxG6ieFsDfsRL5MY2W
-# DacAjM9Gu4JlNDTDjN+M2/NPylPinGzAYtdahZv0H07D6xRGHh/a13IGRr1lJkjF
-# dr57yFEnFIUhGvlWqrgWere4fXlesr+DRP5+qKZo+hUj/qz+1zZ3O2AXx7lDHTKY
-# RIlqI0n0ROUJiS+gWnB9o4frvFjmM+NZ6v6MXv3Uftqb0XxM7I5vzgTO1jMLLyw6
-# yuRIk5N+uzjniFdzDRSOLy0Ii5PITJVXRC+jDUBhAyp4I89KDh56ROUSjkroi0Eq
-# yoGYU4X4ic1DmBJz1jIzC0xZiSr9ktJzL+D6WO9e1IhaD4gwGt5XU84oAkMR300i
-# YN1rkf7vXD3IOmgX3JVkG7awDjn4ljPPHce/mge7vpZwmChLfyyMy+AAN/jYtoYP
-# luVJEac7Evb2SzoRuqQWJcsA51EcImRxF6zuuSUgqbxUyixpWpFXGOYSzwZpMhPy
-# vuNwNBAVA8YxQEfN3pUQzunbhzMmUEk9Jcj0AddvAgMBAAGjggHTMIIBzzAMBgNV
+# ojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAnVjyyGHEaSM5kPEj0PmXnrii
+# z+RQo0mfEhi4d1aRSj7ahqi75poWHhgv8MD8XzGLMM2PSjLvaxwgIlq86d9Xn3FD
+# 6AxxgBaTXGyHf6qwKsDVzfGehkOvsFT/mORiqhTkO6JgBHDRf8hijYA5cG6UnNsX
+# qS2bERxHFnEynYM8PL4ic3uTXBtTyq7Wf3ZipaZJKDrPpc3UlX6IV3O3geUCGw6z
+# 8Zi1tmeTlwy8TLiTMiI58PTpfKiQVO5ubk7qtMjEzqnQ3yvI7ye0B6SonuxU2ymi
+# 7sb3jI1ZoCBsPS2nWZaYKKi+xj8UFQmB0Gw1riLHcBFSUlV2ncRCiAkxX8eL6QZ5
+# wexCg0FRt0GLziR424t4R//k+jllgA7+JlXVYr8csulwG7rBeDe6b/1zKZ8ni5vW
+# k5bwOETJ5Ct1kJ2+VccOFOlV+Y9qlgXxU1FtJVsnNrfOjpHrT82vRx5SqutLgCic
+# UuIu2p0VsPImH4JDp19p+KsdyyqYoQ1siHzSJ4yzAgMBAAGjggHTMIIBzzAMBgNV
 # HRMBAf8EAjAAMA4GA1UdDwEB/wQEAwIHgDA6BgNVHSUEMzAxBgorBgEEAYI3YQEA
 # BggrBgEFBQcDAwYZKwYBBAGCN2HK9PELgrHSgxH33KNOluu6MTAdBgNVHQ4EFgQU
-# vG6fUuRN3JHAKzu9tZUsxqMfZuEwHwYDVR0jBBgwFoAUpEMMf3ZapYXnPo0oDwwX
+# glf3Q5bglH9qb4svXMaZtVFl/ZswHwYDVR0jBBgwFoAUpEMMf3ZapYXnPo0oDwwX
 # okVpcMYwZwYDVR0fBGAwXjBcoFqgWIZWaHR0cDovL3d3dy5taWNyb3NvZnQuY29t
 # L3BraW9wcy9jcmwvTWljcm9zb2Z0JTIwSUQlMjBWZXJpZmllZCUyMENTJTIwQU9D
 # JTIwQ0ElMjAwMy5jcmwwdAYIKwYBBQUHAQEEaDBmMGQGCCsGAQUFBzAChlhodHRw
 # Oi8vd3d3Lm1pY3Jvc29mdC5jb20vcGtpb3BzL2NlcnRzL01pY3Jvc29mdCUyMElE
 # JTIwVmVyaWZpZWQlMjBDUyUyMEFPQyUyMENBJTIwMDMuY3J0MFQGA1UdIARNMEsw
 # SQYEVR0gADBBMD8GCCsGAQUFBwIBFjNodHRwOi8vd3d3Lm1pY3Jvc29mdC5jb20v
-# cGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wDQYJKoZIhvcNAQEMBQADggIBAJX0
-# 7v1xFsUfJqEuQpSMqFHYvSKiFe3D5/skVk1vya8w837tXtrEcnUTwAVgh+/we92R
-# HRRewEkZyP66sv5iDuu6BrpgTio5KxyjTSpgYkZ3OsI0N2gSMxeDlHgUlFv1h6FX
-# Nf/S/MkqwtIONAUC/WqYVxcc5T/+0ZDkfWcIUKKV32CvaMdXAIRJ9ckNqpKL9tog
-# gCWINkvxaP6C1Kgi0nXUUGUyrkhTN0GARPqjOL3JjPem0M0oLurq/rlLUBCkRe55
-# jB/9DnVQPOBO4XS1XbshwD8U3qKyVwFb7nL1HQahl5ewaCPE0Y5VroYfO2Mr9tCQ
-# s0H1Ou3+HZMY6Ec4V9Z3gDzHsYEU6mOuqair6b7Rzr4/3lLYe6/5xf5uvnKJa8BD
-# QPu4jUMTEtwb+j3/jM4b/xpckNmnzFzTOGvjumeSW3Pl58qL9tS4GeWbK+u3qD4c
-# Kjk9ei9r3gtfonM5T9m+PqlTehNdBHGiUMx00ZvjH8C1GrHGxjRIZ6gCqRYRw9bY
-# d2wN+GPKbLLgaPOevH0u+DvTwh9njmALiXrrxjBd6YGwNGSrkFndylNqLUQQqcSt
-# FHBx6iJFl9DF/ozjQE0HS8RphbSEnbw+Szk94cdjbOQE7cs/T8Y/GgOQFRZTBFap
-# QEDmijvqq2LdAXKwal9Sc3wEXw81HxJfnGycGLWGMIIGwDCCBKigAwIBAgITMwAF
-# O1RBqJcdt0SolwAAAAU7VDANBgkqhkiG9w0BAQwFADBaMQswCQYDVQQGEwJVUzEe
+# cGtpb3BzL0RvY3MvUmVwb3NpdG9yeS5odG0wDQYJKoZIhvcNAQEMBQADggIBAL+z
+# xJ+kw96Z5Llix/Cnd4qd5kZubh0Btp1nvi+j2BJ8XK5ciMxbEEfEiO+gRpxuPBSI
+# ngvW95eTBWqH1PN18jfWJBjtR7jIJXqP9DnT6xmYBTTZyL7RYG9DvUGCOzQdrFzZ
+# h+31eYJAKzgye6Wjt5KGZB2/njvG0eeF/lIrW8tYBlB9J6kahfl0/2EFYifcbg52
+# a/fKUpGWOP0zD3GvjjZd0Y9H6/vGjeEJdXydNB4DbbG+iphkGFu5upMzzkwD9xLT
+# Dn5iqySH0myL9orfZ3Oqfoy8/VeA0EL9jPIVFaoxevdexSs315nltThXfRz3A78s
+# 7wfo51yALvIhEBirJP2GWh9oP4j9Y9ed+Wwzvo+ZRiLYv3YyLZWDMCFD684W3Cl+
+# ATGhu3hpwN4O9MNuE/xHqxNA54zxuf56UIDSCHRbjv0DYuLj4Okwt7er2V/62miH
+# p/TPAK2N9+D6CbgCHRxDMVPfheRTh6lnQujdjq09EtYl5kYSjS6sMLfHlXJM4IJn
+# 1l5L+yyZ8hcYJ10QLmJc/Se6LboxV4sS1Euw9Ns7YvcHQNBmICLVyOc1N3Hfke2i
+# U+p22jyimMPCvWTDs3A4Jzc/HuC1VmLiTBE/YNKQdQKnXKuCAbRps1en4ZuFvHSr
+# vudGdIKuSdm0jM3wWXvwf0y/S18N/9jKSNPeFY4cMIIGwDCCBKigAwIBAgITMwAK
+# YHCkS1V4Htp4QgAAAApgcDANBgkqhkiG9w0BAQwFADBaMQswCQYDVQQGEwJVUzEe
 # MBwGA1UEChMVTWljcm9zb2Z0IENvcnBvcmF0aW9uMSswKQYDVQQDEyJNaWNyb3Nv
-# ZnQgSUQgVmVyaWZpZWQgQ1MgQU9DIENBIDAzMB4XDTI2MDgyMjIwMzk0N1oXDTI2
-# MDgyNTIwMzk0N1owgYMxCzAJBgNVBAYTAk5MMRYwFAYDVQQIEw1Ob29yZC1CcmFi
+# ZnQgSUQgVmVyaWZpZWQgQ1MgQU9DIENBIDAzMB4XDTI2MTEwMjAxNDAxNloXDTI2
+# MTEwNTAxNDAxNlowgYMxCzAJBgNVBAYTAk5MMRYwFAYDVQQIEw1Ob29yZC1CcmFi
 # YW50MRIwEAYDVQQHEwlTY2hpam5kZWwxIzAhBgNVBAoTGkpvaG4gQmlsbGVrZW5z
 # IENvbnN1bHRhbmN5MSMwIQYDVQQDExpKb2huIEJpbGxla2VucyBDb25zdWx0YW5j
-# eTCCAaIwDQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBAIbHaIY78RuonhbA37ES
-# +TGNlg2nAIzPRruCZTQ0w4zfjNvzT8pT4pxswGLXWoWb9B9Ow+sURh4f2tdyBka9
-# ZSZIxXa+e8hRJxSFIRr5Vqq4Fnq3uH15XrK/g0T+fqimaPoVI/6s/tc2dztgF8e5
-# Qx0ymESJaiNJ9ETlCYkvoFpwfaOH67xY5jPjWer+jF791H7am9F8TOyOb84EztYz
-# Cy8sOsrkSJOTfrs454hXcw0Uji8tCIuTyEyVV0Qvow1AYQMqeCPPSg4eekTlEo5K
-# 6ItBKsqBmFOF+InNQ5gSc9YyMwtMWYkq/ZLScy/g+ljvXtSIWg+IMBreV1POKAJD
-# Ed9NImDda5H+71w9yDpoF9yVZBu2sA45+JYzzx3Hv5oHu76WcJgoS38sjMvgADf4
-# 2LaGD5blSRGnOxL29ks6EbqkFiXLAOdRHCJkcRes7rklIKm8VMosaVqRVxjmEs8G
-# aTIT8r7jcDQQFQPGMUBHzd6VEM7p24czJlBJPSXI9AHXbwIDAQABo4IB0zCCAc8w
+# eTCCAaIwDQYJKoZIhvcNAQEBBQADggGPADCCAYoCggGBAJ1Y8shhxGkjOZDxI9D5
+# l564os/kUKNJnxIYuHdWkUo+2oaou+aaFh4YL/DA/F8xizDNj0oy72scICJavOnf
+# V59xQ+gMcYAWk1xsh3+qsCrA1c3xnoZDr7BU/5jkYqoU5DuiYARw0X/IYo2AOXBu
+# lJzbF6ktmxEcRxZxMp2DPDy+InN7k1wbU8qu1n92YqWmSSg6z6XN1JV+iFdzt4Hl
+# AhsOs/GYtbZnk5cMvEy4kzIiOfD06XyokFTubm5O6rTIxM6p0N8ryO8ntAekqJ7s
+# VNspou7G94yNWaAgbD0tp1mWmCiovsY/FBUJgdBsNa4ix3ARUlJVdp3EQogJMV/H
+# i+kGecHsQoNBUbdBi84keNuLeEf/5Po5ZYAO/iZV1WK/HLLpcBu6wXg3um/9cymf
+# J4ub1pOW8DhEyeQrdZCdvlXHDhTpVfmPapYF8VNRbSVbJza3zo6R60/Nr0ceUqrr
+# S4AonFLiLtqdFbDyJh+CQ6dfafirHcsqmKENbIh80ieMswIDAQABo4IB0zCCAc8w
 # DAYDVR0TAQH/BAIwADAOBgNVHQ8BAf8EBAMCB4AwOgYDVR0lBDMwMQYKKwYBBAGC
 # N2EBAAYIKwYBBQUHAwMGGSsGAQQBgjdhyvTxC4Kx0oMR99yjTpbrujEwHQYDVR0O
-# BBYEFLxun1LkTdyRwCs7vbWVLMajH2bhMB8GA1UdIwQYMBaAFKRDDH92WqWF5z6N
+# BBYEFIJX90OW4JR/am+LL1zGmbVRZf2bMB8GA1UdIwQYMBaAFKRDDH92WqWF5z6N
 # KA8MF6JFaXDGMGcGA1UdHwRgMF4wXKBaoFiGVmh0dHA6Ly93d3cubWljcm9zb2Z0
 # LmNvbS9wa2lvcHMvY3JsL01pY3Jvc29mdCUyMElEJTIwVmVyaWZpZWQlMjBDUyUy
 # MEFPQyUyMENBJTIwMDMuY3JsMHQGCCsGAQUFBwEBBGgwZjBkBggrBgEFBQcwAoZY
@@ -169,17 +250,17 @@
 # MjBJRCUyMFZlcmlmaWVkJTIwQ1MlMjBBT0MlMjBDQSUyMDAzLmNydDBUBgNVHSAE
 # TTBLMEkGBFUdIAAwQTA/BggrBgEFBQcCARYzaHR0cDovL3d3dy5taWNyb3NvZnQu
 # Y29tL3BraW9wcy9Eb2NzL1JlcG9zaXRvcnkuaHRtMA0GCSqGSIb3DQEBDAUAA4IC
-# AQCV9O79cRbFHyahLkKUjKhR2L0iohXtw+f7JFZNb8mvMPN+7V7axHJ1E8AFYIfv
-# 8HvdkR0UXsBJGcj+urL+Yg7ruga6YE4qOSsco00qYGJGdzrCNDdoEjMXg5R4FJRb
-# 9YehVzX/0vzJKsLSDjQFAv1qmFcXHOU//tGQ5H1nCFCild9gr2jHVwCESfXJDaqS
-# i/baIIAliDZL8Wj+gtSoItJ11FBlMq5IUzdBgET6ozi9yYz3ptDNKC7q6v65S1AQ
-# pEXueYwf/Q51UDzgTuF0tV27IcA/FN6islcBW+5y9R0GoZeXsGgjxNGOVa6GHztj
-# K/bQkLNB9Trt/h2TGOhHOFfWd4A8x7GBFOpjrqmoq+m+0c6+P95S2Huv+cX+br5y
-# iWvAQ0D7uI1DExLcG/o9/4zOG/8aXJDZp8xc0zhr47pnkltz5efKi/bUuBnlmyvr
-# t6g+HCo5PXova94LX6JzOU/Zvj6pU3oTXQRxolDMdNGb4x/AtRqxxsY0SGeoAqkW
-# EcPW2HdsDfhjymyy4Gjznrx9Lvg708IfZ45gC4l668YwXemBsDRkq5BZ3cpTai1E
-# EKnErRRwceoiRZfQxf6M40BNB0vEaYW0hJ28Pks5PeHHY2zkBO3LP0/GPxoDkBUW
-# UwRWqUBA5oo76qti3QFysGpfUnN8BF8PNR8SX5xsnBi1hjCCBygwggUQoAMCAQIC
+# AQC/s8SfpMPemeS5Ysfwp3eKneZGbm4dAbadZ74vo9gSfFyuXIjMWxBHxIjvoEac
+# bjwUiJ4L1veXkwVqh9TzdfI31iQY7Ue4yCV6j/Q50+sZmAU02ci+0WBvQ71Bgjs0
+# Haxc2Yft9XmCQCs4Mnulo7eShmQdv547xtHnhf5SK1vLWAZQfSepGoX5dP9hBWIn
+# 3G4Odmv3ylKRljj9Mw9xr442XdGPR+v7xo3hCXV8nTQeA22xvoqYZBhbubqTM85M
+# A/cS0w5+Yqskh9Jsi/aK32dzqn6MvP1XgNBC/YzyFRWqMXr3XsUrN9eZ5bU4V30c
+# 9wO/LO8H6OdcgC7yIRAYqyT9hlofaD+I/WPXnflsM76PmUYi2L92Mi2VgzAhQ+vO
+# FtwpfgExobt4acDeDvTDbhP8R6sTQOeM8bn+elCA0gh0W479A2Li4+DpMLe3q9lf
+# +tpoh6f0zwCtjffg+gm4Ah0cQzFT34XkU4epZ0Lo3Y6tPRLWJeZGEo0urDC3x5Vy
+# TOCCZ9ZeS/ssmfIXGCddEC5iXP0nui26MVeLEtRLsPTbO2L3B0DQZiAi1cjnNTdx
+# 35HtolPqdto8opjDwr1kw7NwOCc3Px7gtVZi4kwRP2DSkHUCp1yrggG0abNXp+Gb
+# hbx0q77nRnSCrknZtIzN8Fl78H9Mv0tfDf/YykjT3hWOHDCCBygwggUQoAMCAQIC
 # EzMAAAAYDeuRVamKAJgAAAAAABgwDQYJKoZIhvcNAQEMBQAwYzELMAkGA1UEBhMC
 # VVMxHjAcBgNVBAoTFU1pY3Jvc29mdCBDb3Jwb3JhdGlvbjE0MDIGA1UEAxMrTWlj
 # cm9zb2Z0IElEIFZlcmlmaWVkIENvZGUgU2lnbmluZyBQQ0EgMjAyMTAeFw0yNjAz
@@ -260,22 +341,22 @@
 # 7Yww94lDf+8oG2oZmDh5O1Qe38E+M3vhKwmzIeoB1dVLlz4i3IpaDcR+iuGjH2Td
 # aC1ZOmBXiCRKJLj4DT2uhJ04ji+tHD6n58vhavFIrmcxghcyMIIXLgIBATBxMFox
 # CzAJBgNVBAYTAlVTMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRpb24xKzAp
-# BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDMCEzMABTtU
-# QaiXHbdEqJcAAAAFO1QwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
-# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgdjw7
-# 22r5A3dkAUMdJh5t97Oi8Br5ykVZxHeRrWQydcQwDQYJKoZIhvcNAQEBBQAEggGA
-# JvURj+59vuTsQGr/u7FuSi0PrPGersL4Rai6jlOaHEHvdalPT7Ok2r0QyTMDmUQP
-# 3jxMboPJWISOlGNSuTcsvxZy0ES4O4v0a/LSvnIeAlqtYugcndHYhbaI9xMj80c4
-# FZvznhFjjG77P9u16ZBeX9Y9mjzedNoYYQ5aD8xR0V1ePFNFGcoo7U0yyp3q6dRn
-# KwppMLUcw9b2aPwfqQCEK6QvKtcM+5W6y9o9CtQJUpimEpkwFA22w7WxvXago7jY
-# v6dxhvTQNh0N92TIaQ6YLgJfZ9T3qMyZEsrHqCa7ia24IW8pP2hF683JAi2dTMQi
-# CXkCVZQ+zIo7ZSMrJGHM8Ge42OZ1hCCboQ1FEcxad/RJu7LtgVVAj5YSGVTdILdN
-# MBoER0pbph9vMbVheuEr6V7uZSLTty9ucpxDq/yi/NRTEeRHqzuoUD65fHDSzpD8
-# yP0xaJKifdrofJPfd27bSmKYKvmtTSuHqDaw4Coh5KlaME7cgDOBRkmZrAxJCS3H
+# BgNVBAMTIk1pY3Jvc29mdCBJRCBWZXJpZmllZCBDUyBBT0MgQ0EgMDMCEzMACmBw
+# pEtVeB7aeEIAAAAKYHAwDQYJYIZIAWUDBAIBBQCgXjAQBgorBgEEAYI3AgEMMQIw
+# ADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAvBgkqhkiG9w0BCQQxIgQgSMDX
+# XFAATSld8oOdmzEu9lAHStbCZjWKKBbnB4/zLiwwDQYJKoZIhvcNAQEBBQAEggGA
+# REO7u2MmVurLgIDOMj4C18BmZ54+pAScP8u6VbZ7HxYj2bXmH0dIRyX8VcliLimw
+# 8fOXHdPjUy+gNFHxe1C6IaBUK2B7fFp2VT6Kwkf2Afgxya+EaqATUJQ9N6e2nSUq
+# FjvAhD+svL8VYsQXL0/8sgzCk+MYVEygcSgL4ZC5gaHy3MASEyCiG9lLdUHoPq4g
+# FYLJ+JDStrFbtvpSoHBp1QxT/NHqwO0EgnAVeX+Wt8ZAt4NbFbgllbMU5QKvkiCG
+# s+JlJdC+dELJjfv1sqmq1zbG/wIYbaJZeTrAfNigqhCdDhmiXD5K59+gWOCXF/ZI
+# ETYWXHtal+o2aE+Eu1oL0pctDUK3Q5gzdNnu9jfBkNGS1A9jkrwE75tkdh5zW6OI
+# BSR0DlvAvQZ2dEXraD2QAfsV1u/UEd6pzV80BS1OIRmxgfDPnqv2CVXFFwEzsjsk
+# WCPwvbIxBRUUpx0GUNVdkkhuAKI3dbLLEZPzyDtfotmQ+a373dJXtr369I6g3jVb
 # oYIUsjCCFK4GCisGAQQBgjcDAwExghSeMIIUmgYJKoZIhvcNAQcCoIIUizCCFIcC
 # AQMxDzANBglghkgBZQMEAgEFADCCAWoGCyqGSIb3DQEJEAEEoIIBWQSCAVUwggFR
-# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIKKRTSFpFTy6B7mgCrPV
-# 5+siieDG5Ujk/j+82bempkeKAgZqNTCUZFwYEzIwMjYwODI0MTAzMjUyLjE0NVow
+# AgEBBgorBgEEAYRZCgMBMDEwDQYJYIZIAWUDBAIBBQAEIBvD4Hg4wiDYe0pcT5/9
+# tAu8uR7pX6l0W0+eMXAMTOfQAgZqwGDrHpEYEzIwMjYxMTAzMjA0OTE0Ljc5NVow
 # BIACAfSggemkgeYwgeMxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpXYXNoaW5ndG9u
 # MRAwDgYDVQQHEwdSZWRtb25kMR4wHAYDVQQKExVNaWNyb3NvZnQgQ29ycG9yYXRp
 # b24xLTArBgNVBAsTJE1pY3Jvc29mdCBJcmVsYW5kIE9wZXJhdGlvbnMgTGltaXRl
@@ -366,21 +447,21 @@
 # b3Jwb3JhdGlvbjEyMDAGA1UEAxMpTWljcm9zb2Z0IFB1YmxpYyBSU0EgVGltZXN0
 # YW1waW5nIENBIDIwMjACEzMAAABa9g1njIXt3QgAAAAAAFowDQYJYIZIAWUDBAIB
 # BQCgggEtMBoGCSqGSIb3DQEJAzENBgsqhkiG9w0BCRABBDAvBgkqhkiG9w0BCQQx
-# IgQgQCLp1e5BTiZK+CtwrsJ8pU5SPXdI7fvgdu4L12ak/cwwgd0GCyqGSIb3DQEJ
+# IgQgwCJc12f5/9VSvr3nxcMqoSa9xn77WtHt3j4BtWIolmgwgd0GCyqGSIb3DQEJ
 # EAIvMYHNMIHKMIHHMIGgBCBiuWRAi+p96PRsBt3TwW3jNozgPQS+Qco1CVm/NaU0
 # QzB8MGWkYzBhMQswCQYDVQQGEwJVUzEeMBwGA1UEChMVTWljcm9zb2Z0IENvcnBv
 # cmF0aW9uMTIwMAYDVQQDEylNaWNyb3NvZnQgUHVibGljIFJTQSBUaW1lc3RhbXBp
-# bmcgQ0EgMjAyMAITMwAAAFr2DWeMhe3dCAAAAAAAWjAiBCA4H5s9LLDEn1erJX8k
-# ErjWcGcfZjTBYYcXoYg7JUrzXzANBgkqhkiG9w0BAQsFAASCAgCACGjos/ZF0PfL
-# 6y5XPvzCm9NTq3tN3jZpkTqYyTzNG+3JFu6dqM3TkGEWMTFYQTB9FYMlDAEERop0
-# J+SsMcvsvfa2tjc2VcJntMDJYC2N6Cxi6aZ8ZBKXOymgPp217TSV1bmnaUX93+tf
-# zvAEzcdYOplAPpzIEeFLv9bPERmQzAWY3kMKtLZIDTYfc4qKrxULNO5reTcy37LP
-# Q7Fci/1tW0a1SHW1A2c3NeNd/vaGBo+ittpTgThbUC9nSOXWmD/FxbsyRv0KsOZK
-# 5FvtJHyBe/1U/6l4ZshBvOG5bsuSrzAOMNgXvwvqMCHPwmHksSCcb0TI+FZPjOVe
-# ucnJMtPsS8mUlNmfVBGTyGQyIkVTB+AuvaMvUJG5Sr9V17lT8ItBQoVVuKk14OsD
-# RvpvYJl+Bmv4o63qEjeczWmEs46Y7BX+1M/QhEEnnSvXFynMCp+aJj36xoB9LwuH
-# uxgfhsc2s6Y7RwdiYXYIRMG2Q50psJOgAnZaXA3md+0TNEyTTGAEOcj6sOKkS82L
-# MlkM99Rf3mfjNNvw//34sealpztpPSvkz6MeMhYsTLGqfmzRXfcsK5tL8vReQK3d
-# zGkYdWReeF3KZfXvSOF6GDbPXuC28sbQSE5J/0fp71rEDdGtuHwec4+KA701U+it
-# bMB8Zx66KNl71ziMj1ijYFAecDSzdQ==
+# bmcgQ0EgMjAyMAITMwAAAFr2DWeMhe3dCAAAAAAAWjAiBCDlBkDP9Rnq9cpj/Gh9
+# QkEs7AwRuZ4J+BYM99j3Yuvx2DANBgkqhkiG9w0BAQsFAASCAgCkh/ar740j5a6J
+# 1TuqMgtA2Kj/qeLgp8JpI49pkIu1/NEbkPB/SmXD5XPx6qOBY5c9QLxHxjAUG3uk
+# iirAG17ycUAuUwT+9rqOeaYQRkvjMOFJMzNWBeiourOZ1C0InhUpsPbZL2Uz7DVf
+# fcR1ylbyVkXiiOOHeAU5zzCrY+VaNixGLrvJWu/K/oh3tLgWj8dv3psNUuuF4FMe
+# 7JdMEV2WgKo32h2al9hHt17UlrxvnK6kIU4UlDsNm4/LYy6uJopMQ9JdGjDpVYgz
+# nTaURHIggGt4P162Ml534q0Qs/XMZApk1HDp9ycy5A0KEbc1ICOJ8nEO2L9Ulcpq
+# 9Mvh3QT/aeFbpxbDI7B0kKB4Sk8/NT4lHHV+MdksRXX4c+xGaPCE9jKxo2Ti5Y4T
+# PJ3Lu3H++MBuRjyqhXjajZm6u8xSixDtQWLy4MxkhjYTxOuyxY3Jg/zjR2nC42EB
+# 7gjFZgJdR4S+voTIQtUsu/1RG6ePviLRonIOC6Se3YWE9MPFNVAO7oVUyoDDA9AF
+# poUwMxom1puC7KYQfJenYu7gxXAOexolnXAB+GBTVUT4/0x6POrc4r5AYCdWj7Cg
+# QNjzxo1IRNad4VK3//AP4xfrQlrCEnkKGBO2vR61DnPmKULRWH727dhsIPcNUQX4
+# NFn6S2byO8OpMNSG5Uf30K+v4BanNg==
 # SIG # End signature block
