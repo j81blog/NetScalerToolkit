@@ -157,6 +157,9 @@ Copy of the personal standard, project-relevant parts only.
 - Do not edit module files with `sed` from Git Bash: it rewrites CRLF to LF, and patterns ending in
   `\r$` silently fail to match. Use the Edit tool or PowerShell, then normalize to BOM + CRLF and
   check that the file parses before signing.
+- CI fails on any module file or `GenLeCertForNS.ps1` without a valid signature. A file that git
+  stored with LF is unsigned after checkout even when it was valid locally, so check signatures on
+  a fresh checkout, not only in a working copy that was never rewritten.
 - To sign only what changed: take `git status --porcelain` paths under `NetScalerToolkit\` and sign
   those where `(Get-AuthenticodeSignature $path).Status -ne 'Valid'`.
 

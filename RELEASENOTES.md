@@ -1,5 +1,25 @@
 ﻿# Release Notes
 
+## v2026.1110.1145
+
+### Changed
+- CHANGED: Module installs pick the scope that PowerShell also loads from. This applies to `Update-NetScalerToolkit`, the Posh-ACME install and the `GenLeCertForNS.ps1` wrapper. CurrentUser stays the default. When the CurrentUser module folder is not on `PSModulePath`, as for SYSTEM, an elevated session installs for AllUsers
+- CHANGED: `Update-NetScalerToolkit -Scope` has no fixed default. An explicit value still wins
+
+### Fixed
+- FIX: Under SYSTEM, an update or a Posh-ACME install went to a folder that PowerShell does not search. The run then loaded the older version, or failed with "no valid module file was found"
+- FIX: A session that is not elevated loads a new CurrentUser install by path for that run. A warning gives the command that fixes it
+- FIX: The wrapper checks the loaded NetScalerToolkit version after an update. A warning names both versions when an older version stays loaded
+- FIX: An older `GenLeCertForNS.ps1` always installs updates for CurrentUser. When that folder is not on `PSModulePath` and the session is elevated, the module now installs the update for AllUsers itself, so the next run uses it. A warning tells you to replace the wrapper
+- FIX: 152 of 206 files in v2026.1103.2130 had no valid signature, because git stored them with LF line endings. The module did not load under the `AllSigned` execution policy. All files are signed again, and v2026.1103.2130 is unlisted
+
+### Improved
+- IMPROVED: The CI build fails when a module file or the wrapper does not have a valid signature
+- IMPROVED: Tests added for the install scope, the import by path, the version check in the wrapper and the older wrapper
+
+### Known Issues
+- A site that runs an older `GenLeCertForNS.ps1` as SYSTEM, with an older module in `C:\Program Files\WindowsPowerShell\Modules`, keeps loading that older module. Fix it once: replace `GenLeCertForNS.ps1` with the current version, or run `Install-Module NetScalerToolkit -Scope AllUsers -Force` from an elevated prompt. After that, updates and the Posh-ACME install continue with the older wrapper too
+
 ## v2026.1103.2130
 
 ### New
